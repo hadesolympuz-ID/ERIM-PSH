@@ -77,12 +77,14 @@ class GoogleWorkspaceService {
   }
 
   async searchConfirmationEmails(customerCode) {
-    const code = String(customerCode || "").trim().toUpperCase();
-    if (!code) throw new Error("Customer Code is required before searching email.");
-    const query = encodeURIComponent(`subject:"${code.replaceAll('"', "")}"`);
-    const list = await this.authorizedFetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`,
-    );
+    const parsed = parseCustomerCode(customerCode);
+    if (!parsed.customerCode) throw new Error("Customer Code is required before searching email.");
+    let matchedBy = "CUSTOMER_CODE";
+    let list = await this.searchGmailSubject(parsed.customerCode);
+    if (!(list.messages || []).length && parsed.fileCode !== parsed.customerCode) {
+      matchedBy = "FILE_CODE";
+      list = await this.searchGmailSubject(parsed.fileCode);
+    }
     const messages = await Promise.all((list.messages || []).map(async ({ id }) => {
       const message = await this.authorizedFetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
@@ -96,9 +98,19 @@ class GoogleWorkspaceService {
         subject: headers.subject || "(No subject)",
         from: headers.from || "",
         date: headers.date || "",
+        matchedBy,
       };
     }));
-    return messages;
+    return messages.filter((message) =>
+      message.subject.toUpperCase().includes(parsed.fileCode)
+    );
+  }
+
+  async searchGmailSubject(value) {
+    const query = encodeURIComponent(`subject:"${String(value).replaceAll('"', "")}"`);
+    return this.authorizedFetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`,
+    );
   }
 
   async getGmailThread(threadId) {
@@ -129,15 +141,16 @@ class GoogleWorkspaceService {
   }
 
   async selectAndUploadItinerary({ customerCode, customerName }) {
-    const code = String(customerCode || "").trim().toUpperCase();
+    const parsed = parseCustomerCode(customerCode);
+    const code = parsed.customerCode;
     const name = String(customerName || "").trim();
     if (!code || !name) throw new Error("Complete Customer Code and Customer Name first.");
     const filePath = await this.chooseFile();
     if (!filePath) return { canceled: true };
 
     const extension = path.extname(filePath).toLowerCase();
-    const safeCustomer = name.replace(/[<>:"/\\|?*\x00-\x1F]/g, " ").replace(/\s+/g, " ").trim();
-    const fileName = `${code} - ${safeCustomer}${extension}`;
+    const safeCustomer = sanitizeFilePart(name);
+    const fileName = `${parsed.fileNameCode} - ${safeCustomer}${extension}`;
     const metadata = { name: fileName };
     const { driveFolderId } = this.database.getPublicSettings();
     if (driveFolderId) metadata.parents = [driveFolderId];
@@ -166,6 +179,10 @@ class GoogleWorkspaceService {
       webViewLink: payload.webViewLink || `https://drive.google.com/open?id=${payload.id}`,
       mimeType: payload.mimeType || mimeType,
       size: Number(payload.size || content.length),
+      customerCode: parsed.customerCode,
+      salesCode: parsed.salesCode,
+      fileCode: parsed.fileCode,
+      fileNameCode: parsed.fileNameCode,
     };
   }
 
@@ -421,6 +438,28 @@ function escapeHtmlText(value) {
   })[char]);
 }
 
+function parseCustomerCode(value) {
+  const customerCode = String(value || "").trim().toUpperCase();
+  const separator = customerCode.indexOf("/");
+  const salesCode = separator > 0 ? customerCode.slice(0, separator).trim() : "";
+  const fileCode = separator > 0 ? customerCode.slice(separator + 1).trim() : customerCode;
+  return {
+    customerCode,
+    salesCode,
+    fileCode,
+    fileNameCode: sanitizeFilePart(customerCode),
+  };
+}
+
+function sanitizeFilePart(value) {
+  return String(value || "")
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .replace(/^[ .-]+|[ .-]+$/g, "")
+    .trim();
+}
+
 function pendingHoursFormula(row) {
   return `=IF($J${row}="","",IF($I${row}="PENDING",(NOW()-VALUE(SUBSTITUTE(LEFT($J${row},19),"T"," ")))*24,IF($P${row}="",0,(VALUE(SUBSTITUTE(LEFT($P${row},19),"T"," "))-VALUE(SUBSTITUTE(LEFT($J${row},19),"T"," ")))*24)))`;
 }
@@ -433,4 +472,4 @@ function resolutionHoursFormula(row) {
   return `=IF(OR($J${row}="",$P${row}=""),"",(VALUE(SUBSTITUTE(LEFT($P${row},19),"T"," "))-VALUE(SUBSTITUTE(LEFT($J${row},19),"T"," ")))*24)`;
 }
 
-module.exports = { GoogleWorkspaceService };
+module.exports = { GoogleWorkspaceService, parseCustomerCode, sanitizeFilePart };

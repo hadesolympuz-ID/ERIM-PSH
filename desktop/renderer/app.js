@@ -57,6 +57,16 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function parseOfficeCustomerCode(value) {
+  const customerCode = String(value || "").trim().toUpperCase();
+  const separator = customerCode.indexOf("/");
+  return {
+    customerCode,
+    salesCode: separator > 0 ? customerCode.slice(0, separator).trim() : "",
+    fileCode: separator > 0 ? customerCode.slice(separator + 1).trim() : customerCode,
+  };
+}
+
 async function refresh() {
   state.bootstrap = await window.erim.bootstrap();
   state.drafts = await window.erim.drafts.list({});
@@ -653,7 +663,8 @@ function bindEvents() {
   $("#itinerary-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const customerCode = String(form.get("customerCode") || "").trim().toUpperCase();
+    const parsedCode = parseOfficeCustomerCode(form.get("customerCode"));
+    const customerCode = parsedCode.customerCode;
     const customerName = String(form.get("customerName") || "").trim();
     const agentName = String(form.get("agentName") || "").trim();
     const isRevision = form.get("action") === "revise";
@@ -669,6 +680,8 @@ function bindEvents() {
             : `New itinerary preparation initiated for ${customerCode}.`,
           workflowStage: isRevision ? "REVISION_STARTED" : "ITINERARY_STARTED",
           customerName,
+          salesCode: parsedCode.salesCode,
+          fileCode: parsedCode.fileCode,
           agentId: form.get("agentId") || "",
           agentName,
           agentRegistrationRequired: Boolean(agentName && !form.get("agentId")),
