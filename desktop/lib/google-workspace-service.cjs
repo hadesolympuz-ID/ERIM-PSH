@@ -153,7 +153,10 @@ class GoogleWorkspaceService {
     const fileName = `${parsed.fileNameCode} - ${safeCustomer}${extension}`;
     const metadata = { name: fileName };
     const { driveFolderId } = this.database.getPublicSettings();
-    if (driveFolderId) metadata.parents = [driveFolderId];
+    if (!driveFolderId) {
+      throw new Error("Configure the official Itinerary Drive Folder ID before uploading.");
+    }
+    metadata.parents = [driveFolderId];
 
     const mimeType = mimeTypeFor(extension);
     const boundary = `erim_psh_${Date.now().toString(16)}`;

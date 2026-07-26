@@ -490,6 +490,8 @@ Do these in order:
 | 2026-07-26 | Four pending Reservation records published through ONLINE_APPS_SCRIPT; AK/PSHBALI4804 verified directly in central TOURS with customer, agent, and Gmail thread data. | `DONE` |
 | 2026-07-26 | Desktop v1.0.5 completed with explicit Sync Mode visibility and 11 passing automated tests. | `DONE` |
 | 2026-07-26 | GitHub Release v1.0.5 published with installer, blockmap, and latest.yml; feed, checksum, silent installation, executable version, and running process verified. | `DONE` |
+| 2026-07-26 | Dedicated Google Drive folder `ERIM-PSH - ITINERARIES` created; four existing test itineraries moved from Drive root and the folder ID configured as the desktop upload destination. | `DONE` |
+| 2026-07-26 | Itinerary upload guardrail added: desktop must reject uploads when the official Drive Folder ID is not configured instead of silently writing to Drive root. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
