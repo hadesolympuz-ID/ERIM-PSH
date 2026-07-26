@@ -493,6 +493,8 @@ Do these in order:
 | 2026-07-26 | Dedicated Google Drive folder `ERIM-PSH - ITINERARIES` created; four existing test itineraries moved from Drive root and the folder ID configured as the desktop upload destination. | `DONE` |
 | 2026-07-26 | Itinerary upload guardrail added: desktop must reject uploads when the official Drive Folder ID is not configured instead of silently writing to Drive root. | `DONE` |
 | 2026-07-26 | GitHub Release v1.0.6 published and installed; updater feed, executable version, persistent Folder ID, running process, and 12 automated tests verified. | `DONE` |
+| 2026-07-26 | Apps Script deployment Version 4 activated on the existing `/exec` URL with append-only itinerary events and broadcast notification recipients for every active system user. | `DONE` |
+| 2026-07-26 | Desktop v1.0.7 prepared with Re Check Itinerary, independent Gmail/daywise/Drive panes, latest-itinerary download folder actions, central Inbox notifications, and a per-code activity logbook for post/revision/download accountability. | `IN PROGRESS` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |

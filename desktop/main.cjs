@@ -70,6 +70,15 @@ function registerIpc() {
   ipcMain.handle("workspace:revision-context", (_event, customerCode) => googleWorkspace.getRevisionContext(customerCode));
   ipcMain.handle("workspace:revision-choose-file", () => googleWorkspace.chooseRevisedDocx());
   ipcMain.handle("workspace:revision-post", (_event, details) => googleWorkspace.postItineraryRevision(details));
+  ipcMain.handle("workspace:recheck-context", (_event, customerCode) => googleWorkspace.getRecheckContext(customerCode));
+  ipcMain.handle("workspace:itinerary-download", (_event, details) => googleWorkspace.downloadLatestItinerary(details));
+  ipcMain.handle("workspace:notifications-list", () => googleWorkspace.listNotifications());
+  ipcMain.handle("workspace:download-folder-open", async () => {
+    const folderPath = googleWorkspace.ensureDownloadDirectory();
+    const error = await shell.openPath(folderPath);
+    if (error) throw new Error(error);
+    return { ok: true, folderPath };
+  });
   ipcMain.handle("reservation:followup-list", () => database.listReservationFollowups());
   ipcMain.handle("reservation:followup-start", (_event, details) => database.startReservationFollowup(details));
   ipcMain.handle("reservation:followup-update", (_event, id, details) => database.updateReservationFollowup(id, details));
@@ -112,6 +121,7 @@ app.whenReady().then(() => {
   googleWorkspace = new GoogleWorkspaceService({
     database,
     authService: googleAuth,
+    downloadDirectory: path.join(app.getPath("downloads"), "ERIM-PSH", "Itineraries"),
     chooseFile: async (options = {}) => {
       const result = await dialog.showOpenDialog(mainWindow, {
         title: options.title || "Post Soft Copy Itinerary",

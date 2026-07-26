@@ -9,6 +9,8 @@ const state = {
   health: null,
   agentSearchTimer: null,
   revisionContext: null,
+  recheckContext: null,
+  onlineNotifications: [],
   followups: [],
 };
 
@@ -73,6 +75,13 @@ async function refresh() {
   state.syncQueue = await window.erim.sync.list();
   state.auth = await window.erim.auth.status();
   state.followups = await window.erim.reservation.listFollowups();
+  try {
+    state.onlineNotifications = state.auth.connected
+      ? await window.erim.workspace.listNotifications()
+      : [];
+  } catch {
+    state.onlineNotifications = [];
+  }
   renderChrome();
   renderDashboard();
   renderWorkspace();
@@ -113,7 +122,12 @@ function renderDashboard() {
 }
 
 function buildNotifications() {
-  const notifications = [];
+  const notifications = state.onlineNotifications.map((item) => ({
+    tone: item.readAt ? "" : "success",
+    title: item.title,
+    message: item.message,
+    updatedAt: item.createdAt,
+  }));
   state.syncQueue
     .filter((job) => ["FAILED", "CONFLICT", "PENDING_SYNC"].includes(job.status))
     .forEach((job) => notifications.push({
@@ -289,6 +303,7 @@ function showView(view, module = null) {
     sync: ["Publication safety", "Sync Center"],
     admin: ["Administrator diagnostics", "Backend connection console"],
     settings: ["Application configuration", "Desktop settings"],
+    "reservation-recheck": ["Reservation final checking", "Re Check Itinerary"],
     "reservation-kpi": ["Reservation personal performance", "KPI Saya"],
   };
   $("#view-eyebrow").textContent = titles[view][0];
@@ -376,6 +391,111 @@ async function loadRevisionRecord() {
   } finally {
     button.disabled = false;
     button.textContent = "Find record";
+  }
+}
+
+async function loadRecheckRecord() {
+  const code = $("#recheck-customer-code").value.trim();
+  const button = $("#load-recheck-record");
+  if (!code) return toast("Input Customer Code first.", true);
+  button.disabled = true;
+  button.textContent = "Loading...";
+  try {
+    const context = await window.erim.workspace.getRecheckContext(code);
+    state.recheckContext = context;
+    $("#recheck-customer").textContent = context.customerName || context.customerCode;
+    $("#recheck-tour-status").textContent = context.tourStatus || "—";
+    $("#recheck-revision-number").textContent = `REV ${context.currentRevision}`;
+    $("#recheck-itinerary-name").textContent = context.driveFileName || "Latest itinerary";
+    $("#recheck-drive-link").href = context.driveFileUrl;
+    $("#recheck-itinerary-content").innerHTML = context.documentHtml || "<p>No readable DOCX content.</p>";
+    $("#recheck-daywise").innerHTML = context.days.length ? context.days.map((day) => `
+      <tr>
+        <td><strong>${escapeHtml(day.dayNumber)}</strong></td>
+        <td>${escapeHtml(day.date || "—")}</td>
+        <td>${escapeHtml(day.title || "—")}</td>
+        <td>${statusPill(day.status)}</td>
+      </tr>
+    `).join("") : `<tr><td class="empty" colspan="4">No daywise records found.</td></tr>`;
+    $("#recheck-email-panel").innerHTML = context.emails.length ? `
+      <div class="selection-list recheck-email-list">
+        ${context.emails.map((message) => `
+          <button type="button" class="selection-item" data-recheck-thread-id="${escapeHtml(message.threadId)}">
+            <strong>${escapeHtml(message.subject)}</strong>
+            <small>${escapeHtml([message.from, message.date].filter(Boolean).join(" · "))}</small>
+          </button>
+        `).join("")}
+      </div>
+      <div id="recheck-email-trail" class="email-trail" hidden></div>
+    ` : `<div class="empty-notifications">No connected email found for ${escapeHtml(context.customerCode)}.</div>`;
+    $("#recheck-logbook").innerHTML = context.activities.length ? context.activities.map((activity) => `
+      <tr>
+        <td>${formatDate(activity.timestamp)}</td>
+        <td><strong>${escapeHtml(activity.actorName)}</strong><small class="table-subtext">${escapeHtml(activity.actorEmployeeId || activity.actorEmail)}</small></td>
+        <td>${escapeHtml(activity.action.replaceAll("_", " "))}</td>
+        <td>${activity.revisionNumber ? `REV ${activity.revisionNumber}` : "NEW"}</td>
+        <td>${escapeHtml(activity.note || "—")}</td>
+        <td>${statusPill(activity.result)}</td>
+      </tr>
+    `).join("") : `<tr><td class="empty" colspan="6">No itinerary activity has been recorded.</td></tr>`;
+    $("#recheck-record").hidden = false;
+  } catch (error) {
+    state.recheckContext = null;
+    $("#recheck-record").hidden = true;
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Find record";
+  }
+}
+
+async function loadRecheckEmailTrail(threadId) {
+  const trail = $("#recheck-email-trail");
+  if (!trail) return;
+  trail.hidden = false;
+  trail.innerHTML = `<div class="email-message muted-text">Loading complete email trail...</div>`;
+  try {
+    const thread = await window.erim.workspace.getGmailThread(threadId);
+    trail.innerHTML = thread.messages.map((message, index) => `
+      <article class="email-message">
+        <div class="email-message-heading">
+          <strong>${index + 1}. ${escapeHtml(message.subject)}</strong>
+          <span>From: ${escapeHtml(message.from || "—")}</span>
+          <span>To: ${escapeHtml(message.to || "—")}</span>
+          <small>${escapeHtml(message.date || "—")}</small>
+        </div>
+        <div class="email-message-body">${message.bodyHtml}</div>
+        ${message.attachments.length ? `<small>Attachments: ${escapeHtml(message.attachments.join(", "))}</small>` : ""}
+      </article>
+    `).join("");
+  } catch (error) {
+    trail.innerHTML = `<div class="email-message muted-text">Unable to load this email trail.</div>`;
+    toast(error.message, true);
+  }
+}
+
+async function downloadLatestItinerary() {
+  if (!state.recheckContext) return toast("Find the Customer Code record first.", true);
+  const button = $("#download-latest-itinerary");
+  button.disabled = true;
+  button.textContent = "Downloading...";
+  try {
+    const result = await window.erim.workspace.downloadLatestItinerary(state.recheckContext);
+    toast(result.activityWarning || `Downloaded: ${result.fileName}`, Boolean(result.activityWarning));
+    await loadRecheckRecord();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Download Latest Itinerary";
+  }
+}
+
+async function openItineraryDownloadFolder() {
+  try {
+    await window.erim.workspace.openDownloadFolder();
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -560,6 +680,12 @@ async function handleDraftAction(action, id) {
 function bindEvents() {
   $("#main-nav").addEventListener("click", (event) => {
     const reservationAction = event.target.closest("[data-reservation-action]");
+    if (reservationAction?.dataset.reservationAction === "recheck") {
+      state.currentModule = "RESERVATION";
+      showView("reservation-recheck", "RESERVATION");
+      $("#recheck-customer-code").focus();
+      return;
+    }
     if (reservationAction?.dataset.reservationAction === "kpi") {
       state.currentModule = "RESERVATION";
       showView("reservation-kpi", "RESERVATION");
@@ -588,6 +714,10 @@ function bindEvents() {
   $("#load-revision-record").addEventListener("click", loadRevisionRecord);
   $("#revision-form").elements.customerCode.addEventListener("change", loadRevisionRecord);
   $("#choose-revised-docx").addEventListener("click", chooseRevisedDocx);
+  $("#load-recheck-record").addEventListener("click", loadRecheckRecord);
+  $("#recheck-customer-code").addEventListener("change", loadRecheckRecord);
+  $("#download-latest-itinerary").addEventListener("click", downloadLatestItinerary);
+  $("#open-itinerary-download-folder").addEventListener("click", openItineraryDownloadFolder);
   $("#itinerary-form").elements.agentName.addEventListener("input", (event) => {
     clearTimeout(state.agentSearchTimer);
     state.agentSearchTimer = setTimeout(() => searchAgents(event.target.value), 280);
@@ -626,6 +756,11 @@ function bindEvents() {
   $("#post-itinerary-file").addEventListener("click", postItineraryFile);
 
   document.body.addEventListener("click", (event) => {
+    const email = event.target.closest("[data-recheck-thread-id]");
+    if (email) {
+      $$("#recheck-email-panel .selection-item").forEach((item) => item.classList.toggle("selected", item === email));
+      return loadRecheckEmailTrail(email.dataset.recheckThreadId);
+    }
     const action = event.target.closest("[data-action]");
     if (!action) return;
     if (action.dataset.action === "save-followup") return saveFollowup(action.dataset.id);
@@ -735,7 +870,7 @@ function bindEvents() {
       $("#revision-dialog").close();
       await refresh();
       showView("workspace", "RESERVATION");
-      toast(`Itinerary posted as REV ${result.revisionNumber}.`);
+      toast(result.activityWarning || `Itinerary posted as REV ${result.revisionNumber}.`, Boolean(result.activityWarning));
     } catch (error) {
       toast(error.message, true);
     } finally {

@@ -22,6 +22,11 @@ function doPost(event) {
       return json_({ ok: true, data: publishDepartmentResult_(request, actor) });
     }
 
+    if (route === "itinerary.event") {
+      requireDesktop_(request, actor);
+      return json_({ ok: true, data: recordItineraryEvent_(request, actor) });
+    }
+
     if (route === "tour.detail") {
       return json_({ ok: true, data: getTourDetail_(request.customerCode, actor) });
     }
@@ -82,6 +87,7 @@ function authenticateRequest_(auth) {
   }
   return {
     employeeId: employee.employee_id,
+    fullName: employee.full_name || employee.company_email,
     email: identity.email.toLowerCase(),
     department: employee.department,
     role: employee.role,
@@ -173,28 +179,154 @@ function publishDepartmentResult_(request, actor) {
       });
     }
 
+    const isNewItinerary = draft.department === "RESERVATION"
+      && draft.publicationType === "NEW_CONFIRMATION";
     appendRecord_("AUDIT_LOG", {
       audit_id: uuid_("AUD"),
       event_timestamp: now,
       actor_employee_id: actor.employeeId,
       actor_email: actor.email,
       client_mode: "DESKTOP",
-      action: "PUBLICATION_PUBLISH",
-      entity_type: "DEPARTMENT_PUBLICATION",
-      entity_id: publicationId,
+      action: isNewItinerary ? "ITINERARY_POSTED" : "PUBLICATION_PUBLISH",
+      entity_type: isNewItinerary ? "ITINERARY" : "DEPARTMENT_PUBLICATION",
+      entity_id: isNewItinerary
+        ? String(draft.payload.itineraryDriveFileId || publicationId)
+        : publicationId,
       tour_id: resolvedTourId,
       request_id: request.idempotencyKey,
       before_json: previous ? JSON.stringify(previous) : "",
-      after_json: JSON.stringify(publication),
-      reason: "",
+      after_json: JSON.stringify(isNewItinerary ? {
+        customerCode: publication.customer_code,
+        customerName: draft.payload.customerName || "",
+        revisionNumber: 0,
+        driveFileId: draft.payload.itineraryDriveFileId || "",
+        driveFileName: draft.payload.itineraryDriveFileName || "",
+        publicationId,
+      } : publication),
+      reason: isNewItinerary ? "New itinerary posted." : "",
       result: "SUCCESS",
       error_code: "",
     });
+    if (isNewItinerary) {
+      broadcastItineraryNotification_({
+        tourId: resolvedTourId,
+        revisionId: "",
+        customerCode: publication.customer_code,
+        eventType: "NEW",
+        revisionNumber: 0,
+        note: "New itinerary posted.",
+      }, actor, now);
+    }
 
     return publicationResponse_(publication, false);
   } finally {
     lock.releaseLock();
   }
+}
+
+function recordItineraryEvent_(request, actor) {
+  if (request.apiVersion !== API_VERSION) {
+    throw apiError_("API_VERSION_UNSUPPORTED", "Desktop application must be updated before recording itinerary activity.");
+  }
+  const eventId = String(request.eventId || "").trim();
+  const eventType = String(request.eventType || "").trim().toUpperCase();
+  const customerCode = String(request.customerCode || "").trim().toUpperCase();
+  if (!eventId || !customerCode || !["REVISION", "DOWNLOAD"].includes(eventType)) {
+    throw apiError_("VALIDATION_ERROR", "Event ID, Customer Code, and a supported itinerary event are required.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const existing = findRecord_("AUDIT_LOG", "request_id", eventId);
+    if (existing) {
+      return { eventId, auditId: existing.audit_id, replayed: true, notificationsCreated: 0 };
+    }
+    const tour = request.tourId
+      ? findRecord_("TOURS", "tour_id", request.tourId)
+      : findRecord_("TOURS", "customer_code", customerCode);
+    if (!tour) throw apiError_("TOUR_NOT_FOUND", "Customer Code was not found.");
+    const now = new Date().toISOString();
+    const revisionNumber = Number(request.revisionNumber || 0);
+    const action = eventType === "REVISION" ? "ITINERARY_REVISED" : "ITINERARY_DOWNLOADED";
+    const after = {
+      customerCode,
+      revisionNumber,
+      driveFileId: request.driveFileId || "",
+      driveFileName: request.driveFileName || "",
+      downloadedFileName: request.downloadedFileName || "",
+      note: request.note || "",
+    };
+    const auditId = uuid_("AUD");
+    appendRecord_("AUDIT_LOG", {
+      audit_id: auditId,
+      event_timestamp: now,
+      actor_employee_id: actor.employeeId,
+      actor_email: actor.email,
+      client_mode: "DESKTOP",
+      action,
+      entity_type: "ITINERARY",
+      entity_id: request.driveFileId || eventId,
+      tour_id: tour.tour_id,
+      request_id: eventId,
+      before_json: "",
+      after_json: JSON.stringify(after),
+      reason: request.note || "",
+      result: "SUCCESS",
+      error_code: "",
+    });
+    const notificationsCreated = eventType === "REVISION"
+      ? broadcastItineraryNotification_({
+        tourId: tour.tour_id,
+        revisionId: eventId,
+        customerCode,
+        eventType,
+        revisionNumber,
+        note: request.note || "",
+      }, actor, now)
+      : 0;
+    return { eventId, auditId, replayed: false, notificationsCreated };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function broadcastItineraryNotification_(details, actor, now) {
+  const notificationId = uuid_("NOTIF");
+  const revisionLabel = details.eventType === "REVISION"
+    ? `REV ${details.revisionNumber}`
+    : "New itinerary";
+  appendRecord_("NOTIFICATIONS", {
+    notification_id: notificationId,
+    tour_id: details.tourId || "",
+    revision_id: details.revisionId || "",
+    notification_type: details.eventType === "REVISION"
+      ? "ITINERARY_REVISED"
+      : "ITINERARY_POSTED",
+    title: `${details.customerCode} - ${revisionLabel}`,
+    message: `${actor.fullName || actor.employeeId} ${details.eventType === "REVISION" ? "posted a revision" : "posted a new itinerary"}.${details.note ? ` Note: ${details.note}` : ""}`,
+    source_module: "RESERVATION",
+    action_url: `reservation-recheck:${details.customerCode}`,
+    created_at: now,
+    created_by: actor.employeeId,
+    expires_at: "",
+  });
+  const recipients = allRecords_("EMPLOYEES")
+    .filter((employee) => truthy_(employee.active)
+      && (truthy_(employee.desktop_access) || truthy_(employee.mobile_access)));
+  recipients.forEach((employee) => {
+    appendRecord_("NOTIF_RECIPIENTS", {
+      notification_recipient_id: uuid_("NREC"),
+      notification_id: notificationId,
+      employee_id: employee.employee_id,
+      delivery_status: "DELIVERED",
+      read_at: "",
+      acknowledged_at: "",
+      action_status: "PENDING",
+      action_note: "",
+    });
+  });
+  return recipients.length;
 }
 
 function validatePublicationDraft_(draft) {

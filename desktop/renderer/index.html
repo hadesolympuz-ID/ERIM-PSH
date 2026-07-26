@@ -23,6 +23,7 @@
           <div class="nav-submenu" aria-label="Reservation actions">
             <button class="nav-subitem" data-itinerary-action="new">Add New Itinerary</button>
             <button class="nav-subitem" data-itinerary-action="revise">Revise Itinerary</button>
+            <button class="nav-subitem" data-reservation-action="recheck">Re Check Itinerary</button>
             <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
           </div>
           <button class="nav-item" data-view="workspace" data-module="VENDOR">Vendor Booking</button>
@@ -99,6 +100,66 @@
                   <tbody id="workspace-table"></tbody>
                 </table>
               </div>
+            </div>
+          </section>
+
+          <section id="reservation-recheck-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Reservation final checking</p>
+                <h2>Re Check Itinerary</h2>
+                <p>Review the connected email, daywise record, latest Drive itinerary, and complete activity log in one place.</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="recheck-lookup">
+                <label>Customer Code<input id="recheck-customer-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-recheck-record" class="button primary" type="button">Find record</button>
+              </div>
+              <section id="recheck-record" class="recheck-record" hidden>
+                <div class="recheck-summary">
+                  <div><span>Customer</span><strong id="recheck-customer">—</strong></div>
+                  <div><span>Tour status</span><strong id="recheck-tour-status">—</strong></div>
+                  <div><span>Latest revision</span><strong id="recheck-revision-number">REV 0</strong></div>
+                  <div class="recheck-actions">
+                    <button id="download-latest-itinerary" class="button primary small" type="button">Download Latest Itinerary</button>
+                    <button id="open-itinerary-download-folder" class="button ghost small" type="button">Open Download Folder</button>
+                  </div>
+                </div>
+
+                <div class="recheck-columns">
+                  <section class="recheck-pane">
+                    <div class="pane-heading"><div><strong>Connected email</strong><small>Confirmation trail matched by Customer Code</small></div></div>
+                    <div id="recheck-email-panel" class="recheck-scroll"></div>
+                  </section>
+                  <section class="recheck-pane">
+                    <div class="pane-heading"><div><strong>Daywise</strong><small>Central record and current status</small></div></div>
+                    <div class="table-wrap recheck-scroll">
+                      <table>
+                        <thead><tr><th>Day</th><th>Date</th><th>Detail</th><th>Status</th></tr></thead>
+                        <tbody id="recheck-daywise"></tbody>
+                      </table>
+                    </div>
+                  </section>
+                  <section class="recheck-pane">
+                    <div class="pane-heading">
+                      <div><strong id="recheck-itinerary-name">Latest itinerary</strong><small>DOCX content currently stored in Google Drive</small></div>
+                      <a id="recheck-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open Drive</a>
+                    </div>
+                    <div id="recheck-itinerary-content" class="document-preview recheck-scroll"></div>
+                  </section>
+                </div>
+
+                <section class="logbook-panel">
+                  <div class="panel-heading"><div><p class="eyebrow">Append-only history</p><h2>Itinerary logbook</h2></div></div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>Date / time</th><th>User</th><th>Activity</th><th>Revision</th><th>Note</th><th>Result</th></tr></thead>
+                      <tbody id="recheck-logbook"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
             </div>
           </section>
 

@@ -4,10 +4,11 @@ const crypto = require("node:crypto");
 const mammoth = require("mammoth");
 
 class GoogleWorkspaceService {
-  constructor({ database, authService, chooseFile }) {
+  constructor({ database, authService, chooseFile, downloadDirectory }) {
     this.database = database;
     this.authService = authService;
     this.chooseFile = chooseFile;
+    this.downloadDirectory = downloadDirectory || path.join(process.cwd(), "downloads", "ERIM-PSH", "Itineraries");
   }
 
   async authorizedFetch(url, options = {}) {
@@ -256,6 +257,44 @@ class GoogleWorkspaceService {
     };
   }
 
+  async getRecheckContext(customerCode) {
+    const itinerary = await this.getRevisionContext(customerCode);
+    const [emails, auditRows, employees] = await Promise.all([
+      this.searchConfirmationEmails(itinerary.customerCode),
+      this.sheetRecords("AUDIT_LOG"),
+      this.sheetRecords("EMPLOYEES"),
+    ]);
+    const employeeNames = new Map(
+      employees.map((employee) => [
+        String(employee.employee_id || ""),
+        employee.full_name || employee.company_email || employee.employee_id || "Unknown user",
+      ]),
+    );
+    const activities = auditRows
+      .map((row) => ({ row, after: parseJsonObject(row.after_json) }))
+      .filter(({ row, after }) =>
+        String(row.tour_id || "") === String(itinerary.tourId || "")
+        || String(row.entity_id || "") === String(itinerary.driveFileId || "")
+        || String(after.customerCode || after.customer_code || "").trim().toUpperCase() === itinerary.customerCode
+      )
+      .map(({ row, after }) => ({
+        auditId: row.audit_id || "",
+        timestamp: row.event_timestamp || "",
+        actorEmployeeId: row.actor_employee_id || "",
+        actorEmail: row.actor_email || "",
+        actorName: employeeNames.get(String(row.actor_employee_id || ""))
+          || row.actor_email
+          || row.actor_employee_id
+          || "System",
+        action: row.action || "",
+        note: row.reason || after.note || "",
+        revisionNumber: Number(after.revisionNumber || after.revision_number || 0),
+        result: row.result || "",
+      }))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return { ...itinerary, emails, activities };
+  }
+
   async chooseRevisedDocx() {
     const filePath = await this.chooseFile({ docxOnly: true, title: "Choose Revised Itinerary DOCX" });
     if (!filePath) return { canceled: true };
@@ -289,30 +328,157 @@ class GoogleWorkspaceService {
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}/revisions?fields=revisions(id,modifiedTime,keepForever)`,
     );
     const revisionNumber = Math.max(Number(input.currentRevision || 0) + 1, revisionPayload.revisions?.length || 1);
+    const revisionId = `REV-${crypto.randomUUID()}`;
+    const postedAt = new Date().toISOString();
     await this.appendRevisionRecord({
-      revision_id: `REV-${crypto.randomUUID()}`,
+      revision_id: revisionId,
       tour_id: input.tourId || "",
-      customer_code: code,
       revision_number: revisionNumber,
-      revision_no: revisionNumber,
-      revision_note: note,
-      revision_description: note,
+      revision_type: "ITINERARY_REVISION",
+      revision_notes: note,
+      affected_departments: "ALL",
       drive_file_id: driveFileId,
-      itinerary_drive_file_id: driveFileId,
-      revised_drive_file_id: driveFileId,
-      file_name: path.basename(filePath),
-      status: "POSTED",
-      revised_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      revised_by: this.database.getPublicSettings().employeeId || "",
-      created_by: this.database.getPublicSettings().employeeId || "",
+      drive_version_reference: String(revisionPayload.revisions?.at(-1)?.id || ""),
+      base_record_version: Number(input.currentRevision || 0),
+      revision_status: "PUBLISHED",
+      submitted_at: postedAt,
+      submitted_by: this.database.getPublicSettings().employeeId || "",
+      published_at: postedAt,
+      published_by: this.database.getPublicSettings().employeeId || "",
     });
+    let activityWarning = "";
+    try {
+      await this.recordItineraryEvent({
+        eventId: revisionId,
+        eventType: "REVISION",
+        customerCode: code,
+        tourId: input.tourId || "",
+        driveFileId,
+        driveFileName: path.basename(filePath),
+        revisionNumber,
+        note,
+      });
+    } catch (error) {
+      activityWarning = `Revision posted, but notification/log delivery needs attention: ${error.message}`;
+    }
     return {
       ok: true,
       revisionNumber,
+      revisionId,
       driveFileId,
       driveFileUrl: input.driveFileUrl || `https://drive.google.com/open?id=${driveFileId}`,
+      activityWarning,
     };
+  }
+
+  async downloadLatestItinerary(input) {
+    const code = String(input.customerCode || "").trim().toUpperCase();
+    const driveFileId = String(input.driveFileId || "").trim();
+    if (!code || !driveFileId) throw new Error("Load a Customer Code before downloading its itinerary.");
+    const response = await this.authorizedRawFetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
+    );
+    const content = Buffer.from(await response.arrayBuffer());
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    const revisionNumber = Number(input.currentRevision || 0);
+    const baseName = sanitizeFilePart(
+      `${parseCustomerCode(code).fileNameCode} - ${input.customerName || "Itinerary"} - REV ${revisionNumber} - ${stamp}`,
+    );
+    const folderPath = this.ensureDownloadDirectory();
+    const fileName = `${baseName}.docx`;
+    const localPath = path.join(folderPath, fileName);
+    fs.writeFileSync(localPath, content);
+    let activityWarning = "";
+    try {
+      await this.recordItineraryEvent({
+        eventId: `DWL-${crypto.randomUUID()}`,
+        eventType: "DOWNLOAD",
+        customerCode: code,
+        tourId: input.tourId || "",
+        driveFileId,
+        driveFileName: input.driveFileName || "",
+        downloadedFileName: fileName,
+        revisionNumber,
+        note: `Downloaded latest itinerary REV ${revisionNumber}.`,
+      });
+    } catch (error) {
+      activityWarning = `File downloaded, but download log delivery needs attention: ${error.message}`;
+    }
+    return { ok: true, localPath, folderPath, fileName, activityWarning };
+  }
+
+  ensureDownloadDirectory() {
+    fs.mkdirSync(this.downloadDirectory, { recursive: true });
+    return this.downloadDirectory;
+  }
+
+  async listNotifications() {
+    const settings = this.database.getPublicSettings();
+    const employeeId = String(settings.employeeId || "");
+    if (!employeeId || !settings.spreadsheetId || !this.authService?.status().connected) return [];
+    const [notifications, recipients] = await Promise.all([
+      this.sheetRecords("NOTIFICATIONS"),
+      this.sheetRecords("NOTIF_RECIPIENTS"),
+    ]);
+    const recipientByNotification = new Map(
+      recipients
+        .filter((row) => String(row.employee_id || "") === employeeId)
+        .map((row) => [String(row.notification_id || ""), row]),
+    );
+    return notifications
+      .filter((row) => recipientByNotification.has(String(row.notification_id || "")))
+      .map((row) => {
+        const recipient = recipientByNotification.get(String(row.notification_id || ""));
+        return {
+          notificationId: row.notification_id || "",
+          tourId: row.tour_id || "",
+          revisionId: row.revision_id || "",
+          type: row.notification_type || "",
+          title: row.title || "ERIM-PSH notification",
+          message: row.message || "",
+          createdAt: row.created_at || "",
+          readAt: recipient.read_at || "",
+          deliveryStatus: recipient.delivery_status || "",
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 50);
+  }
+
+  async recordItineraryEvent(details) {
+    return this.callAppsScript("itinerary.event", details);
+  }
+
+  async callAppsScript(action, details = {}) {
+    const settings = this.database.getPublicSettings();
+    if (!settings.apiBaseUrl) throw new Error("Apps Script API URL is not configured.");
+    const accessToken = await this.authService.accessToken();
+    const response = await fetch(settings.apiBaseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        action,
+        apiVersion: "v1",
+        clientMode: "DESKTOP",
+        auth: { accessToken },
+        ...details,
+      }),
+      redirect: "follow",
+    });
+    const text = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error("Apps Script returned a non-JSON response. Check the deployed /exec URL and access setting.");
+    }
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error?.message || `Apps Script returned HTTP ${response.status}.`);
+    }
+    return payload.data;
   }
 
   async syncReservationKpi(followup) {
@@ -397,6 +563,15 @@ function firstValue(record, keys) {
     if (record?.[key]) return record[key];
   }
   return "";
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function sanitizeDocumentHtml(value) {

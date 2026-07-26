@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld("erim", {
     getRevisionContext: (customerCode) => ipcRenderer.invoke("workspace:revision-context", customerCode),
     chooseRevisedDocx: () => ipcRenderer.invoke("workspace:revision-choose-file"),
     postItineraryRevision: (details) => ipcRenderer.invoke("workspace:revision-post", details),
+    getRecheckContext: (customerCode) => ipcRenderer.invoke("workspace:recheck-context", customerCode),
+    downloadLatestItinerary: (details) => ipcRenderer.invoke("workspace:itinerary-download", details),
+    openDownloadFolder: () => ipcRenderer.invoke("workspace:download-folder-open"),
+    listNotifications: () => ipcRenderer.invoke("workspace:notifications-list"),
     getGmailThread: (threadId) => ipcRenderer.invoke("workspace:gmail-thread", threadId),
   },
   reservation: {

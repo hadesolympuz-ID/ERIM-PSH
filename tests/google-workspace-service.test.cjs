@@ -54,3 +54,42 @@ test("rejects itinerary upload when the official Drive folder is not configured"
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("downloads the latest itinerary into the managed folder and records an append-only event", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-download-"));
+  const events = [];
+  const service = new GoogleWorkspaceService({
+    database: {
+      getPublicSettings: () => ({ employeeId: "EMP-RES-001" }),
+    },
+    authService: null,
+    chooseFile: async () => null,
+    downloadDirectory: directory,
+  });
+  service.authorizedRawFetch = async () => ({
+    arrayBuffer: async () => Buffer.from("latest docx"),
+  });
+  service.recordItineraryEvent = async (event) => {
+    events.push(event);
+    return { ok: true };
+  };
+
+  try {
+    const result = await service.downloadLatestItinerary({
+      customerCode: "AK/PSHBALI4804",
+      customerName: "Test Family",
+      tourId: "TOUR-001",
+      driveFileId: "DRIVE-001",
+      driveFileName: "AK-PSHBALI4804 - Test Family.docx",
+      currentRevision: 3,
+    });
+    assert.equal(fs.readFileSync(result.localPath, "utf8"), "latest docx");
+    assert.match(result.fileName, /^AK-PSHBALI4804 - Test Family - REV 3 - \d{14}\.docx$/);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, "DOWNLOAD");
+    assert.equal(events[0].revisionNumber, 3);
+    assert.equal(events[0].customerCode, "AK/PSHBALI4804");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

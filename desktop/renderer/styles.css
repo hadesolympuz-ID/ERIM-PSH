@@ -211,6 +211,23 @@ dialog { width: min(760px, calc(100vw - 70px)); max-height: calc(100vh - 70px); 
 .email-message-body img { max-width: 100%; height: auto; }
 .email-message-body pre { white-space: pre-wrap; font: inherit; }
 .personal-kpi-metrics { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.recheck-lookup { display: grid; grid-template-columns: minmax(300px,520px) auto; gap: 10px; align-items: end; padding: 20px; border-bottom: 1px solid var(--line); background: var(--blue-50); }
+.recheck-lookup label { color: var(--muted); font-size: 12px; font-weight: 750; }
+.recheck-lookup input { margin-top: 6px; }
+.recheck-record { padding: 18px; }
+.recheck-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; gap: 12px; align-items: center; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50); }
+.recheck-summary span, .recheck-summary strong { display: block; }
+.recheck-summary span { color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; }
+.recheck-summary strong { margin-top: 3px; }
+.recheck-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.recheck-columns { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,.9fr) minmax(0,1.3fr); gap: 14px; margin-top: 15px; }
+.recheck-pane { min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: #fff; overflow: hidden; }
+.recheck-pane .pane-heading { justify-content: space-between; gap: 10px; }
+.recheck-scroll { height: 510px; overflow: auto; }
+.recheck-email-list { padding: 12px; }
+.recheck-email-list + .email-trail { max-height: none; margin: 0 12px 12px; }
+.logbook-panel { margin-top: 16px; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+.table-subtext { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 450; }
 dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px; border-bottom: 1px solid var(--line); }
 .dialog-heading h2 { margin: 0; }
