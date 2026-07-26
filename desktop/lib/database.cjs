@@ -116,6 +116,23 @@ class LocalDatabase {
         entity_id TEXT,
         details_json TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS reservation_followups (
+        followup_id TEXT PRIMARY KEY,
+        customer_code TEXT NOT NULL,
+        tour_id TEXT,
+        source_type TEXT NOT NULL,
+        source_reference_id TEXT,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        pending_reason TEXT,
+        waiting_for_department TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_reservation_followups_status_age
+        ON reservation_followups(status, started_at);
     `);
   }
 
@@ -218,6 +235,80 @@ class LocalDatabase {
       WHERE local_status != 'CANCELED'
     `).get();
     return Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, Number(value || 0)]));
+  }
+
+  startReservationFollowup(input) {
+    const code = String(input.customerCode || "").trim().toUpperCase();
+    if (!code) throw new Error("Customer Code is required.");
+    const now = this.now();
+    const existing = this.db.prepare(`
+      SELECT followup_id FROM reservation_followups
+      WHERE customer_code = ? AND source_type = ? AND status = 'PENDING'
+      ORDER BY started_at DESC LIMIT 1
+    `).get(code, input.sourceType);
+    if (existing) return this.getReservationFollowup(existing.followup_id);
+    const followupId = this.id("FUP");
+    this.db.prepare(`
+      INSERT INTO reservation_followups (
+        followup_id, customer_code, tour_id, source_type, source_reference_id,
+        status, pending_reason, waiting_for_department, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'PENDING', '', '', ?, ?)
+    `).run(
+      followupId,
+      code,
+      input.tourId || null,
+      input.sourceType || "NEW_ITINERARY",
+      input.sourceReferenceId || null,
+      now,
+      now,
+    );
+    this.log("RESERVATION_FOLLOWUP_STARTED", "RESERVATION_FOLLOWUP", followupId, {
+      customerCode: code,
+      sourceType: input.sourceType,
+    });
+    return this.getReservationFollowup(followupId);
+  }
+
+  getReservationFollowup(id) {
+    return this.db.prepare("SELECT * FROM reservation_followups WHERE followup_id = ?").get(id) || null;
+  }
+
+  listReservationFollowups() {
+    return this.db.prepare(`
+      SELECT * FROM reservation_followups
+      ORDER BY CASE status WHEN 'PENDING' THEN 0 ELSE 1 END, started_at ASC
+    `).all().map((row) => ({
+      ...row,
+      pendingHours: Math.max(0, (Date.now() - new Date(row.started_at).getTime()) / 3_600_000),
+    }));
+  }
+
+  updateReservationFollowup(id, input) {
+    const followup = this.getReservationFollowup(id);
+    if (!followup) throw new Error("Reservation follow-up was not found.");
+    const reason = String(input.pendingReason || "").trim();
+    if (followup.status === "PENDING" && !reason) throw new Error("Pending reason is required.");
+    this.db.prepare(`
+      UPDATE reservation_followups
+      SET pending_reason = ?, waiting_for_department = ?, updated_at = ?
+      WHERE followup_id = ?
+    `).run(reason, String(input.waitingForDepartment || "").trim(), this.now(), id);
+    this.log("RESERVATION_FOLLOWUP_UPDATED", "RESERVATION_FOLLOWUP", id, {
+      pendingReason: reason,
+      waitingForDepartment: input.waitingForDepartment,
+    });
+    return this.getReservationFollowup(id);
+  }
+
+  resolveReservationFollowup(id) {
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE reservation_followups
+      SET status = 'RESOLVED', resolved_at = ?, updated_at = ?
+      WHERE followup_id = ?
+    `).run(now, now, id);
+    this.log("RESERVATION_FOLLOWUP_RESOLVED", "RESERVATION_FOLLOWUP", id, {});
+    return this.getReservationFollowup(id);
   }
 
   listDrafts(filters = {}) {

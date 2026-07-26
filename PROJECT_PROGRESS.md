@@ -475,6 +475,13 @@ Do these in order:
 | 2026-07-26 | Desktop changed to per-user temporary local database with controlled publish. | `DONE` |
 | 2026-07-26 | Hostinger subdomain confirmed as mobile-only. | `DONE` |
 | 2026-07-26 | Reservation confirmation, Ops quotation, Vendor email/WA/portal link strategy documented. | `DONE` |
+| 2026-07-26 | Desktop dashboard simplified to notification Inbox; Reservation itinerary actions moved to submenu; Add New Itinerary reduced to Customer Code. | `DONE` |
+| 2026-07-26 | Reservation intake expanded with Customer Name, Agent typeahead/add-new flag, Gmail confirmation linking, and normalized itinerary upload to Google Drive. | `DONE` |
+| 2026-07-26 | Revise Itinerary workflow added: central Customer Code lookup, daywise/status view, embedded scrollable DOCX content, mandatory revised DOCX and revision note, Drive file replacement with revision numbering. | `DONE` |
+| 2026-07-26 | Gmail confirmation trail viewer and Reservation pending follow-up KPI foundation added, including aging bands, cross-department waiting field, mandatory pending reason on update, and resolution tracking. | `DONE` |
+| 2026-07-26 | Central Google Sheet Reservation KPI database and management summary created; desktop cloud upsert connector prepared but activation deferred. | `IN PROGRESS` |
+| 2026-07-26 | Reservation submenu `Cek KPI` and personal local KPI screen prepared; cloud KPI synchronization intentionally deferred until the later implementation milestone. | `DONE` |
+| 2026-07-26 | Desktop v1.0.3 compiled for Reservation workflow, Gmail trail, Drive itinerary handling, revision control, notification Inbox, and personal KPI screen. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |

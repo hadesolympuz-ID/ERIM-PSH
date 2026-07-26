@@ -22,6 +22,21 @@ contextBridge.exposeInMainWorld("erim", {
   health: {
     checkAll: () => ipcRenderer.invoke("health:check-all"),
   },
+  workspace: {
+    searchAgents: (query) => ipcRenderer.invoke("workspace:agents-search", query),
+    searchConfirmationEmails: (customerCode) => ipcRenderer.invoke("workspace:confirmation-search", customerCode),
+    uploadItinerary: (details) => ipcRenderer.invoke("workspace:itinerary-upload", details),
+    getRevisionContext: (customerCode) => ipcRenderer.invoke("workspace:revision-context", customerCode),
+    chooseRevisedDocx: () => ipcRenderer.invoke("workspace:revision-choose-file"),
+    postItineraryRevision: (details) => ipcRenderer.invoke("workspace:revision-post", details),
+    getGmailThread: (threadId) => ipcRenderer.invoke("workspace:gmail-thread", threadId),
+  },
+  reservation: {
+    listFollowups: () => ipcRenderer.invoke("reservation:followup-list"),
+    startFollowup: (details) => ipcRenderer.invoke("reservation:followup-start", details),
+    updateFollowup: (id, details) => ipcRenderer.invoke("reservation:followup-update", id, details),
+    resolveFollowup: (id) => ipcRenderer.invoke("reservation:followup-resolve", id),
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

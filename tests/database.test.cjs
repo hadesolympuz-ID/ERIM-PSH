@@ -155,3 +155,27 @@ test("persists and reloads Google session through secure storage adapter", () =>
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("tracks Reservation follow-up aging, reason, and resolution", () => withDatabase((database) => {
+  const followup = database.startReservationFollowup({
+    customerCode: "psh-0100",
+    sourceType: "NEW_ITINERARY",
+    sourceReferenceId: "DRIVE-1",
+  });
+  assert.equal(followup.customer_code, "PSH-0100");
+  assert.equal(followup.status, "PENDING");
+  assert.throws(
+    () => database.updateReservationFollowup(followup.followup_id, { pendingReason: "" }),
+    /reason is required/i,
+  );
+  const updated = database.updateReservationFollowup(followup.followup_id, {
+    pendingReason: "Waiting for Vendor Booking confirmation.",
+    waitingForDepartment: "VENDOR",
+  });
+  assert.equal(updated.waiting_for_department, "VENDOR");
+  assert.match(updated.pending_reason, /Vendor Booking/);
+  assert.equal(database.listReservationFollowups().length, 1);
+  const resolved = database.resolveReservationFollowup(followup.followup_id);
+  assert.equal(resolved.status, "RESOLVED");
+  assert.ok(resolved.resolved_at);
+}));

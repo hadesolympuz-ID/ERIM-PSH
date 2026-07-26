@@ -5,6 +5,7 @@ const { SyncService } = require("./lib/sync-service.cjs");
 const { UpdateService } = require("./lib/update-service.cjs");
 const { GoogleAuthService } = require("./lib/google-auth-service.cjs");
 const { BackendHealthService } = require("./lib/backend-health-service.cjs");
+const { GoogleWorkspaceService } = require("./lib/google-workspace-service.cjs");
 
 let mainWindow;
 let database;
@@ -12,6 +13,7 @@ let syncService;
 let updateService;
 let googleAuth;
 let backendHealth;
+let googleWorkspace;
 
 const isDev = !app.isPackaged;
 
@@ -62,6 +64,17 @@ function registerIpc() {
   ipcMain.handle("auth:login", () => googleAuth.login());
   ipcMain.handle("auth:logout", () => googleAuth.logout());
   ipcMain.handle("health:check-all", () => backendHealth.checkAll());
+  ipcMain.handle("workspace:agents-search", (_event, query) => googleWorkspace.searchAgents(query));
+  ipcMain.handle("workspace:confirmation-search", (_event, customerCode) => googleWorkspace.searchConfirmationEmails(customerCode));
+  ipcMain.handle("workspace:itinerary-upload", (_event, details) => googleWorkspace.selectAndUploadItinerary(details));
+  ipcMain.handle("workspace:revision-context", (_event, customerCode) => googleWorkspace.getRevisionContext(customerCode));
+  ipcMain.handle("workspace:revision-choose-file", () => googleWorkspace.chooseRevisedDocx());
+  ipcMain.handle("workspace:revision-post", (_event, details) => googleWorkspace.postItineraryRevision(details));
+  ipcMain.handle("reservation:followup-list", () => database.listReservationFollowups());
+  ipcMain.handle("reservation:followup-start", (_event, details) => database.startReservationFollowup(details));
+  ipcMain.handle("reservation:followup-update", (_event, id, details) => database.updateReservationFollowup(id, details));
+  ipcMain.handle("reservation:followup-resolve", (_event, id) => database.resolveReservationFollowup(id));
+  ipcMain.handle("workspace:gmail-thread", (_event, threadId) => googleWorkspace.getGmailThread(threadId));
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
@@ -94,6 +107,23 @@ app.whenReady().then(() => {
     authService: googleAuth,
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
+  });
+  googleWorkspace = new GoogleWorkspaceService({
+    database,
+    authService: googleAuth,
+    chooseFile: async (options = {}) => {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: options.title || "Post Soft Copy Itinerary",
+        properties: ["openFile"],
+        filters: options.docxOnly ? [
+          { name: "Word document", extensions: ["docx"] },
+        ] : [
+          { name: "Itinerary documents", extensions: ["pdf", "doc", "docx", "xls", "xlsx"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      return result.canceled ? null : result.filePaths[0];
+    },
   });
   updateService = new UpdateService({
     isPackaged: app.isPackaged,

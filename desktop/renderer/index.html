@@ -19,7 +19,12 @@
         </div>
         <nav id="main-nav">
           <button class="nav-item active" data-view="dashboard">Dashboard</button>
-          <button class="nav-item" data-view="workspace" data-module="RESERVATION">Reservation</button>
+          <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION">Reservation</button>
+          <div class="nav-submenu" aria-label="Reservation actions">
+            <button class="nav-subitem" data-itinerary-action="new">Add New Itinerary</button>
+            <button class="nav-subitem" data-itinerary-action="revise">Revise Itinerary</button>
+            <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
+          </div>
           <button class="nav-item" data-view="workspace" data-module="VENDOR">Vendor Booking</button>
           <button class="nav-item" data-view="workspace" data-module="TRANSPORT">Transport</button>
           <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
@@ -56,42 +61,22 @@
 
         <main>
           <section id="dashboard-view" class="view active">
-            <div class="hero-card">
-              <div>
-                <p class="eyebrow">Desktop v1.0</p>
-                <h2>Work locally. Publish safely.</h2>
-                <p>Every department prepares isolated local work, then posts a versioned result to the official Google publication chain.</p>
-              </div>
-              <button id="new-draft-hero" class="button primary">New local draft</button>
-            </div>
-
-            <div class="metric-grid">
-              <article><span>Total active</span><strong id="metric-total">0</strong></article>
-              <article><span>Local drafts</span><strong id="metric-drafts">0</strong></article>
-              <article><span>Ready to post</span><strong id="metric-ready">0</strong></article>
-              <article class="attention"><span>Needs attention</span><strong id="metric-attention">0</strong></article>
-              <article class="success"><span>Synced</span><strong id="metric-synced">0</strong></article>
-            </div>
-
             <div class="panel">
               <div class="panel-heading">
-                <div><p class="eyebrow">Recent work</p><h2>Local drafts</h2></div>
-                <button id="new-draft" class="button primary">New draft</button>
+                <div><p class="eyebrow">Notifications</p><h2>Inbox</h2></div>
+                <span id="inbox-count" class="inbox-count">0</span>
               </div>
-              <div class="toolbar">
-                <input id="draft-search" type="search" placeholder="Search Customer Code or title" />
-                <select id="draft-status-filter">
-                  <option value="">All statuses</option>
-                  <option>LOCAL_DRAFT</option>
-                  <option>READY_TO_POST</option>
-                  <option>SYNCED</option>
-                  <option>CANCELED</option>
-                </select>
+              <div id="notification-inbox" class="notification-inbox"></div>
+            </div>
+            <div id="reservation-followup-panel" class="panel followup-panel" hidden>
+              <div class="panel-heading">
+                <div><p class="eyebrow">Reservation KPI</p><h2>Pending follow-up queue</h2></div>
               </div>
+              <div class="callout">Pending age starts when an itinerary or revision is posted. Longer unresolved items reduce the Reservation follow-up KPI.</div>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>Customer Code</th><th>Department</th><th>Work</th><th>Local status</th><th>Sync</th><th>Updated</th><th></th></tr></thead>
-                  <tbody id="draft-table"></tbody>
+                  <thead><tr><th>Customer Code</th><th>Source</th><th>Pending age</th><th>KPI</th><th>Waiting for</th><th>Alasan pending</th><th></th></tr></thead>
+                  <tbody id="reservation-followup-table"></tbody>
                 </table>
               </div>
             </div>
@@ -112,6 +97,35 @@
                 <table>
                   <thead><tr><th>Customer Code</th><th>Type</th><th>Title</th><th>Status</th><th>Sync</th><th>Updated</th><th></th></tr></thead>
                   <tbody id="workspace-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="reservation-kpi-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Reservation personal performance</p>
+                <h2>KPI Saya</h2>
+                <p id="personal-kpi-owner">Ringkasan follow-up Reservation pada komputer staff ini.</p>
+              </div>
+            </div>
+            <div class="metric-grid personal-kpi-metrics">
+              <article><span>Total posted</span><strong id="personal-kpi-total">0</strong></article>
+              <article><span>Pending</span><strong id="personal-kpi-pending">0</strong></article>
+              <article class="success"><span>On track</span><strong id="personal-kpi-ontrack">0</strong></article>
+              <article class="attention"><span>Attention</span><strong id="personal-kpi-attention">0</strong></article>
+              <article class="attention"><span>Overdue</span><strong id="personal-kpi-overdue">0</strong></article>
+            </div>
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">My follow-up records</p><h2>Detail KPI Reservation</h2></div>
+                <span id="personal-kpi-missing-reason" class="status">0 missing reason</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Source</th><th>Status</th><th>Pending age</th><th>KPI</th><th>Waiting for</th><th>Alasan pending</th><th>Updated</th></tr></thead>
+                  <tbody id="personal-kpi-table"></tbody>
                 </table>
               </div>
             </div>
@@ -212,6 +226,116 @@
         <div class="dialog-actions">
           <button type="button" id="cancel-dialog" class="button ghost">Cancel</button>
           <button type="submit" class="button primary">Save local draft</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="itinerary-dialog" class="compact-dialog">
+      <form id="itinerary-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Reservation</p><h2 id="itinerary-dialog-title">Add New Itinerary</h2></div>
+          <button type="button" id="close-itinerary-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <input type="hidden" name="action" value="new" />
+        <div class="form-grid itinerary-fields">
+          <label>Customer Code<input name="customerCode" placeholder="PSH-0001" autocomplete="off" required /></label>
+          <label>Customer Name<input name="customerName" placeholder="Customer or group name" autocomplete="off" required /></label>
+          <label class="wide agent-field">
+            Agent Name
+            <input name="agentName" placeholder="Type to find an agent" autocomplete="off" />
+            <input type="hidden" name="agentId" />
+            <div id="agent-suggestions" class="suggestion-list" hidden></div>
+            <button id="add-agent-name" type="button" class="inline-action" hidden>Add Agent Name</button>
+          </label>
+          <div class="wide linked-section">
+            <div class="field-heading">
+              <div><strong>Link with confirmation email</strong><small>Searches Gmail subjects containing the Customer Code.</small></div>
+              <button id="search-confirmation-email" type="button" class="button ghost small">Find email</button>
+            </div>
+            <div id="confirmation-email-results" class="selection-list">
+              <span class="muted-text">No email selected.</span>
+            </div>
+            <div id="confirmation-thread-trail" class="email-trail" hidden></div>
+            <input type="hidden" name="confirmationMessageId" />
+            <input type="hidden" name="confirmationThreadId" />
+            <input type="hidden" name="confirmationSubject" />
+          </div>
+          <div class="wide linked-section">
+            <div class="field-heading">
+              <div><strong>Soft copy itinerary</strong><small>File will be renamed to Customer Code - Customer Name before upload.</small></div>
+              <button id="post-itinerary-file" type="button" class="button ghost small">Post Soft Copy Itinerary</button>
+            </div>
+            <div id="itinerary-upload-result" class="upload-result muted-text">No file uploaded.</div>
+            <input type="hidden" name="driveFileId" />
+            <input type="hidden" name="driveFileName" />
+            <input type="hidden" name="driveFileUrl" />
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-itinerary-dialog" class="button ghost">Cancel</button>
+          <button id="save-itinerary" type="submit" class="button primary">Create itinerary</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="revision-dialog" class="revision-dialog">
+      <form id="revision-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Reservation</p><h2>Revise Itinerary</h2></div>
+          <button type="button" id="close-revision-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <div class="revision-layout">
+          <div class="revision-lookup">
+            <label>Customer Code<input name="customerCode" placeholder="PSH-0001" autocomplete="off" required /></label>
+            <button id="load-revision-record" type="button" class="button primary">Find record</button>
+          </div>
+
+          <section id="revision-record" class="revision-record" hidden>
+            <div class="revision-summary">
+              <div><span>Customer</span><strong id="revision-customer">—</strong></div>
+              <div><span>Tour status</span><strong id="revision-tour-status">—</strong></div>
+              <div><span>Current revision</span><strong id="revision-current-number">REV 0</strong></div>
+              <a id="revision-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open in Google Drive</a>
+            </div>
+
+            <div class="revision-columns">
+              <section class="revision-pane">
+                <div class="pane-heading"><strong>Daywise & status</strong></div>
+                <div class="table-wrap daywise-scroll">
+                  <table>
+                    <thead><tr><th>Day</th><th>Date</th><th>Detail</th><th>Status</th></tr></thead>
+                    <tbody id="revision-daywise"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="revision-pane">
+                <div class="pane-heading">
+                  <div><strong id="old-itinerary-name">Current itinerary</strong><small>Contents of the DOCX stored in Google Drive</small></div>
+                </div>
+                <div id="old-itinerary-content" class="document-preview"></div>
+              </section>
+            </div>
+
+            <div class="revision-inputs">
+              <div class="linked-section">
+                <div class="field-heading">
+                  <div><strong>Revised DOCX</strong><small>Required. Select the completed revision from My Computer.</small></div>
+                  <button id="choose-revised-docx" type="button" class="button ghost small">Choose DOCX</button>
+                </div>
+                <div id="revised-docx-result" class="upload-result muted-text">No revised file selected.</div>
+                <input type="hidden" name="revisedFilePath" />
+              </div>
+              <label>
+                Keterangan revisi
+                <textarea name="revisionNote" rows="4" placeholder="Jelaskan perubahan yang dilakukan pada itinerary." required></textarea>
+              </label>
+            </div>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-revision-dialog" class="button ghost">Cancel</button>
+          <button id="post-revision" type="submit" class="button primary" disabled>Post</button>
         </div>
       </form>
     </dialog>
