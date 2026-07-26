@@ -45,7 +45,7 @@
               <span id="update-message">Checking application status…</span>
               <button id="update-action" class="button ghost small" hidden>Check update</button>
             </div>
-            <button id="google-auth" class="button ghost small">Connect Google</button>
+            <button id="google-auth" class="button ghost small" hidden>Connect Google</button>
             <div class="user-chip">
               <span id="user-initials">DU</span>
               <div><strong id="user-name">Development User</strong><small id="user-department">RESERVATION</small></div>
@@ -146,8 +146,10 @@
                 </select></label>
                 <label>Environment<select name="environment"><option>DEV</option><option>STAGING</option><option>PROD</option></select></label>
                 <label class="wide">Apps Script API URL<input name="apiBaseUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" /></label>
-                <label class="wide">Google Desktop OAuth Client ID<input name="googleClientId" placeholder="...apps.googleusercontent.com" /></label>
-                <label class="wide">Google Desktop OAuth Client Secret<input name="googleClientSecret" type="password" autocomplete="off" /></label>
+                <div id="google-settings" class="wide form-grid" hidden>
+                  <label class="wide">Google Desktop OAuth Client ID<input name="googleClientId" placeholder="...apps.googleusercontent.com" /></label>
+                  <label class="wide">Google Desktop OAuth Client Secret<input name="googleClientSecret" type="password" autocomplete="off" /></label>
+                </div>
                 <div class="wide form-actions"><button class="button primary" type="submit">Save settings</button></div>
               </form>
               <div class="database-location"><strong>Local database</strong><code id="database-path">—</code></div>

@@ -4,6 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { LocalDatabase } = require("../desktop/lib/database.cjs");
+const { SyncService } = require("../desktop/lib/sync-service.cjs");
 
 function withDatabase(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
@@ -78,3 +79,28 @@ test("rejects editing a ready draft and requires a controlled revision", () => w
   }), /controlled revision/i);
 }));
 
+test("publishes end-to-end in DEV dummy mode without Google auth", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  try {
+    const draft = database.saveDraft({
+      customerCode: "PSH-0004",
+      module: "RESERVATION",
+      workType: "NEW_CONFIRMATION",
+      title: "Dummy publication",
+      payload: { details: "Exercise the complete local publication flow." },
+    });
+    database.markReady(draft.draft_id);
+    database.queueDraft(draft.draft_id);
+    const result = await new SyncService(database, null).runPending();
+    const published = database.getDraft(draft.draft_id);
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, "LOCAL_DUMMY");
+    assert.equal(published.local_status, "SYNCED");
+    assert.match(published.official_entity_id, /^DEV-/);
+    assert.equal(database.listSyncQueue()[0].status, "SYNCED");
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -10,6 +10,9 @@ class SyncService {
 
   async runPending() {
     const settings = this.database.getPublicSettings();
+    if (settings.environment === "DEV") {
+      return this.runDummyPending(settings);
+    }
     if (!settings.apiBaseUrl) {
       return {
         ok: false,
@@ -72,6 +75,38 @@ class SyncService {
     }
 
     return { ok: results.every((item) => item.ok), results, queue: this.database.listSyncQueue() };
+  }
+
+  runDummyPending(settings) {
+    const results = [];
+    for (const job of this.database.pendingSyncJobs()) {
+      this.database.markSyncPosting(job.sync_job_id);
+      const request = JSON.parse(job.request_json);
+      const draft = request.draft;
+      const suffix = job.idempotency_key.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toUpperCase();
+      const response = {
+        publicationId: `DEV-PUB-${suffix}`,
+        officialEntityId: draft.officialEntityId || `DEV-${draft.customerCode}-${draft.department}`,
+        publishedRecordVersion: Number(draft.localRevision || 1),
+        sourcePublicationId: draft.sourcePublicationId || null,
+        sourceRecordVersion: draft.sourceRecordVersion || null,
+        environment: settings.environment,
+        mode: "LOCAL_DUMMY",
+        publishedAt: new Date().toISOString(),
+        publishedBy: settings.employeeId,
+      };
+      this.database.markSyncComplete(job.sync_job_id, response);
+      results.push({ jobId: job.sync_job_id, ok: true, data: response });
+    }
+    return {
+      ok: true,
+      mode: "LOCAL_DUMMY",
+      message: results.length
+        ? `${results.length} dummy publication completed locally.`
+        : "No pending dummy publications.",
+      results,
+      queue: this.database.listSyncQueue(),
+    };
   }
 }
 

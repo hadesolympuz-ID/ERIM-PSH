@@ -18,6 +18,10 @@ Desktop v1.0 includes:
 - confirmation, quotation, email, WhatsApp, and portal references;
 - Windows installer and GitHub Releases update flow.
 
+In `DEV`, the complete publication flow runs in local dummy mode. Google login,
+Apps Script, and Google Workspace credentials are not required. Switching to
+`STAGING` or `PROD` activates the authenticated central publication path.
+
 Run locally:
 
 ```powershell

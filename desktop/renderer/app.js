@@ -68,11 +68,14 @@ async function refresh() {
 function renderChrome() {
   const { version, settings } = state.bootstrap;
   $("#version-label").textContent = `Version ${version}`;
-  $("#environment-label").textContent = settings.environment;
+  const dummyMode = settings.environment === "DEV";
+  $("#environment-label").textContent = dummyMode ? "DEV DUMMY" : settings.environment;
   $("#user-name").textContent = settings.employeeName;
   $("#user-department").textContent = settings.department;
   $("#user-initials").textContent = settings.employeeName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   $("#sync-nav-count").textContent = state.syncQueue.filter((job) => !["SYNCED", "CANCELED"].includes(job.status)).length;
+  $("#google-auth").hidden = dummyMode;
+  $("#google-settings").hidden = dummyMode;
   $("#google-auth").textContent = state.auth.connected ? `Google: ${state.auth.email || "Connected"}` : "Connect Google";
 }
 

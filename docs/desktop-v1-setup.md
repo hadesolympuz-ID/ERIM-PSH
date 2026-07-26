@@ -11,6 +11,17 @@ Open Settings and enter the employee ID, name, department, environment, Apps
 Script web-app URL, and Google Desktop OAuth client credentials. These values
 remain on the current PC. Each Windows profile gets a separate SQLite database.
 
+## DEV dummy mode
+
+Keep Environment set to `DEV`. In this mode Google login and OAuth settings are
+hidden. Publishing a ready draft creates a deterministic dummy publication ID,
+official entity ID, record version, sync result, and local audit history. This
+allows the full desktop workflow to be modeled before company infrastructure
+is available.
+
+`STAGING` and `PROD` never use the dummy bypass. They require Google login,
+Apps Script configuration, and an approved employee record.
+
 ## Google OAuth
 
 Create a Google Cloud OAuth client with application type **Desktop app**. Put

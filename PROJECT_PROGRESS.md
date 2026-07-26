@@ -9,7 +9,7 @@ dibatalkan.
 **Local project:** `C:\PROJECT\ERIM-PSH`  
 **Target application:** `https://status.peakseasonholidays.com`  
 **Last updated:** 2026-07-26  
-**Current phase:** Desktop v1.0 Foundation Built; Google deployment configuration pending
+**Current phase:** Desktop v1.0 Dummy Operational Modeling
 
 ---
 
@@ -155,6 +155,7 @@ User PC
 | Publication-chain workbook update | `DONE` | `DEPARTMENT_PUBLICATIONS`, `PUBLICATION_LINKS`, dan `EXTERNAL_BOOKING_REFS`. |
 | Windows installer v1.0 | `DONE` | NSIS installer plus `latest.yml` updater metadata. |
 | Google browser sign-in adapter | `DONE` | Desktop OAuth + PKCE loopback; credentials still require DEV configuration. |
+| DEV dummy authentication bypass | `DONE` | Google login removed from DEV UI; local publish simulation is fully operable. |
 | GitHub Releases auto-update client | `DONE` | Check, download, restart-and-install flow implemented. |
 | Git commit | `DONE` | Desktop v1.0 foundation committed intentionally. |
 | GitHub push | `DONE` | Branch `agent/desktop-v1` pushed; draft PR #1 opened. |
