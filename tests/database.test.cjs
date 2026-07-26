@@ -101,13 +101,95 @@ test("publishes end-to-end in DEV dummy mode without Google auth", async () => {
     assert.equal(published.local_status, "SYNCED");
     assert.match(published.official_entity_id, /^DEV-/);
     assert.equal(database.listSyncQueue()[0].status, "SYNCED");
+    assert.equal(database.listSyncQueue()[0].sync_mode, "LOCAL_DUMMY");
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("reports local database and ADMIN_DEV dummy engine health", async () => {
+test("ADMIN_DEV publishes through Apps Script instead of the local dummy engine", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  const originalFetch = global.fetch;
+  try {
+    database.saveSettings({
+      environment: "ADMIN_DEV",
+      apiBaseUrl: "https://script.google.com/macros/s/dev/exec",
+    });
+    const draft = database.saveDraft({
+      customerCode: "AK/PSHBALI4804",
+      module: "RESERVATION",
+      workType: "NEW_CONFIRMATION",
+      title: "Online publication",
+      payload: { customerName: "MUKESH THAKKAR" },
+    });
+    database.markReady(draft.draft_id);
+    database.queueDraft(draft.draft_id);
+    let postedPayload;
+    global.fetch = async (_url, options) => {
+      postedPayload = JSON.parse(options.body);
+      return {
+        json: async () => ({
+          ok: true,
+          data: {
+            publicationId: "PUB-ONLINE",
+            officialEntityId: "TOUR-ONLINE",
+            tourId: "TOUR-ONLINE",
+            publishedRecordVersion: 1,
+            publishedAt: new Date().toISOString(),
+          },
+        }),
+      };
+    };
+    const authService = { accessToken: async () => "online-access-token" };
+    const result = await new SyncService(database, authService).runPending();
+    const queue = database.listSyncQueue();
+    assert.equal(result.ok, true);
+    assert.equal(result.results[0].data.mode, "ONLINE_APPS_SCRIPT");
+    assert.equal(queue[0].status, "SYNCED");
+    assert.equal(queue[0].sync_mode, "ONLINE_APPS_SCRIPT");
+    assert.equal(postedPayload.draft.customerCode, "AK/PSHBALI4804");
+    assert.equal(postedPayload.auth.accessToken, "online-access-token");
+  } finally {
+    global.fetch = originalFetch;
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("requeues legacy ADMIN_DEV publications completed by the dummy engine", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  try {
+    const draft = database.saveDraft({
+      customerCode: "AK/PSHBALI4804",
+      module: "RESERVATION",
+      workType: "NEW_CONFIRMATION",
+      title: "Legacy dummy publication",
+      payload: { customerName: "MUKESH THAKKAR" },
+    });
+    database.markReady(draft.draft_id);
+    database.queueDraft(draft.draft_id);
+    await new SyncService(database, null).runPending();
+    database.saveSettings({ environment: "ADMIN_DEV" });
+
+    assert.equal(database.requeueAdminDevDummyPublications(), 1);
+    const queue = database.listSyncQueue();
+    const requeuedDraft = database.getDraft(draft.draft_id);
+    assert.equal(queue[0].status, "PENDING_SYNC");
+    assert.equal(queue[0].sync_mode, null);
+    assert.equal(requeuedDraft.local_status, "READY_TO_POST");
+    assert.equal(requeuedDraft.sync_status, "PENDING_SYNC");
+    assert.equal(requeuedDraft.official_entity_id, null);
+    assert.equal(database.requeueAdminDevDummyPublications(), 0);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports local database health and disables dummy publishing in ADMIN_DEV", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
   const database = new LocalDatabase(path.join(directory, "test.sqlite"));
   try {
@@ -121,7 +203,8 @@ test("reports local database and ADMIN_DEV dummy engine health", async () => {
     const local = await service.localDatabase();
     const dummy = await service.dummyPublisher(database.getPublicSettings());
     assert.equal(local.status, "HEALTHY");
-    assert.equal(dummy.status, "HEALTHY");
+    assert.equal(dummy.status, "UNAVAILABLE");
+    assert.match(dummy.detail, /Apps Script/);
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });

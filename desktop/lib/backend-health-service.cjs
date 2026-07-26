@@ -68,11 +68,11 @@ class BackendHealthService {
   async dummyPublisher(settings) {
     return {
       name: "Dummy publication engine",
-      status: ["DEV", "ADMIN_DEV"].includes(settings.environment) ? "HEALTHY" : "UNAVAILABLE",
+      status: settings.environment === "DEV" ? "HEALTHY" : "UNAVAILABLE",
       latencyMs: 0,
-      detail: ["DEV", "ADMIN_DEV"].includes(settings.environment)
+      detail: settings.environment === "DEV"
         ? "Local end-to-end publication enabled"
-        : "Disabled outside DEV environments",
+        : "Disabled; ADMIN_DEV publishes through Apps Script",
     };
   }
 

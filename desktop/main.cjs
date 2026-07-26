@@ -94,6 +94,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   const databasePath = path.join(app.getPath("userData"), "erim-psh-local.sqlite");
   database = new LocalDatabase(databasePath);
+  database.requeueAdminDevDummyPublications();
   googleAuth = new GoogleAuthService({
     database,
     openExternal: (url) => shell.openExternal(url),

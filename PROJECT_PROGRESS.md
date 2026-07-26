@@ -415,14 +415,14 @@ official data.
 | Item | Status | Required action |
 | --- | --- | --- |
 | Google Sheet import | `DONE` | Native Google Sheet created and structurally verified. |
-| Google resource IDs | `PENDING` | Create DEV Sheet, Drive folders, and Apps Script deployment. |
+| Google resource IDs | `DONE` | Personal DEV Sheet, Drive folder, and Apps Script deployment are connected. |
 | Local database technology | `DONE` | Electron + SQLite validated with automated tests. |
 | Publication-chain schema | `DONE` | Workbook and Apps Script contract aligned. |
-| OAuth / Google identity | `PENDING` | Configure DEV client and approved users. |
+| OAuth / Google identity | `DONE` | Personal DEV Google OAuth is connected; company Workspace migration remains a later milestone. |
 | Hostinger access | `PENDING` | Provide staging subdomain/hosting access when deployment begins. |
 | Company roles and employees | `PENDING` | Complete employee master. |
 | Approved status transitions | `PENDING` | Review `STATUS_CATALOG`. |
-| Cross-origin integration | `PENDING` | Run technical spike before module implementation. |
+| Cross-origin integration | `DONE` | Desktop-to-Apps-Script publication and central Sheet readback verified end-to-end. |
 | GitHub publication | `DONE` | Branch `agent/desktop-v1` and draft PR #1 available for review. |
 
 ---
@@ -485,6 +485,10 @@ Do these in order:
 | 2026-07-26 | GitHub Release v1.0.3 published with NSIS installer, blockmap, and latest.yml; updater feed verified as latest. | `DONE` |
 | 2026-07-26 | Office Customer Code format implemented: slash preserved for database/Gmail, Sales Code and File Code stored separately, Drive filename normalized safely, and Gmail fallback search added. | `DONE` |
 | 2026-07-26 | GitHub Release v1.0.4 published and installed locally for office Customer Code and Gmail attachment testing. | `DONE` |
+| 2026-07-26 | ADMIN_DEV publication routing corrected from local dummy mode to the live Apps Script API; legacy dummy-sync records are automatically requeued once. | `DONE` |
+| 2026-07-26 | Apps Script deployment v3 activated with Reservation NEW_CONFIRMATION upsert into central TOURS and Gmail/Drive reference fields. | `DONE` |
+| 2026-07-26 | Four pending Reservation records published through ONLINE_APPS_SCRIPT; AK/PSHBALI4804 verified directly in central TOURS with customer, agent, and Gmail thread data. | `DONE` |
+| 2026-07-26 | Desktop v1.0.5 prepared with explicit Sync Mode visibility and 11 passing automated tests. | `IN PROGRESS` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |

@@ -236,11 +236,12 @@ function renderSync() {
       <td>${escapeHtml(job.module)}</td>
       <td>${escapeHtml(job.operation)}</td>
       <td>${statusPill(job.status)}</td>
+      <td>${escapeHtml(job.sync_mode || "—")}</td>
       <td>${job.attempts}</td>
       <td>${escapeHtml(job.last_error_message || "—")}</td>
       <td>${formatDate(job.updated_at)}</td>
     </tr>
-  `).join("") : `<tr><td class="empty" colspan="7">Nothing is queued for publication.</td></tr>`;
+  `).join("") : `<tr><td class="empty" colspan="8">Nothing is queued for publication.</td></tr>`;
 }
 
 function renderSettings() {

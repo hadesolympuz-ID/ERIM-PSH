@@ -84,6 +84,7 @@ class LocalDatabase {
         operation TEXT NOT NULL,
         request_json TEXT NOT NULL,
         status TEXT NOT NULL,
+        sync_mode TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         next_attempt_at TEXT,
         last_attempt_at TEXT,
@@ -134,6 +135,14 @@ class LocalDatabase {
       CREATE INDEX IF NOT EXISTS idx_reservation_followups_status_age
         ON reservation_followups(status, started_at);
     `);
+    this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
+  }
+
+  ensureColumn(tableName, columnName, definition) {
+    const columns = this.db.prepare(`PRAGMA table_info(${tableName})`).all();
+    if (!columns.some((column) => column.name === columnName)) {
+      this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
   }
 
   seedDefaults() {
@@ -532,13 +541,14 @@ class LocalDatabase {
 
   markSyncComplete(jobId, response) {
     const now = this.now();
+    const syncMode = response.mode || "ONLINE_APPS_SCRIPT";
     this.db.transaction(() => {
       this.db.prepare(`
         UPDATE local_sync_queue
-        SET status = 'SYNCED', last_error_code = NULL, last_error_message = NULL,
+        SET status = 'SYNCED', sync_mode = ?, last_error_code = NULL, last_error_message = NULL,
           updated_at = ?
         WHERE sync_job_id = ?
-      `).run(now, jobId);
+      `).run(syncMode, now, jobId);
       this.db.prepare(`
         UPDATE local_drafts
         SET local_status = 'SYNCED', sync_status = 'SYNCED',
@@ -560,6 +570,42 @@ class LocalDatabase {
         now,
       );
     })();
+  }
+
+  requeueAdminDevDummyPublications() {
+    if (this.getPublicSettings().environment !== "ADMIN_DEV") return 0;
+    const jobs = this.db.prepare(`
+      SELECT DISTINCT q.sync_job_id, q.draft_id
+      FROM local_sync_queue q
+      JOIN local_sync_results r ON r.sync_job_id = q.sync_job_id
+      WHERE q.status = 'SYNCED'
+        AND (q.sync_mode = 'LOCAL_DUMMY' OR r.response_json LIKE '%"mode":"LOCAL_DUMMY"%')
+    `).all();
+    if (!jobs.length) return 0;
+    const now = this.now();
+    this.db.transaction(() => {
+      for (const job of jobs) {
+        this.db.prepare("DELETE FROM local_sync_results WHERE sync_job_id = ?").run(job.sync_job_id);
+        this.db.prepare(`
+          UPDATE local_sync_queue
+          SET status = 'PENDING_SYNC', sync_mode = NULL, attempts = 0,
+            next_attempt_at = NULL, last_attempt_at = NULL,
+            last_error_code = NULL, last_error_message = NULL, updated_at = ?
+          WHERE sync_job_id = ?
+        `).run(now, job.sync_job_id);
+        this.db.prepare(`
+          UPDATE local_drafts
+          SET local_status = 'READY_TO_POST', sync_status = 'PENDING_SYNC',
+            official_entity_id = NULL, updated_at = ?
+          WHERE draft_id = ?
+        `).run(now, job.draft_id);
+      }
+    })();
+    this.log("ADMIN_DEV_DUMMY_REQUEUED", "SYNC_QUEUE", null, {
+      count: jobs.length,
+      jobIds: jobs.map((job) => job.sync_job_id),
+    });
+    return jobs.length;
   }
 
   log(action, entityType, entityId, details) {

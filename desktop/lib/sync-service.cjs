@@ -10,7 +10,7 @@ class SyncService {
 
   async runPending() {
     const settings = this.database.getPublicSettings();
-    if (["DEV", "ADMIN_DEV"].includes(settings.environment)) {
+    if (settings.environment === "DEV") {
       return this.runDummyPending(settings);
     }
     if (!settings.apiBaseUrl) {
@@ -62,8 +62,13 @@ class SyncService {
           results.push({ jobId: job.sync_job_id, ok: false, error: payload.error });
           continue;
         }
-        this.database.markSyncComplete(job.sync_job_id, payload.data);
-        results.push({ jobId: job.sync_job_id, ok: true, data: payload.data });
+        const onlineResult = {
+          ...payload.data,
+          environment: settings.environment,
+          mode: "ONLINE_APPS_SCRIPT",
+        };
+        this.database.markSyncComplete(job.sync_job_id, onlineResult);
+        results.push({ jobId: job.sync_job_id, ok: true, data: onlineResult });
       } catch (error) {
         this.database.markSyncFailed(job.sync_job_id, "NETWORK_ERROR", error.message);
         results.push({

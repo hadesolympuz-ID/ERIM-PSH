@@ -121,9 +121,13 @@ function publishDepartmentResult_(request, actor) {
     validateSourceVersion_(draft);
 
     const now = new Date().toISOString();
+    const reservationTour = draft.department === "RESERVATION" && draft.publicationType === "NEW_CONFIRMATION"
+      ? upsertReservationTour_(draft, actor, now)
+      : null;
+    const resolvedTourId = draft.tourId || (reservationTour && reservationTour.tour_id) || "";
     const publicationId = uuid_("PUB");
-    const officialEntityId = draft.officialEntityId || uuid_(entityPrefix_(draft.publicationType));
-    const previous = latestDepartmentPublication_(draft.tourId, draft.customerCode, draft.department);
+    const officialEntityId = draft.officialEntityId || resolvedTourId || uuid_(entityPrefix_(draft.publicationType));
+    const previous = latestDepartmentPublication_(resolvedTourId, draft.customerCode, draft.department);
     const publishedVersion = Number(previous && previous.published_record_version || 0) + 1;
     const contentHash = digest_(JSON.stringify(draft.payload));
 
@@ -131,7 +135,7 @@ function publishDepartmentResult_(request, actor) {
       publication_id: publicationId,
       idempotency_key: request.idempotencyKey,
       official_entity_id: officialEntityId,
-      tour_id: draft.tourId || "",
+      tour_id: resolvedTourId,
       customer_code: String(draft.customerCode).trim().toUpperCase(),
       department: draft.department,
       publication_type: draft.publicationType,
@@ -159,7 +163,7 @@ function publishDepartmentResult_(request, actor) {
     if (draft.sourcePublicationId) {
       appendRecord_("PUBLICATION_LINKS", {
         publication_link_id: uuid_("LNK"),
-        tour_id: draft.tourId || "",
+        tour_id: resolvedTourId,
         customer_code: publication.customer_code,
         from_publication_id: draft.sourcePublicationId,
         to_publication_id: publicationId,
@@ -178,7 +182,7 @@ function publishDepartmentResult_(request, actor) {
       action: "PUBLICATION_PUBLISH",
       entity_type: "DEPARTMENT_PUBLICATION",
       entity_id: publicationId,
-      tour_id: draft.tourId || "",
+      tour_id: resolvedTourId,
       request_id: request.idempotencyKey,
       before_json: previous ? JSON.stringify(previous) : "",
       after_json: JSON.stringify(publication),
@@ -202,6 +206,41 @@ function validatePublicationDraft_(draft) {
   if (Object.keys(draft.payload || {}).length === 0) {
     throw apiError_("VALIDATION_ERROR", "Publication payload cannot be empty.");
   }
+}
+
+function upsertReservationTour_(draft, actor, now) {
+  ensureHeaders_("TOURS", [
+    "itinerary_drive_file_id",
+    "itinerary_drive_file_name",
+    "itinerary_drive_file_url",
+    "updated_at",
+    "updated_by",
+  ]);
+  const code = String(draft.customerCode).trim().toUpperCase();
+  const payload = draft.payload || {};
+  const existing = findRecord_("TOURS", "customer_code", code);
+  const tour = {
+    tour_id: existing && existing.tour_id || uuid_("TOUR"),
+    customer_code: code,
+    client_name: payload.customerName || existing && existing.client_name || "",
+    agent_name: payload.agentName || existing && existing.agent_name || "",
+    confirmation_email_thread_id: payload.confirmationThreadId
+      || existing && existing.confirmation_email_thread_id || "",
+    itinerary_drive_file_id: payload.itineraryDriveFileId
+      || existing && existing.itinerary_drive_file_id || "",
+    itinerary_drive_file_name: payload.itineraryDriveFileName
+      || existing && existing.itinerary_drive_file_name || "",
+    itinerary_drive_file_url: payload.itineraryDriveFileUrl
+      || existing && existing.itinerary_drive_file_url || "",
+    updated_at: now,
+    updated_by: actor.employeeId,
+  };
+  if (existing) {
+    updateRecord_("TOURS", "customer_code", code, tour);
+  } else {
+    appendRecord_("TOURS", tour);
+  }
+  return tour;
 }
 
 function validateSourceVersion_(draft) {
@@ -255,6 +294,7 @@ function publicationResponse_(publication, replayed) {
   return {
     publicationId: publication.publication_id,
     officialEntityId: publication.official_entity_id,
+    tourId: publication.tour_id,
     publishedRecordVersion: Number(publication.published_record_version),
     publishedAt: publication.published_at,
     replayed,
@@ -301,6 +341,16 @@ function appendRecord_(sheetName, record) {
   const sheet = sheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   sheet.appendRow(headers.map((header) => record[header] === undefined ? "" : record[header]));
+}
+
+function ensureHeaders_(sheetName, requiredHeaders) {
+  const sheet = sheet_(sheetName);
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+  requiredHeaders.forEach((header) => {
+    if (!headers.includes(header)) headers.push(header);
+  });
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 }
 
 function updateRecord_(sheetName, key, value, changes) {
@@ -379,4 +429,3 @@ function digest_(value) {
     .map((byte) => (byte + 256).toString(16).slice(-2))
     .join("");
 }
-
