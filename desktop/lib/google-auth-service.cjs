@@ -1,11 +1,14 @@
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const http = require("node:http");
 
 class GoogleAuthService {
-  constructor({ database, openExternal }) {
+  constructor({ database, openExternal, safeStorage, sessionFile }) {
     this.database = database;
     this.openExternal = openExternal;
-    this.session = null;
+    this.safeStorage = safeStorage;
+    this.sessionFile = sessionFile;
+    this.session = this.loadSession();
   }
 
   status() {
@@ -20,11 +23,15 @@ class GoogleAuthService {
     if (this.session?.accessToken && this.session.expiresAt > Date.now() + 60_000) {
       return this.session.accessToken;
     }
+    if (this.session?.refreshToken) {
+      return this.refreshAccessToken();
+    }
     throw new Error("Google session is not connected or has expired.");
   }
 
   logout() {
     this.session = null;
+    if (fs.existsSync(this.sessionFile)) fs.rmSync(this.sessionFile, { force: true });
     return this.status();
   }
 
@@ -54,8 +61,8 @@ class GoogleAuthService {
       ].join(" "),
       code_challenge: challenge,
       code_challenge_method: "S256",
-      access_type: "online",
-      prompt: "select_account",
+      access_type: "offline",
+      prompt: "consent select_account",
       state,
     }).toString();
 
@@ -66,7 +73,6 @@ class GoogleAuthService {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: settings.googleClientId,
-        client_secret: settings.googleClientSecret || "",
         code,
         code_verifier: verifier,
         grant_type: "authorization_code",
@@ -84,10 +90,52 @@ class GoogleAuthService {
     const profile = profileResponse.ok ? await profileResponse.json() : {};
     this.session = {
       accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token || "",
       email: profile.email || "",
       expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
     };
+    this.saveSession();
     return this.status();
+  }
+
+  async refreshAccessToken() {
+    const settings = this.database.getPublicSettings();
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: settings.googleClientId,
+        refresh_token: this.session.refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+    const tokens = await response.json();
+    if (!response.ok || !tokens.access_token) {
+      this.logout();
+      throw new Error(tokens.error_description || "Google session refresh failed; connect again.");
+    }
+    this.session.accessToken = tokens.access_token;
+    this.session.expiresAt = Date.now() + Number(tokens.expires_in || 3600) * 1000;
+    this.saveSession();
+    return this.session.accessToken;
+  }
+
+  loadSession() {
+    try {
+      if (!this.safeStorage.isEncryptionAvailable() || !fs.existsSync(this.sessionFile)) return null;
+      const encrypted = fs.readFileSync(this.sessionFile);
+      return JSON.parse(this.safeStorage.decryptString(encrypted));
+    } catch {
+      return null;
+    }
+  }
+
+  saveSession() {
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      throw new Error("Windows secure storage is unavailable; Google session was not saved.");
+    }
+    const encrypted = this.safeStorage.encryptString(JSON.stringify(this.session));
+    fs.writeFileSync(this.sessionFile, encrypted);
   }
 
   createCallbackServer(expectedState) {
@@ -107,7 +155,7 @@ class GoogleAuthService {
       const returnedState = url.searchParams.get("state");
       const authCode = url.searchParams.get("code");
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      response.end("<h2>ERIM-PSH connected</h2><p>You can close this browser tab and return to the desktop application.</p>");
+      response.end("<h2>ERIM-PSH authorization received</h2><p>Return to the desktop application while it completes the secure connection.</p>");
       server.close();
       if (error) rejectCode(new Error(`Google sign-in failed: ${error}`));
       else if (returnedState !== expectedState) rejectCode(new Error("Google sign-in state validation failed."));

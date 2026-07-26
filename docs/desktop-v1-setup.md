@@ -46,6 +46,11 @@ The desktop app opens Google's browser login and accepts the callback only on a
 temporary `127.0.0.1` port. The access token is kept in memory and is never
 written into a draft, sync job, repository, or central sheet.
 
+Desktop PKCE does not require the OAuth Client Secret. The refresh token is
+encrypted using Electron safeStorage/Windows encryption and stored separately
+from the operational SQLite database. This keeps the Google connection active
+across application restarts without exposing the token to renderer code.
+
 ## Apps Script
 
 Create a standalone Apps Script project from `apps-script/`, set these Script

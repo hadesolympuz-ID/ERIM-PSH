@@ -1,5 +1,5 @@
 const path = require("node:path");
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require("electron");
 const { LocalDatabase } = require("./lib/database.cjs");
 const { SyncService } = require("./lib/sync-service.cjs");
 const { UpdateService } = require("./lib/update-service.cjs");
@@ -81,7 +81,12 @@ function registerIpc() {
 app.whenReady().then(() => {
   const databasePath = path.join(app.getPath("userData"), "erim-psh-local.sqlite");
   database = new LocalDatabase(databasePath);
-  googleAuth = new GoogleAuthService({ database, openExternal: (url) => shell.openExternal(url) });
+  googleAuth = new GoogleAuthService({
+    database,
+    openExternal: (url) => shell.openExternal(url),
+    safeStorage,
+    sessionFile: path.join(app.getPath("userData"), "google-session.secure"),
+  });
   syncService = new SyncService(database, googleAuth);
   backendHealth = new BackendHealthService({
     database,

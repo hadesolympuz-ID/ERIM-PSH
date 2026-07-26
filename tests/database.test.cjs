@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const { LocalDatabase } = require("../desktop/lib/database.cjs");
 const { SyncService } = require("../desktop/lib/sync-service.cjs");
 const { BackendHealthService } = require("../desktop/lib/backend-health-service.cjs");
+const { GoogleAuthService } = require("../desktop/lib/google-auth-service.cjs");
 
 function withDatabase(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
@@ -123,6 +124,33 @@ test("reports local database and ADMIN_DEV dummy engine health", async () => {
     assert.equal(dummy.status, "HEALTHY");
   } finally {
     database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("persists and reloads Google session through secure storage adapter", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-auth-"));
+  const sessionFile = path.join(directory, "google-session.secure");
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(value, "utf8"),
+    decryptString: (value) => value.toString("utf8"),
+  };
+  try {
+    const first = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile });
+    first.session = {
+      accessToken: "dummy-access",
+      refreshToken: "dummy-refresh",
+      email: "dev@example.com",
+      expiresAt: Date.now() + 60_000,
+    };
+    first.saveSession();
+    const restored = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile });
+    assert.equal(restored.status().connected, true);
+    assert.equal(restored.status().email, "dev@example.com");
+    restored.logout();
+    assert.equal(fs.existsSync(sessionFile), false);
+  } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
