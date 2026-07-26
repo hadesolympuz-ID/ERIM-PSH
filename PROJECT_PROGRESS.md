@@ -156,8 +156,8 @@ User PC
 | Windows installer v1.0 | `DONE` | NSIS installer plus `latest.yml` updater metadata. |
 | Google browser sign-in adapter | `DONE` | Desktop OAuth + PKCE loopback; credentials still require DEV configuration. |
 | GitHub Releases auto-update client | `DONE` | Check, download, restart-and-install flow implemented. |
-| Git commit | `PENDING` | Belum ada commit project foundation. |
-| GitHub push | `PENDING` | Belum ada push project foundation. |
+| Git commit | `DONE` | Desktop v1.0 foundation committed intentionally. |
+| GitHub push | `DONE` | Branch `agent/desktop-v1` pushed; draft PR #1 opened. |
 
 ---
 
@@ -420,7 +420,7 @@ official data.
 | Company roles and employees | `PENDING` | Complete employee master. |
 | Approved status transitions | `PENDING` | Review `STATUS_CATALOG`. |
 | Cross-origin integration | `PENDING` | Run technical spike before module implementation. |
-| GitHub publication | `IN PROGRESS` | Desktop v1.0 branch and draft PR being prepared. |
+| GitHub publication | `DONE` | Branch `agent/desktop-v1` and draft PR #1 available for review. |
 
 ---
 
@@ -472,6 +472,7 @@ Do these in order:
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
 | 2026-07-26 | Windows NSIS installer v1.0 generated and smoke-tested. | `DONE` |
+| 2026-07-26 | Desktop v1.0 pushed and opened as GitHub draft PR #1. | `DONE` |
 | 2026-07-26 | Master project progress document created. | `DONE` |
 
 ---
