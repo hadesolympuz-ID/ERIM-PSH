@@ -484,6 +484,7 @@ Do these in order:
 | 2026-07-26 | Desktop v1.0.3 compiled for Reservation workflow, Gmail trail, Drive itinerary handling, revision control, notification Inbox, and personal KPI screen. | `DONE` |
 | 2026-07-26 | GitHub Release v1.0.3 published with NSIS installer, blockmap, and latest.yml; updater feed verified as latest. | `DONE` |
 | 2026-07-26 | Office Customer Code format implemented: slash preserved for database/Gmail, Sales Code and File Code stored separately, Drive filename normalized safely, and Gmail fallback search added. | `DONE` |
+| 2026-07-26 | GitHub Release v1.0.4 published and installed locally for office Customer Code and Gmail attachment testing. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
