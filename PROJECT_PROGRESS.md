@@ -482,7 +482,7 @@ Do these in order:
 | 2026-07-26 | Desktop v1.0 pushed and opened as GitHub draft PR #1. | `DONE` |
 | 2026-07-26 | Next update scope recorded: Template Booking, Template Report, and Export / Import menu. | `PENDING` |
 | 2026-07-26 | Administrator DEV Console and read-only backend health scheme implemented. | `DONE` |
-| 2026-07-26 | v1.0.1 prepared as the first live GitHub Releases auto-update test. | `IN PROGRESS` |
+| 2026-07-26 | v1.0.1 published with installer, blockmap, and latest.yml as the first live auto-update test. | `DONE` |
 | 2026-07-26 | Master project progress document created. | `DONE` |
 
 ---
