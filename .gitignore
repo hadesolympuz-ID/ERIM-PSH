@@ -1,0 +1,20 @@
+# Environment-specific values
+config/env.js
+apps/pwa/config.js
+
+# Local tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test output
+coverage/
+dist/
+tmp/
+node_modules/
+release/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log

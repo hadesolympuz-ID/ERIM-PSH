@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#123c69" />
+    <meta name="description" content="ERM-PSH operations status and monitoring." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>ERM-PSH Status</title>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Peak Season Holidays</p>
+        <h1>Operations status</h1>
+      </div>
+      <span class="read-only-badge">Mobile read-only</span>
+    </header>
+
+    <main>
+      <section class="search-card" aria-labelledby="search-heading">
+        <p class="eyebrow">Find itinerary</p>
+        <h2 id="search-heading">Search by customer code</h2>
+        <form id="tour-search">
+          <label for="customer-code">Customer code</label>
+          <div class="search-row">
+            <input
+              id="customer-code"
+              name="customerCode"
+              placeholder="Example: DEV-PSH-0001"
+              autocomplete="off"
+              required
+            />
+            <button type="submit">Find</button>
+          </div>
+        </form>
+        <p id="search-message" class="message" role="status"></p>
+      </section>
+
+      <section id="result" class="result-card" hidden aria-live="polite">
+        <div class="result-heading">
+          <div>
+            <p class="eyebrow">Tour overview</p>
+            <h2 id="result-code">—</h2>
+          </div>
+          <span id="result-status" class="status-pill">—</span>
+        </div>
+
+        <dl class="summary-grid">
+          <div><dt>Client</dt><dd id="result-client">—</dd></div>
+          <div><dt>Agent</dt><dd id="result-agent">—</dd></div>
+          <div><dt>Arrival</dt><dd id="result-arrival">—</dd></div>
+          <div><dt>Updated</dt><dd id="result-updated">—</dd></div>
+        </dl>
+
+        <section class="detail-section">
+          <h3>Today / on ground</h3>
+          <dl class="detail-list">
+            <div><dt>Driver</dt><dd id="driver-name">Not assigned</dd></div>
+            <div><dt>Phone</dt><dd id="driver-phone">—</dd></div>
+            <div><dt>Vehicle</dt><dd id="driver-vehicle">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading">
+            <h3>Pending confirmations</h3>
+            <span id="pending-count" class="count-badge">0</span>
+          </div>
+          <ul id="pending-list" class="pending-list"></ul>
+        </section>
+
+        <section class="detail-section">
+          <h3>Quick links</h3>
+          <div id="quick-links" class="link-grid"></div>
+        </section>
+      </section>
+
+      <section class="notice-card">
+        <strong>Monitoring only</strong>
+        <p>Creation, revision, sending, approval, pricing, and payment actions remain available only from the desktop workspace.</p>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <a href="#tour-search" aria-current="page">Search</a>
+      <a href="#result">Today</a>
+      <a href="#result">Pending</a>
+      <a href="#profile">Profile</a>
+    </nav>
+
+    <script src="./config.js" onerror="window.ERIM_CONFIG = window.ERIM_CONFIG || {}"></script>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
+

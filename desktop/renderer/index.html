@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src https:;">
+    <title>ERIM-PSH Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">EP</span>
+          <div>
+            <strong>ERIM-PSH</strong>
+            <small>Desktop Operations</small>
+          </div>
+        </div>
+        <nav id="main-nav">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="workspace" data-module="RESERVATION">Reservation</button>
+          <button class="nav-item" data-view="workspace" data-module="VENDOR">Vendor Booking</button>
+          <button class="nav-item" data-view="workspace" data-module="TRANSPORT">Transport</button>
+          <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
+          <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
+          <button class="nav-item" data-view="workspace" data-module="MANAGER_ADMIN">Manager / Admin</button>
+          <button class="nav-item" data-view="sync">Sync Center <span id="sync-nav-count" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="settings">Settings</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span id="environment-label">DEV</span>
+          <small id="version-label">Version —</small>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="view-eyebrow">Local workspace</p>
+            <h1 id="view-title">Operations dashboard</h1>
+          </div>
+          <div class="topbar-actions">
+            <div id="update-panel" class="update-panel">
+              <span id="update-message">Checking application status…</span>
+              <button id="update-action" class="button ghost small" hidden>Check update</button>
+            </div>
+            <button id="google-auth" class="button ghost small">Connect Google</button>
+            <div class="user-chip">
+              <span id="user-initials">DU</span>
+              <div><strong id="user-name">Development User</strong><small id="user-department">RESERVATION</small></div>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <section id="dashboard-view" class="view active">
+            <div class="hero-card">
+              <div>
+                <p class="eyebrow">Desktop v1.0</p>
+                <h2>Work locally. Publish safely.</h2>
+                <p>Every department prepares isolated local work, then posts a versioned result to the official Google publication chain.</p>
+              </div>
+              <button id="new-draft-hero" class="button primary">New local draft</button>
+            </div>
+
+            <div class="metric-grid">
+              <article><span>Total active</span><strong id="metric-total">0</strong></article>
+              <article><span>Local drafts</span><strong id="metric-drafts">0</strong></article>
+              <article><span>Ready to post</span><strong id="metric-ready">0</strong></article>
+              <article class="attention"><span>Needs attention</span><strong id="metric-attention">0</strong></article>
+              <article class="success"><span>Synced</span><strong id="metric-synced">0</strong></article>
+            </div>
+
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Recent work</p><h2>Local drafts</h2></div>
+                <button id="new-draft" class="button primary">New draft</button>
+              </div>
+              <div class="toolbar">
+                <input id="draft-search" type="search" placeholder="Search Customer Code or title" />
+                <select id="draft-status-filter">
+                  <option value="">All statuses</option>
+                  <option>LOCAL_DRAFT</option>
+                  <option>READY_TO_POST</option>
+                  <option>SYNCED</option>
+                  <option>CANCELED</option>
+                </select>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Department</th><th>Work</th><th>Local status</th><th>Sync</th><th>Updated</th><th></th></tr></thead>
+                  <tbody id="draft-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="workspace-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Department workspace</p>
+                <h2 id="workspace-title">Reservation</h2>
+                <p id="workspace-description"></p>
+              </div>
+              <button id="workspace-new-draft" class="button primary">New department draft</button>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><h2>Department work queue</h2></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Type</th><th>Title</th><th>Status</th><th>Sync</th><th>Updated</th><th></th></tr></thead>
+                  <tbody id="workspace-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="sync-view" class="view">
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Publication safety</p><h2>Sync Center</h2></div>
+                <button id="run-sync" class="button primary">Publish pending</button>
+              </div>
+              <div class="callout">
+                Drafts are published only after validation. Failed jobs retain the same idempotency key, and version conflicts require review.
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Department</th><th>Operation</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Updated</th></tr></thead>
+                  <tbody id="sync-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-view" class="view">
+            <div class="panel settings-panel">
+              <div class="panel-heading"><div><p class="eyebrow">Local profile</p><h2>Desktop settings</h2></div></div>
+              <form id="settings-form" class="form-grid">
+                <label>Employee ID<input name="employeeId" required /></label>
+                <label>Employee name<input name="employeeName" required /></label>
+                <label>Department<select name="department">
+                  <option>RESERVATION</option><option>VENDOR</option><option>TRANSPORT</option>
+                  <option>OPS_ACCOUNTING</option><option>GENERAL_CASHIER</option><option>MANAGER_ADMIN</option>
+                </select></label>
+                <label>Environment<select name="environment"><option>DEV</option><option>STAGING</option><option>PROD</option></select></label>
+                <label class="wide">Apps Script API URL<input name="apiBaseUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" /></label>
+                <label class="wide">Google Desktop OAuth Client ID<input name="googleClientId" placeholder="...apps.googleusercontent.com" /></label>
+                <label class="wide">Google Desktop OAuth Client Secret<input name="googleClientSecret" type="password" autocomplete="off" /></label>
+                <div class="wide form-actions"><button class="button primary" type="submit">Save settings</button></div>
+              </form>
+              <div class="database-location"><strong>Local database</strong><code id="database-path">—</code></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="draft-dialog">
+      <form id="draft-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Temporary local database</p><h2 id="draft-dialog-title">New local draft</h2></div>
+          <button type="button" id="close-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <input type="hidden" name="draftId" />
+        <div class="form-grid">
+          <label>Customer Code<input name="customerCode" placeholder="PSH-0001" required /></label>
+          <label>Department<select name="module">
+            <option>RESERVATION</option><option>VENDOR</option><option>TRANSPORT</option>
+            <option>OPS_ACCOUNTING</option><option>GENERAL_CASHIER</option><option>MANAGER_ADMIN</option>
+          </select></label>
+          <label>Work type<select name="workType">
+            <option>NEW_CONFIRMATION</option><option>ITINERARY_REVISION</option><option>DAYWISE_BOOKING</option>
+            <option>DRIVER_ASSIGNMENT</option><option>CUSTOMER_INVOICE</option><option>PAYMENT_REQUEST</option>
+            <option>GENERAL</option>
+          </select></label>
+          <label>Title<input name="title" required /></label>
+          <label class="wide">Details<textarea name="details" rows="8" placeholder="Write complete working details, notes, references, and expected output." required></textarea></label>
+          <label>Confirmation email URL<input name="confirmationEmailUrl" type="url" placeholder="https://mail.google.com/..." /></label>
+          <label>Quotation email URL<input name="quotationEmailUrl" type="url" placeholder="https://mail.google.com/..." /></label>
+          <label>Booking channel<select name="bookingChannel"><option value="">Not applicable</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option></select></label>
+          <label>External reference<input name="externalReference" placeholder="Booking/thread/portal reference" /></label>
+          <label class="wide">Source publication ID<input name="basePublicationId" placeholder="Optional upstream publication ID" /></label>
+          <label>Source version<input name="baseRecordVersion" type="number" min="1" /></label>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-dialog" class="button ghost">Cancel</button>
+          <button type="submit" class="button primary">Save local draft</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

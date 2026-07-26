@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "ERM-PSH Operations Status",
+  "short_name": "ERM-PSH",
+  "description": "Read-only mobile monitoring for Peak Season Holidays operations.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f8",
+  "theme_color": "#123c69",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
