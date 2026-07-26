@@ -429,17 +429,21 @@ official data.
 
 Do these in order:
 
-1. Review this progress document and confirm the milestone direction.
-2. Review the workbook `STATUS_CATALOG`, `EMPLOYEES`, and `VENDORS`.
-3. Approve or revise the role-alignment policy recommendations.
-4. Review the local-database and publication-chain model.
-5. Update the workbook with approved publication/external-reference tables.
-6. Import the prepared XLSX into Google Drive as native Google Sheets.
-7. Create DEV Google Drive folders and Apps Script project.
-8. Add dummy data only.
-9. Run the end-to-end desktop publish + mobile read technical spike.
-10. Start desktop dashboard shell and Reservation workflow after the spike passes.
-11. Commit and push an intentional reviewed foundation to GitHub.
+### Next desktop dummy update
+
+| Feature | Status | Initial direction |
+| --- | --- | --- |
+| Template Booking | `PENDING` | Reusable booking templates by service/vendor/channel with controlled fields and preview. |
+| Template Report | `PENDING` | Reusable operational report templates with department, period, and status filters. |
+| Export / Import menu | `PENDING` | Controlled XLSX/CSV export and validated import with preview, error report, duplicate protection, and audit. |
+
+### Following actions
+
+1. Define the required Booking Template types and fields.
+2. Define the required Report Template layouts and recipients.
+3. Approve which tables are allowed for import and export per department.
+4. Implement preview and validation before any imported data is accepted.
+5. Continue detailed Reservation and Vendor Booking workflow modeling.
 
 ---
 
@@ -474,6 +478,7 @@ Do these in order:
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
 | 2026-07-26 | Windows NSIS installer v1.0 generated and smoke-tested. | `DONE` |
 | 2026-07-26 | Desktop v1.0 pushed and opened as GitHub draft PR #1. | `DONE` |
+| 2026-07-26 | Next update scope recorded: Template Booking, Template Report, and Export / Import menu. | `PENDING` |
 | 2026-07-26 | Master project progress document created. | `DONE` |
 
 ---
