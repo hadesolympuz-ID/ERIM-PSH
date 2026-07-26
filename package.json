@@ -1,6 +1,6 @@
 {
   "name": "erim-psh-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "ERM-PSH desktop operations workspace",
   "main": "desktop/main.cjs",
