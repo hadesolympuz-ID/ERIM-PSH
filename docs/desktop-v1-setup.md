@@ -22,6 +22,20 @@ is available.
 `STAGING` and `PROD` never use the dummy bypass. They require Google login,
 Apps Script configuration, and an approved employee record.
 
+## Administrator DEV Console
+
+Select `ADMIN_DEV` to keep local dummy publication while enabling optional
+Google connectivity and backend diagnostics. Configure the Desktop OAuth
+client, central Spreadsheet ID, optional Drive DEV Folder ID, and Apps Script
+URL. Then connect Google and run **Admin DEV Console → Run all checks**.
+
+The console reports explicit `HEALTHY`, `NOT_CONFIGURED`, `UNAVAILABLE`, or
+`FAILED` states. Health checks are read-only. Gmail uses profile metadata only,
+Drive reads account/folder metadata, and Sheets reads spreadsheet metadata.
+
+The Gmail and Drive connections installed in Codex are separate development
+connectors; their tokens are never copied into ERIM-PSH.
+
 ## Google OAuth
 
 Create a Google Cloud OAuth client with application type **Desktop app**. Put

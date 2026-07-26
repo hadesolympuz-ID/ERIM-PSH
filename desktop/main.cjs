@@ -4,12 +4,14 @@ const { LocalDatabase } = require("./lib/database.cjs");
 const { SyncService } = require("./lib/sync-service.cjs");
 const { UpdateService } = require("./lib/update-service.cjs");
 const { GoogleAuthService } = require("./lib/google-auth-service.cjs");
+const { BackendHealthService } = require("./lib/backend-health-service.cjs");
 
 let mainWindow;
 let database;
 let syncService;
 let updateService;
 let googleAuth;
+let backendHealth;
 
 const isDev = !app.isPackaged;
 
@@ -59,6 +61,7 @@ function registerIpc() {
   ipcMain.handle("auth:status", () => googleAuth.status());
   ipcMain.handle("auth:login", () => googleAuth.login());
   ipcMain.handle("auth:logout", () => googleAuth.logout());
+  ipcMain.handle("health:check-all", () => backendHealth.checkAll());
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
@@ -80,6 +83,12 @@ app.whenReady().then(() => {
   database = new LocalDatabase(databasePath);
   googleAuth = new GoogleAuthService({ database, openExternal: (url) => shell.openExternal(url) });
   syncService = new SyncService(database, googleAuth);
+  backendHealth = new BackendHealthService({
+    database,
+    authService: googleAuth,
+    appVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+  });
   updateService = new UpdateService({
     isPackaged: app.isPackaged,
     currentVersion: app.getVersion(),

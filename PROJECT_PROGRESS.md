@@ -156,6 +156,8 @@ User PC
 | Windows installer v1.0 | `DONE` | NSIS installer plus `latest.yml` updater metadata. |
 | Google browser sign-in adapter | `DONE` | Desktop OAuth + PKCE loopback; credentials still require DEV configuration. |
 | DEV dummy authentication bypass | `DONE` | Google login removed from DEV UI; local publish simulation is fully operable. |
+| Administrator DEV Console | `DONE` | Health checks for SQLite, dummy engine, Google account/Gmail/Drive/Sheets, Apps Script, GitHub, and updater. |
+| ADMIN_DEV environment | `DONE` | Dummy publishing remains enabled while optional personal Google DEV connectivity can be tested. |
 | GitHub Releases auto-update client | `DONE` | Check, download, restart-and-install flow implemented. |
 | Git commit | `DONE` | Desktop v1.0 foundation committed intentionally. |
 | GitHub push | `DONE` | Branch `agent/desktop-v1` pushed; draft PR #1 opened. |
@@ -479,6 +481,7 @@ Do these in order:
 | 2026-07-26 | Windows NSIS installer v1.0 generated and smoke-tested. | `DONE` |
 | 2026-07-26 | Desktop v1.0 pushed and opened as GitHub draft PR #1. | `DONE` |
 | 2026-07-26 | Next update scope recorded: Template Booking, Template Report, and Export / Import menu. | `PENDING` |
+| 2026-07-26 | Administrator DEV Console and read-only backend health scheme implemented. | `DONE` |
 | 2026-07-26 | Master project progress document created. | `DONE` |
 
 ---

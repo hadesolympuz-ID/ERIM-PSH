@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { LocalDatabase } = require("../desktop/lib/database.cjs");
 const { SyncService } = require("../desktop/lib/sync-service.cjs");
+const { BackendHealthService } = require("../desktop/lib/backend-health-service.cjs");
 
 function withDatabase(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
@@ -99,6 +100,27 @@ test("publishes end-to-end in DEV dummy mode without Google auth", async () => {
     assert.equal(published.local_status, "SYNCED");
     assert.match(published.official_entity_id, /^DEV-/);
     assert.equal(database.listSyncQueue()[0].status, "SYNCED");
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports local database and ADMIN_DEV dummy engine health", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  try {
+    database.saveSettings({ environment: "ADMIN_DEV" });
+    const service = new BackendHealthService({
+      database,
+      authService: { status: () => ({ connected: false }) },
+      appVersion: "1.0.0",
+      isPackaged: false,
+    });
+    const local = await service.localDatabase();
+    const dummy = await service.dummyPublisher(database.getPublicSettings());
+    assert.equal(local.status, "HEALTHY");
+    assert.equal(dummy.status, "HEALTHY");
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });

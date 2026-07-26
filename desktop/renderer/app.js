@@ -6,6 +6,7 @@ const state = {
   currentModule: null,
   updateStatus: "DEV_MODE",
   auth: { connected: false, email: "" },
+  health: null,
 };
 
 const moduleDescriptions = {
@@ -37,9 +38,9 @@ function formatDate(value) {
 
 function statusClass(status) {
   const lower = String(status || "").toLowerCase();
-  if (lower.includes("sync")) return "synced";
+  if (lower.includes("sync") || lower.includes("healthy")) return "synced";
   if (lower.includes("fail")) return "failed";
-  if (lower.includes("conflict")) return "conflict";
+  if (lower.includes("conflict") || lower.includes("unavailable") || lower.includes("not_configured")) return "conflict";
   return "";
 }
 
@@ -68,14 +69,15 @@ async function refresh() {
 function renderChrome() {
   const { version, settings } = state.bootstrap;
   $("#version-label").textContent = `Version ${version}`;
-  const dummyMode = settings.environment === "DEV";
-  $("#environment-label").textContent = dummyMode ? "DEV DUMMY" : settings.environment;
+  const dummyMode = ["DEV", "ADMIN_DEV"].includes(settings.environment);
+  const adminMode = settings.environment === "ADMIN_DEV";
+  $("#environment-label").textContent = settings.environment.replace("_", " ");
   $("#user-name").textContent = settings.employeeName;
   $("#user-department").textContent = settings.department;
   $("#user-initials").textContent = settings.employeeName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   $("#sync-nav-count").textContent = state.syncQueue.filter((job) => !["SYNCED", "CANCELED"].includes(job.status)).length;
-  $("#google-auth").hidden = dummyMode;
-  $("#google-settings").hidden = dummyMode;
+  $("#google-auth").hidden = dummyMode && !adminMode;
+  $("#google-settings").hidden = dummyMode && !adminMode;
   $("#google-auth").textContent = state.auth.connected ? `Google: ${state.auth.email || "Connected"}` : "Connect Google";
 }
 
@@ -144,6 +146,24 @@ function renderSettings() {
   $("#database-path").textContent = databasePath;
 }
 
+function renderHealth() {
+  if (!state.health) return;
+  $("#health-healthy").textContent = state.health.summary.healthy;
+  $("#health-attention").textContent = state.health.summary.attention;
+  $("#health-failed").textContent = state.health.summary.failed;
+  $("#health-checked").textContent = formatDate(state.health.checkedAt);
+  $("#health-grid").innerHTML = state.health.checks.map((check) => `
+    <article class="health-card">
+      <div class="health-heading">
+        <strong>${escapeHtml(check.name)}</strong>
+        ${statusPill(check.status)}
+      </div>
+      <p>${escapeHtml(check.detail)}</p>
+      <small>${Number(check.latencyMs || 0)} ms</small>
+    </article>
+  `).join("");
+}
+
 function draftActions(draft) {
   const buttons = [`<button data-action="edit" data-id="${draft.draft_id}">Open</button>`];
   if (draft.local_status === "LOCAL_DRAFT") buttons.push(`<button data-action="ready" data-id="${draft.draft_id}">Mark ready</button>`);
@@ -160,6 +180,7 @@ function showView(view, module = null) {
     dashboard: ["Local workspace", "Operations dashboard"],
     workspace: ["Department workspace", module?.replaceAll("_", " ") || "Workspace"],
     sync: ["Publication safety", "Sync Center"],
+    admin: ["Administrator diagnostics", "Backend connection console"],
     settings: ["Application configuration", "Desktop settings"],
   };
   $("#view-eyebrow").textContent = titles[view][0];
@@ -271,6 +292,22 @@ function bindEvents() {
     const result = await window.erim.sync.run();
     await refresh();
     toast(result.message || (result.ok ? "Publication queue completed." : "Sync requires attention."), !result.ok);
+  });
+
+  $("#run-health-check").addEventListener("click", async () => {
+    const button = $("#run-health-check");
+    button.disabled = true;
+    button.textContent = "Checking...";
+    try {
+      state.health = await window.erim.health.checkAll();
+      renderHealth();
+      toast("Backend health checks completed.");
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run all checks";
+    }
   });
 
   $("#google-auth").addEventListener("click", async () => {

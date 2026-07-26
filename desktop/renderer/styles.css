@@ -133,3 +133,13 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: var(--red); }
 
+.health-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+.health-card { min-height: 132px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.health-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.health-card p { min-height: 42px; color: var(--muted); line-height: 1.45; }
+.health-card small { color: var(--muted); }
+.empty-health { grid-column: 1 / -1; color: var(--muted); }
+
+@media (max-width: 1180px) {
+  .health-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}

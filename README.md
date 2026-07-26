@@ -22,6 +22,11 @@ In `DEV`, the complete publication flow runs in local dummy mode. Google login,
 Apps Script, and Google Workspace credentials are not required. Switching to
 `STAGING` or `PROD` activates the authenticated central publication path.
 
+`ADMIN_DEV` keeps dummy publication enabled and adds the Administrator DEV
+Console. It can run read-only diagnostics against local SQLite, Gmail, Drive,
+Sheets, Apps Script, GitHub, and the packaged updater when the relevant
+development credentials and IDs are configured.
+
 Run locally:
 
 ```powershell

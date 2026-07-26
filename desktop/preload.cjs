@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld("erim", {
     login: () => ipcRenderer.invoke("auth:login"),
     logout: () => ipcRenderer.invoke("auth:logout"),
   },
+  health: {
+    checkAll: () => ipcRenderer.invoke("health:check-all"),
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

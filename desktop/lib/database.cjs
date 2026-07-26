@@ -125,6 +125,8 @@ class LocalDatabase {
       employee_name: "Development User",
       department: "RESERVATION",
       api_base_url: "",
+      spreadsheet_id: "",
+      drive_folder_id: "",
       environment: "DEV",
     };
     const insert = this.db.prepare(`
@@ -166,6 +168,8 @@ class LocalDatabase {
       apiBaseUrl: values.api_base_url,
       googleClientId: values.google_client_id,
       googleClientSecret: values.google_client_secret,
+      spreadsheetId: values.spreadsheet_id,
+      driveFolderId: values.drive_folder_id,
       environment: values.environment,
     };
   }
@@ -178,6 +182,8 @@ class LocalDatabase {
       apiBaseUrl: "api_base_url",
       googleClientId: "google_client_id",
       googleClientSecret: "google_client_secret",
+      spreadsheetId: "spreadsheet_id",
+      driveFolderId: "drive_folder_id",
       environment: "environment",
     };
     if (values.department && !MODULES.includes(values.department)) {

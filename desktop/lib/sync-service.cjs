@@ -10,7 +10,7 @@ class SyncService {
 
   async runPending() {
     const settings = this.database.getPublicSettings();
-    if (settings.environment === "DEV") {
+    if (["DEV", "ADMIN_DEV"].includes(settings.environment)) {
       return this.runDummyPending(settings);
     }
     if (!settings.apiBaseUrl) {
