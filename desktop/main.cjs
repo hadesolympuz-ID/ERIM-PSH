@@ -86,6 +86,7 @@ app.whenReady().then(() => {
     openExternal: (url) => shell.openExternal(url),
     safeStorage,
     sessionFile: path.join(app.getPath("userData"), "google-session.secure"),
+    diagnosticFile: path.join(app.getPath("userData"), "google-auth-diagnostic.log"),
   });
   syncService = new SyncService(database, googleAuth);
   backendHealth = new BackendHealthService({

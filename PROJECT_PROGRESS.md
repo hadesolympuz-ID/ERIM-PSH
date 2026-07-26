@@ -484,6 +484,7 @@ Do these in order:
 | 2026-07-26 | Administrator DEV Console and read-only backend health scheme implemented. | `DONE` |
 | 2026-07-26 | v1.0.1 published with installer, blockmap, and latest.yml as the first live auto-update test. | `DONE` |
 | 2026-07-26 | Live updater verified from installed v1.0.0 to v1.0.1: detection, download, restart, and installation succeeded. | `DONE` |
+| 2026-07-26 | v1.0.2 prepared with OAuth token-exchange fallback and sanitized diagnostics. | `IN PROGRESS` |
 | 2026-07-26 | Master project progress document created. | `DONE` |
 
 ---

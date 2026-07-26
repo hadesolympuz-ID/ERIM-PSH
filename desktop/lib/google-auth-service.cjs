@@ -3,11 +3,13 @@ const fs = require("node:fs");
 const http = require("node:http");
 
 class GoogleAuthService {
-  constructor({ database, openExternal, safeStorage, sessionFile }) {
+  constructor({ database, openExternal, safeStorage, sessionFile, diagnosticFile }) {
     this.database = database;
     this.openExternal = openExternal;
     this.safeStorage = safeStorage;
     this.sessionFile = sessionFile;
+    this.diagnosticFile = diagnosticFile;
+    this.persistenceWarning = "";
     this.session = this.loadSession();
   }
 
@@ -16,6 +18,8 @@ class GoogleAuthService {
       connected: Boolean(this.session?.accessToken && this.session.expiresAt > Date.now()),
       email: this.session?.email || "",
       expiresAt: this.session?.expiresAt || null,
+      persistent: Boolean(this.session && fs.existsSync(this.sessionFile)),
+      warning: this.persistenceWarning,
     };
   }
 
@@ -68,20 +72,25 @@ class GoogleAuthService {
 
     await this.openExternal(authUrl.toString());
     const code = await callback.code;
+    this.diagnostic("CALLBACK_RECEIVED", "Authorization code received; starting token exchange.");
+    const tokenParameters = {
+      client_id: settings.googleClientId,
+      code,
+      code_verifier: verifier,
+      grant_type: "authorization_code",
+      redirect_uri: redirectUri,
+    };
+    if (settings.googleClientSecret) tokenParameters.client_secret = settings.googleClientSecret.trim();
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: settings.googleClientId,
-        code,
-        code_verifier: verifier,
-        grant_type: "authorization_code",
-        redirect_uri: redirectUri,
-      }),
+      body: new URLSearchParams(tokenParameters),
     });
     const tokens = await tokenResponse.json();
     if (!tokenResponse.ok || !tokens.access_token) {
-      throw new Error(tokens.error_description || "Google sign-in token exchange failed.");
+      const message = `${tokens.error || "TOKEN_EXCHANGE_FAILED"}: ${tokens.error_description || "Google sign-in token exchange failed."}`;
+      this.diagnostic("TOKEN_EXCHANGE_FAILED", message);
+      throw new Error(message);
     }
 
     const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
@@ -94,7 +103,8 @@ class GoogleAuthService {
       email: profile.email || "",
       expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
     };
-    this.saveSession();
+    const persistent = this.saveSession();
+    this.diagnostic("CONNECTED", persistent ? "Google session encrypted and saved." : "Connected for current session only.");
     return this.status();
   }
 
@@ -132,10 +142,28 @@ class GoogleAuthService {
 
   saveSession() {
     if (!this.safeStorage.isEncryptionAvailable()) {
-      throw new Error("Windows secure storage is unavailable; Google session was not saved.");
+      this.persistenceWarning = "Windows secure storage is unavailable; connection lasts for this application session.";
+      this.diagnostic("SECURE_STORAGE_UNAVAILABLE", this.persistenceWarning);
+      return false;
     }
-    const encrypted = this.safeStorage.encryptString(JSON.stringify(this.session));
-    fs.writeFileSync(this.sessionFile, encrypted);
+    try {
+      const encrypted = this.safeStorage.encryptString(JSON.stringify(this.session));
+      fs.writeFileSync(this.sessionFile, encrypted);
+      this.persistenceWarning = "";
+      return true;
+    } catch (error) {
+      this.persistenceWarning = `Google connected, but secure session persistence failed: ${error.message}`;
+      this.diagnostic("SECURE_STORAGE_FAILED", this.persistenceWarning);
+      return false;
+    }
+  }
+
+  diagnostic(stage, message) {
+    if (!this.diagnosticFile) return;
+    const safeMessage = String(message)
+      .replace(/4\/[A-Za-z0-9._-]+/g, "[REDACTED_CODE]")
+      .replace(/ya29\.[A-Za-z0-9._-]+/g, "[REDACTED_TOKEN]");
+    fs.appendFileSync(this.diagnosticFile, `${new Date().toISOString()} ${stage} ${safeMessage}\n`);
   }
 
   createCallbackServer(expectedState) {

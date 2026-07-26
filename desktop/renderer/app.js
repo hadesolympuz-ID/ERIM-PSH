@@ -315,7 +315,9 @@ function bindEvents() {
       if (state.auth.connected) await window.erim.auth.logout();
       else await window.erim.auth.login();
       await refresh();
-      toast(state.auth.connected ? "Google account connected." : "Google account disconnected.");
+      toast(state.auth.connected
+        ? `Google account connected.${state.auth.warning ? ` ${state.auth.warning}` : ""}`
+        : "Google account disconnected.");
     } catch (error) {
       toast(error.message, true);
     }

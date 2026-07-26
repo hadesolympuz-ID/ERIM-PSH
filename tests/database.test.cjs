@@ -137,7 +137,8 @@ test("persists and reloads Google session through secure storage adapter", () =>
     decryptString: (value) => value.toString("utf8"),
   };
   try {
-    const first = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile });
+    const diagnosticFile = path.join(directory, "auth.log");
+    const first = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile, diagnosticFile });
     first.session = {
       accessToken: "dummy-access",
       refreshToken: "dummy-refresh",
@@ -145,7 +146,7 @@ test("persists and reloads Google session through secure storage adapter", () =>
       expiresAt: Date.now() + 60_000,
     };
     first.saveSession();
-    const restored = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile });
+    const restored = new GoogleAuthService({ database: null, openExternal: null, safeStorage, sessionFile, diagnosticFile });
     assert.equal(restored.status().connected, true);
     assert.equal(restored.status().email, "dev@example.com");
     restored.logout();
