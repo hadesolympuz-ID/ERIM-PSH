@@ -14,6 +14,7 @@ dist/
 tmp/
 node_modules/
 release/
+installer/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
