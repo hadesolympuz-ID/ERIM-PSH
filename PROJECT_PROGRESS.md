@@ -641,6 +641,7 @@ implemented yet. The focused build contract and phase gates are maintained in
 | 2026-07-27 | Apps Script Version 7 deployed on the existing `/exec` URL. Version 6 Vendor intake controls remain, while Vendor New Itinerary now persists validated Adult/Child/Infant values to existing `TOURS.pax_adult`, `pax_child`, and `pax_infant` fields and records them in the audit payload. | `DONE` |
 | 2026-07-27 | Workbook foundation aligned for Vendor Sprint 1: `TOUR_HOTEL_STAYS` added, TOURS flight fields and SERVICES suggested-vendor fields appended, SHEET_INDEX/DATA_DICTIONARY updated, formula scan clean, and visual table preview verified. | `DONE` |
 | 2026-07-27 | Vendor Sprint 1 automated suite passes 17/17 tests; isolated-profile Electron startup smoke test completed without application errors. Live authenticated Post/readback dummy UAT remains before v1.0.8 installer release. | `IN PROGRESS` |
+| 2026-07-27 | GitHub Release v1.0.8 published from commit `4de1488` with NSIS installer, blockmap, and `latest.yml`. Apps Script Version 7 and the desktop release now contain the Vendor Inbox/New Itinerary baseline plus Adult/Child/Infant persistence. Live authenticated Post/readback dummy UAT remains. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
