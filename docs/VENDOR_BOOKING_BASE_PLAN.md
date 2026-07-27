@@ -4,7 +4,7 @@ Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
 Target sequence: v1.0.8-v1.1.x
 
-## Supplier Master foundation — v1.1.0-v1.1.1
+## Supplier Master foundation — v1.1.0-v1.1.2
 
 The Manager/Admin `Supplier Master` submenu is the shared foundation for all
 Vendor Booking rate and booking-address selection. It supports data-driven
@@ -21,6 +21,13 @@ master contract. The operating procedure is recorded in
 The v1.1.1 contact-field hotfix reorganizes repeatable contacts and recipients
 into responsive cards and preserves international `+` phone/WhatsApp values as
 literal text across the desktop, Apps Script, and Google Sheet boundary.
+
+The v1.1.2 workflow stages routine Type, Supplier, Product, Contract, and archive
+changes in local SQLite. Managers can enter a large catalogue without waiting
+for Google after every record, review the pending queue, then publish selected
+changes in one dependency-ordered batch. Per-entity audit remains detailed,
+while users receive one summary notification per successful batch. Initialize /
+migrate remains on the same page inside protected System Maintenance.
 
 ## 1. Purpose
 

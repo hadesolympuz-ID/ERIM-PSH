@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const root = path.resolve(__dirname, "..");
 const renderer = fs.readFileSync(path.join(root, "desktop", "renderer", "app.js"), "utf8");
 const styles = fs.readFileSync(path.join(root, "desktop", "renderer", "styles.css"), "utf8");
+const html = fs.readFileSync(path.join(root, "desktop", "renderer", "index.html"), "utf8");
 const appsScript = fs.readFileSync(path.join(root, "apps-script", "Code.gs"), "utf8");
 
 function rendererPhoneHelpers() {
@@ -52,4 +53,15 @@ test("Apps Script stores formula-like text safely and repairs existing phone for
   assert.match(appsScript, /SUPPLIER_CONTACTS: \["phone", "whatsapp"\]/);
   assert.match(appsScript, /safeSheetValue_\(fieldValue\)/);
   assert.match(appsScript, /normalizeSupplierPhone_\(row\.whatsapp, "WhatsApp"\)/);
+});
+
+test("Supplier Master exposes local staging, batch publish, and protected maintenance controls", () => {
+  assert.match(html, /id="review-supplier-drafts"/);
+  assert.match(html, /id="publish-supplier-drafts"/);
+  assert.match(html, /Save supplier locally/);
+  assert.match(html, /System Maintenance/);
+  assert.match(html, /Type <strong>INITIALIZE<\/strong> to unlock/);
+  assert.match(renderer, /publishSupplierDrafts/);
+  assert.match(appsScript, /supplier\.master\.batch\.publish/);
+  assert.match(appsScript, /assertSupplierMasterBaseVersion_/);
 });

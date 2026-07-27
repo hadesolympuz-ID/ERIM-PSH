@@ -34,7 +34,6 @@ function doPost(event) {
 
     if (route === "supplier.master.list") {
       requireDesktop_(request, actor);
-      ensureSupplierMasterSchema_();
       return json_({ ok: true, data: supplierMasterCatalog_() });
     }
 
@@ -42,6 +41,12 @@ function doPost(event) {
       requireDesktop_(request, actor);
       requireSupplierManager_(actor);
       return json_({ ok: true, data: initializeSupplierMaster_(request, actor) });
+    }
+
+    if (route === "supplier.master.batch.publish") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: publishSupplierMasterBatch_(request, actor) });
     }
 
     if (route === "supplier.type.save") {
@@ -473,8 +478,9 @@ function seedSupplierMasterFromLegacy_(actor) {
   appendRecords_("CONTRACT_RATES", rateRows);
 }
 
-function saveSupplierType_(request, actor) {
-  ensureSupplierMasterSchema_();
+function saveSupplierType_(request, actor, options) {
+  options = options || {};
+  if (!options.schemaReady) ensureSupplierMasterSchema_();
   const input = request.supplierType || {};
   const code = String(input.typeCode || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
   const name = String(input.typeName || "").trim();
@@ -494,12 +500,13 @@ function saveSupplierType_(request, actor) {
     status: "ACTIVE",
   }, actor, now);
   recordAndBroadcastMasterChange_("SUPPLIER_TYPE_CHANGED", "SUPPLIER_TYPE", id, "", code,
-    `${before ? "Updated" : "Added"} Supplier Type ${name}.`, before, input, actor, now);
-  return supplierMasterCatalog_();
+    `${before ? "Updated" : "Added"} Supplier Type ${name}.`, before, input, actor, now, options.broadcast !== false);
+  return options.returnCatalog === false ? { entityId: id } : supplierMasterCatalog_();
 }
 
-function saveSupplier_(request, actor) {
-  ensureSupplierMasterSchema_();
+function saveSupplier_(request, actor, options) {
+  options = options || {};
+  if (!options.schemaReady) ensureSupplierMasterSchema_();
   const input = request.supplier || {};
   const name = String(input.supplierName || "").trim();
   const typeCode = String(input.typeCode || "").trim().toUpperCase();
@@ -580,12 +587,13 @@ function saveSupplier_(request, actor) {
   const changeCount = (input.contacts || []).length + (input.recipients || []).length + 1;
   recordAndBroadcastMasterChange_("SUPPLIER_CHANGED", "SUPPLIER", id, id, typeCode,
     `${before ? "Updated" : "Added"} supplier ${name}; ${changeCount} contact/SOP records synchronized.`,
-    before, input, actor, now);
-  return supplierMasterCatalog_();
+    before, input, actor, now, options.broadcast !== false);
+  return options.returnCatalog === false ? { entityId: id } : supplierMasterCatalog_();
 }
 
-function saveSupplierProduct_(request, actor) {
-  ensureSupplierMasterSchema_();
+function saveSupplierProduct_(request, actor, options) {
+  options = options || {};
+  if (!options.schemaReady) ensureSupplierMasterSchema_();
   const input = request.product || {};
   const supplier = findRecord_("SUPPLIERS", "supplier_id", input.supplierId);
   if (!supplier || !String(input.productName || "").trim()) {
@@ -617,12 +625,13 @@ function saveSupplierProduct_(request, actor) {
   recordAndBroadcastMasterChange_("SUPPLIER_PRODUCT_CHANGED", "SUPPLIER_PRODUCT", id,
     supplier.supplier_id, supplier.type_code,
     `${before ? "Updated" : "Added"} ${supplier.supplier_name} product ${input.productName}.`,
-    before, input, actor, now);
-  return supplierMasterCatalog_();
+    before, input, actor, now, options.broadcast !== false);
+  return options.returnCatalog === false ? { entityId: id } : supplierMasterCatalog_();
 }
 
-function saveSupplierContract_(request, actor) {
-  ensureSupplierMasterSchema_();
+function saveSupplierContract_(request, actor, options) {
+  options = options || {};
+  if (!options.schemaReady) ensureSupplierMasterSchema_();
   const input = request.contract || {};
   const supplier = findRecord_("SUPPLIERS", "supplier_id", input.supplierId);
   const validFrom = normalizeDateText_(input.validFrom);
@@ -702,12 +711,13 @@ function saveSupplierContract_(request, actor) {
   recordAndBroadcastMasterChange_("SUPPLIER_CONTRACT_CHANGED", "SUPPLIER_CONTRACT", id,
     supplier.supplier_id, supplier.type_code,
     `${before ? "Updated" : "Added"} contract ${input.contractNumber} for ${supplier.supplier_name}; ${rates.length} rate components active.`,
-    before, input, actor, now);
-  return supplierMasterCatalog_();
+    before, input, actor, now, options.broadcast !== false);
+  return options.returnCatalog === false ? { entityId: id } : supplierMasterCatalog_();
 }
 
-function archiveSupplierEntity_(request, actor) {
-  ensureSupplierMasterSchema_();
+function archiveSupplierEntity_(request, actor, options) {
+  options = options || {};
+  if (!options.schemaReady) ensureSupplierMasterSchema_();
   const kind = String(request.entityKind || "").toUpperCase();
   const config = {
     SUPPLIER_TYPE: ["SUPPLIER_TYPES", "supplier_type_id"],
@@ -738,8 +748,90 @@ function archiveSupplierEntity_(request, actor) {
   const supplierId = kind === "SUPPLIER" ? request.entityId : before.supplier_id || "";
   recordAndBroadcastMasterChange_("SUPPLIER_MASTER_ARCHIVED", kind, request.entityId,
     supplierId, before.type_code || "", `Archived ${kind.replaceAll("_", " ")}. Reason: ${request.reason || "Not provided"}.`,
-    before, { status: "ARCHIVED", reason: request.reason || "" }, actor, now);
-  return supplierMasterCatalog_();
+    before, { status: "ARCHIVED", reason: request.reason || "" }, actor, now, options.broadcast !== false);
+  return options.returnCatalog === false ? { entityId: request.entityId } : supplierMasterCatalog_();
+}
+
+function publishSupplierMasterBatch_(request, actor) {
+  const changes = Array.isArray(request.changes) ? request.changes : [];
+  if (!request.requestId || !changes.length) {
+    throw apiError_("VALIDATION_ERROR", "Batch request ID and at least one change are required.");
+  }
+  if (changes.length > 250) {
+    throw apiError_("BATCH_TOO_LARGE", "Publish at most 250 Supplier Master changes per batch.");
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    ensureSupplierMasterSchema_();
+    const order = { TYPE: 1, SUPPLIER: 2, PRODUCT: 3, CONTRACT: 4, ARCHIVE: 5 };
+    const sorted = changes.slice().sort((a, b) =>
+      (order[String(a.entityKind).toUpperCase()] || 9)
+      - (order[String(b.entityKind).toUpperCase()] || 9)
+    );
+    const results = [];
+    sorted.forEach((change) => {
+      const kind = String(change.entityKind || "").toUpperCase();
+      const payload = change.payload || {};
+      try {
+        assertSupplierMasterBaseVersion_(kind, change.entityId, change.baseRecordVersion);
+        const options = { schemaReady: true, returnCatalog: false, broadcast: false };
+        if (kind === "TYPE") saveSupplierType_({ supplierType: payload }, actor, options);
+        else if (kind === "SUPPLIER") saveSupplier_({ supplier: payload }, actor, options);
+        else if (kind === "PRODUCT") saveSupplierProduct_({ product: payload }, actor, options);
+        else if (kind === "CONTRACT") saveSupplierContract_({ contract: payload }, actor, options);
+        else if (kind === "ARCHIVE") archiveSupplierEntity_(payload, actor, options);
+        else throw apiError_("VALIDATION_ERROR", `Unsupported Supplier Master entity kind: ${kind}.`);
+        results.push({ draftId: change.draftId, entityId: change.entityId, status: "SYNCED" });
+      } catch (error) {
+        results.push({
+          draftId: change.draftId,
+          entityId: change.entityId,
+          status: error.code === "VERSION_CONFLICT" ? "CONFLICT" : "FAILED",
+          errorCode: error.code || "PUBLISH_FAILED",
+          message: error.publicMessage || error.message,
+        });
+      }
+    });
+    const synced = results.filter((row) => row.status === "SYNCED").length;
+    const conflicts = results.filter((row) => row.status === "CONFLICT").length;
+    const failed = results.length - synced - conflicts;
+    if (synced) {
+      const now = new Date().toISOString();
+      broadcastSupplierMasterNotification_({
+        type: "SUPPLIER_MASTER_BATCH_PUBLISHED",
+        title: "Supplier Master updated",
+        message: `${actor.fullName || actor.employeeId} published ${synced} Supplier Master change(s).`,
+        actionUrl: "supplier-master",
+      }, actor, now);
+    }
+    return {
+      results,
+      summary: { total: results.length, synced, failed, conflicts },
+      catalog: supplierMasterCatalog_(),
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function assertSupplierMasterBaseVersion_(kind, entityId, baseRecordVersion) {
+  if (baseRecordVersion === null || baseRecordVersion === undefined || baseRecordVersion === "") return;
+  const config = {
+    TYPE: ["SUPPLIER_TYPES", "supplier_type_id"],
+    SUPPLIER: ["SUPPLIERS", "supplier_id"],
+    PRODUCT: ["SUPPLIER_PRODUCTS", "product_id"],
+    CONTRACT: ["SUPPLIER_CONTRACTS", "contract_id"],
+  }[kind];
+  if (!config) return;
+  const current = findRecord_(config[0], config[1], entityId);
+  if (current && Number(current.record_version || 0) !== Number(baseRecordVersion)) {
+    throw apiError_(
+      "VERSION_CONFLICT",
+      "This record changed in Google after the local edit was started. Refresh and review before publishing.",
+      { currentRecordVersion: Number(current.record_version || 0) },
+    );
+  }
 }
 
 function saveVendorIntake_(request, actor) {
@@ -1447,7 +1539,7 @@ function replaceSupplierChildren_(sheetName, key, parentKey, parentId, rows, map
 
 function recordAndBroadcastMasterChange_(
   action, entityType, entityId, supplierId, typeCode, summary,
-  before, after, actor, now
+  before, after, actor, now, shouldBroadcast
 ) {
   const eventId = uuid_("SMEV");
   appendRecord_("AUDIT_LOG", {
@@ -1476,12 +1568,14 @@ function recordAndBroadcastMasterChange_(
     typeCode,
     summary,
   }, actor, now);
-  broadcastSupplierMasterNotification_({
-    type: action,
-    title: entityType.replaceAll("_", " "),
-    message: `${actor.fullName || actor.employeeId}: ${summary}`,
-    actionUrl: `supplier-master:${typeCode || ""}:${supplierId || ""}`,
-  }, actor, now);
+  if (shouldBroadcast !== false) {
+    broadcastSupplierMasterNotification_({
+      type: action,
+      title: entityType.replaceAll("_", " "),
+      message: `${actor.fullName || actor.employeeId}: ${summary}`,
+      actionUrl: `supplier-master:${typeCode || ""}:${supplierId || ""}`,
+    }, actor, now);
+  }
 }
 
 function recordSupplierMasterEvent_(details, actor, now) {
@@ -1711,12 +1805,14 @@ function updateRecord_(sheetName, key, value, changes) {
   if (keyIndex < 0) throw apiError_("SCHEMA_INVALID", `${sheetName}.${key} is missing.`);
   const rowIndex = values.findIndex((row, index) => index > 0 && String(row[keyIndex]) === String(value));
   if (rowIndex < 1) throw apiError_("RECORD_NOT_FOUND", `${sheetName} record was not found.`);
+  const updatedRow = values[rowIndex].slice();
   Object.entries(changes).forEach(([field, fieldValue]) => {
     const columnIndex = headers.indexOf(field);
     if (columnIndex >= 0) {
-      sheet.getRange(rowIndex + 1, columnIndex + 1).setValue(safeSheetValue_(fieldValue));
+      updatedRow[columnIndex] = safeSheetValue_(fieldValue);
     }
   });
+  sheet.getRange(rowIndex + 1, 1, 1, headers.length).setValues([updatedRow]);
 }
 
 function recordRejectedAudit_(error) {

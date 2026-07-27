@@ -65,6 +65,9 @@ contextBridge.exposeInMainWorld("erim", {
     saveProduct: (details) => ipcRenderer.invoke("supplier-master:product-save", details),
     saveContract: (details) => ipcRenderer.invoke("supplier-master:contract-save", details),
     archive: (details) => ipcRenderer.invoke("supplier-master:archive", details),
+    listDrafts: () => ipcRenderer.invoke("supplier-master:drafts-list"),
+    publishDrafts: (details) => ipcRenderer.invoke("supplier-master:drafts-publish", details),
+    discardDraft: (draftId) => ipcRenderer.invoke("supplier-master:draft-discard", draftId),
     uploadContract: (details) => ipcRenderer.invoke("supplier-master:contract-upload", details),
   },
   settings: {

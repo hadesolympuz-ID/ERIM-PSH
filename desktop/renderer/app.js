@@ -28,6 +28,7 @@ const state = {
     sops: [], products: [], contracts: [], rates: [],
   },
   supplierMasterLoaded: false,
+  supplierMasterDrafts: [],
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
 };
@@ -371,6 +372,72 @@ function supplierCatalogFrom(payload) {
   };
 }
 
+function applySupplierLocalResult(result) {
+  state.supplierMaster = supplierCatalogFrom(result);
+  state.supplierMasterDrafts = result?.drafts || state.supplierMasterDrafts;
+  renderSupplierDraftStatus();
+  return result?.draft || null;
+}
+
+function supplierDraftLabel(draft) {
+  const payload = draft.payload || {};
+  if (draft.entityKind === "TYPE") return payload.typeName || payload.typeCode || draft.entityId;
+  if (draft.entityKind === "SUPPLIER") return payload.supplierName || draft.entityId;
+  if (draft.entityKind === "PRODUCT") return payload.productName || draft.entityId;
+  if (draft.entityKind === "CONTRACT") return payload.contractNumber || draft.entityId;
+  if (draft.entityKind === "ARCHIVE") return `Archive ${payload.entityKind || "record"} ${payload.entityId || ""}`;
+  return draft.entityId;
+}
+
+function renderSupplierDraftStatus() {
+  const pending = (state.supplierMasterDrafts || []).filter((row) => row.localStatus !== "SYNCED");
+  $("#supplier-draft-count").textContent = String(pending.length);
+  $("#publish-supplier-drafts").disabled = !pending.length;
+  $("#review-supplier-drafts").classList.toggle("attention", Boolean(pending.length));
+  const list = $("#supplier-draft-list");
+  if (!list) return;
+  list.innerHTML = pending.length ? pending.map((draft) => `
+    <label class="supplier-draft-row">
+      <input type="checkbox" data-supplier-draft-select value="${escapeHtml(draft.draftId)}"
+        ${draft.localStatus === "SYNCING" ? "disabled" : "checked"} />
+      <span>
+        <strong>${escapeHtml(supplierDraftLabel(draft))}</strong>
+        <small>${escapeHtml(draft.entityKind)} · saved ${escapeHtml(formatDate(draft.updatedAt))}</small>
+        ${draft.lastErrorMessage ? `<span class="supplier-draft-error">${escapeHtml(draft.lastErrorMessage)}</span>` : ""}
+      </span>
+      ${statusPill(draft.localStatus)}
+    </label>
+  `).join("") : `<div class="empty-notifications">All Supplier Master changes are published.</div>`;
+  $("#supplier-queue-summary").textContent = pending.length
+    ? `${pending.length} local change(s) waiting for Google`
+    : "No pending changes.";
+  $("#publish-selected-supplier-drafts").disabled = !pending.length;
+}
+
+async function publishSupplierDrafts(draftIds = []) {
+  $("#publish-selected-supplier-drafts").disabled = true;
+  $("#publish-supplier-drafts").disabled = true;
+  $("#supplier-master-sync-status").textContent = "PUBLISHING";
+  try {
+    const result = await window.erim.supplierMaster.publishDrafts({ draftIds });
+    applySupplierLocalResult(result);
+    renderSupplierMaster();
+    state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
+    renderVendorSuggestions(state.vendorSuggestions);
+    $("#supplier-master-sync-status").textContent = "SYNCED";
+    $("#supplier-master-sync-status").className = "status synced";
+    const summary = result.summary || {};
+    if (!state.supplierMasterDrafts.length) $("#supplier-draft-dialog").close();
+    toast(`${summary.synced || 0} change(s) published; ${summary.conflicts || 0} conflict(s), ${summary.failed || 0} failed.`);
+  } catch (error) {
+    state.supplierMasterDrafts = await window.erim.supplierMaster.listDrafts();
+    renderSupplierDraftStatus();
+    $("#supplier-master-sync-status").textContent = "FAILED";
+    $("#supplier-master-sync-status").className = "status failed";
+    toast(error.message, true);
+  }
+}
+
 async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
   const status = $("#supplier-master-sync-status");
   status.textContent = initialize ? "INITIALIZING" : "LOADING";
@@ -379,6 +446,7 @@ async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
       ? await window.erim.supplierMaster.initialize()
       : await window.erim.supplierMaster.list({ refresh });
     state.supplierMaster = supplierCatalogFrom(result);
+    state.supplierMasterDrafts = result?.drafts || await window.erim.supplierMaster.listDrafts();
     state.supplierMasterLoaded = true;
     if (!state.supplierMaster.supplierTypes.some((row) =>
       row.typeCode === state.selectedSupplierTypeCode && row.active !== false
@@ -391,6 +459,7 @@ async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
     status.textContent = result?.status || "SYNCED";
     status.className = `status ${String(result?.status || "SYNCED").includes("OFFLINE") ? "conflict" : "synced"}`;
     renderSupplierMaster();
+    renderSupplierDraftStatus();
     state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
     renderVendorSuggestions(state.vendorSuggestions);
   } catch (error) {
@@ -495,6 +564,7 @@ function renderSupplierList() {
     <button class="supplier-list-item ${row.supplierId === state.selectedSupplierId ? "active" : ""}"
       type="button" data-supplier-id="${escapeHtml(row.supplierId)}">
       <strong>${escapeHtml(row.supplierName)}</strong>
+      ${row.localDraftStatus ? `<span class="local-change">LOCAL CHANGE</span>` : ""}
       <small>${escapeHtml(row.supplierCode || "No code")} · ${escapeHtml((row.destinations || []).join(", ") || "All destinations")}</small>
     </button>
   `).join("") : `<div class="empty-notifications">No active supplier in this Type.</div>`;
@@ -546,7 +616,7 @@ function fillSupplierForm(supplier) {
     form.elements[field].value = sop[field] || "";
   });
   $("#supplier-form-title").textContent = supplier.supplierName;
-  $("#supplier-form-status").textContent = supplier.status || "ACTIVE";
+  $("#supplier-form-status").textContent = supplier.localDraftStatus ? "LOCAL DRAFT" : supplier.status || "ACTIVE";
   $("#archive-supplier").hidden = false;
   $("#supplier-product-heading").textContent = supplier.supplierName;
   $("#supplier-product-subheading").textContent = `${supplier.typeCode} · ${supplier.supplierCode || "No code"}`;
@@ -681,29 +751,13 @@ async function saveSupplierMasterForm(event) {
   if (invalidContact || invalidRecipient) {
     return toast("Phone and WhatsApp numbers must start with + and use international format.", true);
   }
-  const transportPayload = {
-    ...payload,
-    contacts: payload.contacts.map((row) => ({
-      ...row,
-      phone: supplierPhoneForTransport(row.phone),
-      whatsapp: supplierPhoneForTransport(row.whatsapp),
-    })),
-    recipients: payload.recipients.map((row) => ({
-      ...row,
-      address: row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP"
-        ? supplierPhoneForTransport(row.address) : row.address,
-    })),
-  };
+  const existing = state.supplierMaster.suppliers.find((row) => row.supplierId === payload.supplierId);
+  payload.baseRecordVersion = existing?.recordVersion ?? null;
   try {
-    state.supplierMaster = supplierCatalogFrom(
-      await window.erim.supplierMaster.saveSupplier(transportPayload),
-    );
-    const saved = state.supplierMaster.suppliers.find((row) =>
-      row.supplierName === payload.supplierName && row.typeCode === payload.typeCode
-    );
-    state.selectedSupplierId = saved?.supplierId || payload.supplierId;
+    const draft = applySupplierLocalResult(await window.erim.supplierMaster.saveSupplier(payload));
+    state.selectedSupplierId = draft?.entityId || payload.supplierId;
     renderSupplierMaster();
-    toast(`${payload.supplierName} saved, activated, and notified to all users.`);
+    toast(`${payload.supplierName} saved locally. Continue editing or publish the batch when ready.`);
   } catch (error) {
     toast(error.message, true);
   }
@@ -725,6 +779,7 @@ function renderSupplierProductsAndContracts() {
         <button class="button ghost small" data-edit-supplier-product="${escapeHtml(product.productId)}" type="button">Edit</button>
       </div>
       <div class="supplier-product-detail">${escapeHtml(product.description || "No description")}</div>
+      ${product.localDraftStatus ? `<span class="local-change">LOCAL CHANGE</span>` : ""}
     </article>
   `).join("");
   const contractCards = contracts.map((contract) => {
@@ -735,6 +790,7 @@ function renderSupplierProductsAndContracts() {
           <div><strong>${escapeHtml(contract.contractNumber)}</strong><small>${escapeHtml(contract.validFrom)} – ${escapeHtml(contract.validTo)} · ${escapeHtml(contract.status)}</small></div>
           <button class="button ghost small" data-edit-supplier-contract="${escapeHtml(contract.contractId)}" type="button">Edit</button>
         </div>
+        ${contract.localDraftStatus ? `<span class="local-change">LOCAL CHANGE</span>` : ""}
         <table class="supplier-rate-table"><thead><tr><th>Product</th><th>Basis</th><th>Rate</th><th>Validity</th></tr></thead><tbody>
           ${contractRates.map((rate) => {
             const product = products.find((row) => row.productId === rate.productId);
@@ -775,11 +831,13 @@ async function saveSupplierProductForm(event) {
   const form = event.currentTarget;
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.destinations = String(payload.destinations || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const existing = state.supplierMaster.products.find((row) => row.productId === payload.productId);
+  payload.baseRecordVersion = existing?.recordVersion ?? null;
   try {
-    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveProduct(payload));
+    applySupplierLocalResult(await window.erim.supplierMaster.saveProduct(payload));
     $("#supplier-product-dialog").close();
     renderSupplierMaster();
-    toast(`${payload.productName} saved and activated.`);
+    toast(`${payload.productName} saved locally.`);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -840,13 +898,15 @@ async function saveSupplierContractForm(event) {
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.allowOverlap = form.elements.allowOverlap.checked;
   payload.rates = collectContractRates();
+  const existing = state.supplierMaster.contracts.find((row) => row.contractId === payload.contractId);
+  payload.baseRecordVersion = existing?.recordVersion ?? null;
   try {
-    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveContract(payload));
+    applySupplierLocalResult(await window.erim.supplierMaster.saveContract(payload));
     $("#supplier-contract-dialog").close();
     renderSupplierMaster();
     state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
     renderVendorSuggestions(state.vendorSuggestions);
-    toast(`${payload.contractNumber} saved; contract rates are immediately available by service date.`);
+    toast(`${payload.contractNumber} and its rates saved locally.`);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -875,14 +935,14 @@ async function archiveSelectedSupplierEntity(entityKind, entityId, label) {
   if (reason === null) return;
   if (!reason.trim()) return toast("Archive reason is required.", true);
   try {
-    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.archive({
+    applySupplierLocalResult(await window.erim.supplierMaster.archive({
       entityKind, entityId, reason: reason.trim(),
     }));
     if (entityKind === "SUPPLIER") state.selectedSupplierId = "";
     $("#supplier-product-dialog").close();
     $("#supplier-contract-dialog").close();
     renderSupplierMaster();
-    toast(`${label} archived. Historical booking snapshots remain available.`);
+    toast(`${label} archive queued locally. Historical booking snapshots remain available.`);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -2041,7 +2101,35 @@ function bindEvents() {
     list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
   });
   $("#refresh-supplier-master").addEventListener("click", () => loadSupplierMaster({ refresh: true }));
-  $("#initialize-supplier-master").addEventListener("click", () => loadSupplierMaster({ initialize: true }));
+  $("#review-supplier-drafts").addEventListener("click", () => {
+    renderSupplierDraftStatus();
+    $("#supplier-draft-dialog").showModal();
+  });
+  $("#publish-supplier-drafts").addEventListener("click", () => publishSupplierDrafts());
+  $("#close-supplier-draft-dialog").addEventListener("click", () => $("#supplier-draft-dialog").close());
+  $("#cancel-supplier-draft-dialog").addEventListener("click", () => $("#supplier-draft-dialog").close());
+  $("#select-all-supplier-drafts").addEventListener("change", (event) => {
+    $$("[data-supplier-draft-select]:not(:disabled)").forEach((node) => { node.checked = event.target.checked; });
+  });
+  $("#publish-selected-supplier-drafts").addEventListener("click", () => {
+    const draftIds = $$("[data-supplier-draft-select]:checked").map((node) => node.value);
+    if (!draftIds.length) return toast("Choose at least one pending change.", true);
+    publishSupplierDrafts(draftIds);
+  });
+  $("#open-supplier-maintenance").addEventListener("click", () => {
+    $("#supplier-maintenance-confirmation").value = "";
+    $("#initialize-supplier-master").disabled = true;
+    $("#supplier-maintenance-dialog").showModal();
+  });
+  $("#close-supplier-maintenance").addEventListener("click", () => $("#supplier-maintenance-dialog").close());
+  $("#cancel-supplier-maintenance").addEventListener("click", () => $("#supplier-maintenance-dialog").close());
+  $("#supplier-maintenance-confirmation").addEventListener("input", (event) => {
+    $("#initialize-supplier-master").disabled = event.target.value.trim() !== "INITIALIZE";
+  });
+  $("#initialize-supplier-master").addEventListener("click", async () => {
+    $("#supplier-maintenance-dialog").close();
+    await loadSupplierMaster({ initialize: true });
+  });
   $("#add-supplier-type").addEventListener("click", () => {
     $("#supplier-type-form").reset();
     $("#supplier-type-dialog").showModal();
@@ -2054,12 +2142,12 @@ function bindEvents() {
     payload.allowedPriceBases = String(payload.allowedPriceBases || "").split(",").map((x) => x.trim()).filter(Boolean);
     payload.defaultBookingChannels = String(payload.defaultBookingChannels || "").split(",").map((x) => x.trim()).filter(Boolean);
     try {
-      state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveType(payload));
+      applySupplierLocalResult(await window.erim.supplierMaster.saveType(payload));
       state.selectedSupplierTypeCode = String(payload.typeCode).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
       state.selectedSupplierId = "";
       $("#supplier-type-dialog").close();
       renderSupplierMaster();
-      toast(`${payload.typeName} Type saved and available without a backend syntax change.`);
+      toast(`${payload.typeName} Type saved locally and available without a backend syntax change.`);
     } catch (error) { toast(error.message, true); }
   });
   $("#supplier-master-search").addEventListener("input", renderSupplierList);

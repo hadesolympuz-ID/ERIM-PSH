@@ -243,8 +243,10 @@
               </div>
               <div class="supplier-master-banner-actions">
                 <span id="supplier-master-sync-status" class="status">Not loaded</span>
-                <button id="initialize-supplier-master" class="button ghost small" type="button">Initialize / migrate</button>
-                <button id="refresh-supplier-master" class="button primary small" type="button">Refresh Google data</button>
+                <button id="review-supplier-drafts" class="button ghost small" type="button">Pending <span id="supplier-draft-count">0</span></button>
+                <button id="publish-supplier-drafts" class="button primary small" type="button" disabled>Publish to Google</button>
+                <button id="refresh-supplier-master" class="button ghost small" type="button">Refresh</button>
+                <button id="open-supplier-maintenance" class="icon-button supplier-maintenance-button" type="button" title="System Maintenance" aria-label="System Maintenance">⚙</button>
               </div>
             </div>
             <div class="panel supplier-master-panel">
@@ -264,7 +266,7 @@
                       <input name="supplierId" type="hidden" />
                       <input name="typeCode" type="hidden" />
                       <div class="supplier-form-heading">
-                        <div><strong id="supplier-form-title">New supplier</strong><small>Changes become active immediately and notify all users.</small></div>
+                        <div><strong id="supplier-form-title">New supplier</strong><small>Save instantly to this PC, then publish the reviewed batch to Google.</small></div>
                         <span id="supplier-form-status" class="status">NEW</span>
                       </div>
                       <div class="supplier-form-grid">
@@ -311,7 +313,7 @@
                       </div>
                       <div class="supplier-master-form-actions">
                         <button id="archive-supplier" class="button danger" type="button" hidden>Archive supplier</button>
-                        <button class="button primary" type="submit">Save & activate supplier</button>
+                        <button class="button primary" type="submit">Save supplier locally</button>
                       </div>
                     </form>
                   </div>
@@ -698,7 +700,7 @@
           <label>Allowed price bases<input name="allowedPriceBases" value="PER_PAX,PER_SERVICE,PER_ITEM,CUSTOM" /></label>
           <label>Default booking channels<input name="defaultBookingChannels" value="EMAIL,WHATSAPP,OTHERS" /></label>
         </div>
-        <div class="dialog-actions"><button id="cancel-supplier-type-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Type</button></div>
+        <div class="dialog-actions"><button id="cancel-supplier-type-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Type locally</button></div>
       </form>
     </dialog>
 
@@ -721,7 +723,7 @@
           <label>Tax treatment<select name="taxTreatment"><option>AS_CONTRACT</option><option>INCLUDED</option><option>EXCLUDED</option></select></label>
           <label class="wide">Internal notes<textarea name="notes" rows="3"></textarea></label>
         </div>
-        <div class="dialog-actions"><button id="archive-supplier-product" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-product-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Product</button></div>
+        <div class="dialog-actions"><button id="archive-supplier-product" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-product-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Product locally</button></div>
       </form>
     </dialog>
 
@@ -744,8 +746,39 @@
           <div class="supplier-contract-rates-heading"><div><p class="eyebrow">Repeatable components</p><h3>Contract rates</h3></div><button id="add-contract-rate" class="button ghost small" type="button">+ Rate</button></div>
           <div id="supplier-contract-rate-list" class="supplier-contract-rate-list"></div>
         </div>
-        <div class="dialog-actions"><button id="archive-supplier-contract" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-contract-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Contract</button></div>
+        <div class="dialog-actions"><button id="archive-supplier-contract" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-contract-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Contract locally</button></div>
       </form>
+    </dialog>
+
+    <dialog id="supplier-draft-dialog" class="supplier-queue-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SQLite staging queue</p><h2>Pending Supplier Master changes</h2><small>Review the checked records, then publish them to Google in one batch.</small></div>
+        <button id="close-supplier-draft-dialog" class="icon-button" type="button">×</button>
+      </div>
+      <div class="supplier-queue-actions">
+        <label><input id="select-all-supplier-drafts" type="checkbox" checked /> Select all pending</label>
+        <span id="supplier-queue-summary" class="muted-text">No pending changes.</span>
+      </div>
+      <div id="supplier-draft-list" class="supplier-draft-list"></div>
+      <div class="dialog-actions">
+        <button id="cancel-supplier-draft-dialog" class="button ghost" type="button">Close</button>
+        <button id="publish-selected-supplier-drafts" class="button primary" type="button">Publish selected to Google</button>
+      </div>
+    </dialog>
+
+    <dialog id="supplier-maintenance-dialog" class="compact-dialog supplier-maintenance-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Admin / Owner only</p><h2>System Maintenance</h2></div>
+        <button id="close-supplier-maintenance" class="icon-button" type="button">×</button>
+      </div>
+      <div class="supplier-maintenance-content">
+        <div class="maintenance-warning"><strong>Initialize / migrate</strong><p>Creates or repairs the Google Sheet schema, migrates legacy supplier data, and installs the contract-expiry monitor. This is not required for daily data entry.</p></div>
+        <label>Type <strong>INITIALIZE</strong> to unlock<input id="supplier-maintenance-confirmation" autocomplete="off" placeholder="INITIALIZE" /></label>
+      </div>
+      <div class="dialog-actions">
+        <button id="cancel-supplier-maintenance" class="button ghost" type="button">Cancel</button>
+        <button id="initialize-supplier-master" class="button danger" type="button" disabled>Initialize / migrate Google source</button>
+      </div>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

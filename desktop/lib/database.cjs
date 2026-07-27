@@ -367,6 +367,25 @@ class LocalDatabase {
         ON local_supplier_master_cache(entity_kind, parent_id);
       CREATE INDEX IF NOT EXISTS idx_supplier_master_type_status
         ON local_supplier_master_cache(supplier_type_code, status);
+
+      CREATE TABLE IF NOT EXISTS local_supplier_master_drafts (
+        draft_id TEXT PRIMARY KEY,
+        entity_kind TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        parent_id TEXT,
+        payload_json TEXT NOT NULL,
+        base_record_version INTEGER,
+        local_status TEXT NOT NULL DEFAULT 'READY_TO_PUBLISH',
+        last_error_code TEXT,
+        last_error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        synced_at TEXT,
+        UNIQUE(entity_kind, entity_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_supplier_master_drafts_status
+        ON local_supplier_master_drafts(local_status, updated_at);
     `);
     this.migrateVendorServiceSplits();
     this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
@@ -813,6 +832,178 @@ class LocalDatabase {
         result[target[row.entity_kind]]?.push(JSON.parse(row.payload_json));
       } catch {
         // A malformed cache row is ignored; the next online sync replaces the cache atomically.
+      }
+    }
+    return this.applySupplierMasterDrafts(result);
+  }
+
+  listSupplierMasterDrafts({ includeSynced = false } = {}) {
+    const rows = this.db.prepare(`
+      SELECT * FROM local_supplier_master_drafts
+      ${includeSynced ? "" : "WHERE local_status <> 'SYNCED'"}
+      ORDER BY
+        CASE entity_kind
+          WHEN 'TYPE' THEN 1 WHEN 'SUPPLIER' THEN 2 WHEN 'PRODUCT' THEN 3
+          WHEN 'CONTRACT' THEN 4 WHEN 'ARCHIVE' THEN 5 ELSE 9
+        END,
+        updated_at
+    `).all();
+    return rows.map((row) => ({
+      draftId: row.draft_id,
+      entityKind: row.entity_kind,
+      entityId: row.entity_id,
+      parentId: row.parent_id || "",
+      payload: JSON.parse(row.payload_json),
+      baseRecordVersion: row.base_record_version,
+      localStatus: row.local_status,
+      lastErrorCode: row.last_error_code || "",
+      lastErrorMessage: row.last_error_message || "",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      syncedAt: row.synced_at || "",
+    }));
+  }
+
+  saveSupplierMasterDraft(entityKind, details = {}) {
+    const kind = String(entityKind || "").trim().toUpperCase();
+    const config = {
+      TYPE: ["supplierTypeId", "STYPE", ""],
+      SUPPLIER: ["supplierId", "SUP", ""],
+      PRODUCT: ["productId", "PROD", "supplierId"],
+      CONTRACT: ["contractId", "CTR", "supplierId"],
+      ARCHIVE: ["entityId", "ARCH", "supplierId"],
+    }[kind];
+    if (!config) throw new Error("Unsupported Supplier Master draft type.");
+    const payload = structuredClone(details || {});
+    const [idField, prefix, parentField] = config;
+    const entityId = String(payload[idField] || `${prefix}-${crypto.randomUUID()}`).trim();
+    payload[idField] = entityId;
+    if (kind === "TYPE") {
+      payload.typeCode = String(payload.typeCode || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+      payload.typeName = String(payload.typeName || "").trim();
+      payload.status = payload.status || "ACTIVE";
+      payload.active = true;
+    }
+    if (kind === "SUPPLIER") {
+      payload.typeCode = String(payload.typeCode || "").trim().toUpperCase();
+      payload.status = payload.status || "ACTIVE";
+      payload.active = true;
+      payload.contacts = (payload.contacts || []).map((row) => ({
+        ...row,
+        contactId: row.contactId || `SCON-${crypto.randomUUID()}`,
+      }));
+      payload.recipients = (payload.recipients || []).map((row) => ({
+        ...row,
+        recipientId: row.recipientId || `SREC-${crypto.randomUUID()}`,
+      }));
+      payload.sop = { ...(payload.sop || {}), sopId: payload.sop?.sopId || `SSOP-${crypto.randomUUID()}` };
+    }
+    if (kind === "CONTRACT") {
+      payload.status = payload.status || "LOCAL_DRAFT";
+      payload.active = true;
+      payload.rates = (payload.rates || []).map((row) => ({
+        ...row,
+        contractRateId: row.contractRateId || `RATE-${crypto.randomUUID()}`,
+        contractId: entityId,
+      }));
+    }
+    const existing = this.db.prepare(`
+      SELECT created_at FROM local_supplier_master_drafts
+      WHERE entity_kind = ? AND entity_id = ?
+    `).get(kind, entityId);
+    const now = this.now();
+    this.db.prepare(`
+      INSERT INTO local_supplier_master_drafts (
+        draft_id, entity_kind, entity_id, parent_id, payload_json,
+        base_record_version, local_status, last_error_code, last_error_message,
+        created_at, updated_at, synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'READY_TO_PUBLISH', NULL, NULL, ?, ?, NULL)
+      ON CONFLICT(entity_kind, entity_id) DO UPDATE SET
+        parent_id = excluded.parent_id,
+        payload_json = excluded.payload_json,
+        base_record_version = excluded.base_record_version,
+        local_status = 'READY_TO_PUBLISH',
+        last_error_code = NULL,
+        last_error_message = NULL,
+        updated_at = excluded.updated_at,
+        synced_at = NULL
+    `).run(
+      existing ? `${kind}-${entityId}` : `${kind}-${entityId}`,
+      kind,
+      entityId,
+      String(parentField ? payload[parentField] || "" : ""),
+      JSON.stringify(payload),
+      details.recordVersion ?? details.baseRecordVersion ?? null,
+      existing?.created_at || now,
+      now,
+    );
+    this.log("SUPPLIER_MASTER_DRAFT_SAVED", kind, entityId, { parentId: payload[parentField] || "" });
+    return {
+      draft: this.listSupplierMasterDrafts().find((row) =>
+        row.entityKind === kind && row.entityId === entityId),
+      drafts: this.listSupplierMasterDrafts(),
+      catalog: this.getSupplierMasterCatalog(),
+    };
+  }
+
+  setSupplierMasterDraftStatus(draftId, status, error = {}) {
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE local_supplier_master_drafts
+      SET local_status = ?, last_error_code = ?, last_error_message = ?,
+        updated_at = ?, synced_at = CASE WHEN ? = 'SYNCED' THEN ? ELSE synced_at END
+      WHERE draft_id = ?
+    `).run(
+      status,
+      error.code || null,
+      error.message || null,
+      now,
+      status,
+      now,
+      draftId,
+    );
+  }
+
+  discardSupplierMasterDraft(draftId) {
+    this.db.prepare("DELETE FROM local_supplier_master_drafts WHERE draft_id = ?").run(draftId);
+    return { drafts: this.listSupplierMasterDrafts(), catalog: this.getSupplierMasterCatalog() };
+  }
+
+  applySupplierMasterDrafts(catalog) {
+    const result = structuredClone(catalog);
+    const upsert = (collection, idField, payload) => {
+      const index = collection.findIndex((row) => String(row[idField]) === String(payload[idField]));
+      const next = { ...(index >= 0 ? collection[index] : {}), ...payload, localDraftStatus: "READY_TO_PUBLISH" };
+      if (index >= 0) collection[index] = next;
+      else collection.push(next);
+    };
+    for (const draft of this.listSupplierMasterDrafts()) {
+      const payload = draft.payload;
+      if (draft.entityKind === "TYPE") upsert(result.supplierTypes, "supplierTypeId", payload);
+      if (draft.entityKind === "SUPPLIER") {
+        upsert(result.suppliers, "supplierId", payload);
+        result.contacts = result.contacts.filter((row) => row.supplierId !== payload.supplierId);
+        result.recipients = result.recipients.filter((row) => row.supplierId !== payload.supplierId);
+        result.sops = result.sops.filter((row) => row.supplierId !== payload.supplierId);
+        result.contacts.push(...(payload.contacts || []).map((row) => ({ ...row, supplierId: payload.supplierId, localDraftStatus: draft.localStatus })));
+        result.recipients.push(...(payload.recipients || []).map((row) => ({ ...row, supplierId: payload.supplierId, localDraftStatus: draft.localStatus })));
+        if (payload.sop) result.sops.push({ ...payload.sop, supplierId: payload.supplierId, localDraftStatus: draft.localStatus });
+      }
+      if (draft.entityKind === "PRODUCT") upsert(result.products, "productId", payload);
+      if (draft.entityKind === "CONTRACT") {
+        upsert(result.contracts, "contractId", payload);
+        result.rates = result.rates.filter((row) => row.contractId !== payload.contractId);
+        result.rates.push(...(payload.rates || []).map((row) => ({ ...row, contractId: payload.contractId, localDraftStatus: draft.localStatus })));
+      }
+      if (draft.entityKind === "ARCHIVE") {
+        const target = {
+          SUPPLIER_TYPE: ["supplierTypes", "supplierTypeId"],
+          SUPPLIER: ["suppliers", "supplierId"],
+          PRODUCT: ["products", "productId"],
+          CONTRACT: ["contracts", "contractId"],
+        }[String(payload.entityKind || "").toUpperCase()];
+        const row = target && result[target[0]].find((item) => item[target[1]] === payload.entityId);
+        if (row) Object.assign(row, { status: "PENDING_ARCHIVE", active: false, localDraftStatus: draft.localStatus });
       }
     }
     return result;

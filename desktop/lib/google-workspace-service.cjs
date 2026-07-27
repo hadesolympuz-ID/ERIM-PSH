@@ -162,11 +162,17 @@ class GoogleWorkspaceService {
       return {
         status: "OFFLINE_CACHE",
         catalog: this.database.getSupplierMasterCatalog(),
+        drafts: this.database.listSupplierMasterDrafts(),
       };
     }
     const catalog = await this.callAppsScript("supplier.master.list", {});
     const cached = this.database.replaceSupplierMasterCache(catalog);
-    return { status: "SYNCED", catalog: cached, checksum: catalog.checksum || "" };
+    return {
+      status: "SYNCED",
+      catalog: cached,
+      drafts: this.database.listSupplierMasterDrafts(),
+      checksum: catalog.checksum || "",
+    };
   }
 
   async initializeSupplierMaster() {
@@ -178,45 +184,85 @@ class GoogleWorkspaceService {
   }
 
   async saveSupplierType(details) {
-    const catalog = await this.callAppsScript("supplier.type.save", {
-      requestId: details.requestId || `STYPE-${crypto.randomUUID()}`,
-      supplierType: details,
-    });
-    return this.database.replaceSupplierMasterCache(catalog);
+    return this.database.saveSupplierMasterDraft("TYPE", details);
   }
 
   async saveSupplier(details) {
-    const catalog = await this.callAppsScript("supplier.save", {
-      requestId: details.requestId || `SUP-${crypto.randomUUID()}`,
-      supplier: details,
-    });
-    return this.database.replaceSupplierMasterCache(catalog);
+    return this.database.saveSupplierMasterDraft("SUPPLIER", details);
   }
 
   async saveSupplierProduct(details) {
-    const catalog = await this.callAppsScript("supplier.product.save", {
-      requestId: details.requestId || `PROD-${crypto.randomUUID()}`,
-      product: details,
-    });
-    return this.database.replaceSupplierMasterCache(catalog);
+    return this.database.saveSupplierMasterDraft("PRODUCT", details);
   }
 
   async saveSupplierContract(details) {
-    const catalog = await this.callAppsScript("supplier.contract.save", {
-      requestId: details.requestId || `CTR-${crypto.randomUUID()}`,
-      contract: details,
-    });
-    return this.database.replaceSupplierMasterCache(catalog);
+    return this.database.saveSupplierMasterDraft("CONTRACT", details);
   }
 
   async archiveSupplierEntity(details) {
-    const catalog = await this.callAppsScript("supplier.entity.archive", {
-      requestId: details.requestId || `ARCH-${crypto.randomUUID()}`,
-      entityKind: details.entityKind,
-      entityId: details.entityId,
-      reason: details.reason || "",
-    });
-    return this.database.replaceSupplierMasterCache(catalog);
+    return this.database.saveSupplierMasterDraft("ARCHIVE", details);
+  }
+
+  listSupplierMasterDrafts() {
+    return this.database.listSupplierMasterDrafts();
+  }
+
+  discardSupplierMasterDraft(draftId) {
+    return this.database.discardSupplierMasterDraft(draftId);
+  }
+
+  async publishSupplierMasterDrafts({ draftIds = [] } = {}) {
+    const selected = new Set((draftIds || []).map(String));
+    const drafts = this.database.listSupplierMasterDrafts()
+      .filter((draft) => !selected.size || selected.has(draft.draftId));
+    if (!drafts.length) {
+      return {
+        status: "NOTHING_TO_PUBLISH",
+        drafts: this.database.listSupplierMasterDrafts(),
+        catalog: this.database.getSupplierMasterCatalog(),
+        summary: { total: 0, synced: 0, failed: 0, conflicts: 0 },
+      };
+    }
+    drafts.forEach((draft) => this.database.setSupplierMasterDraftStatus(draft.draftId, "SYNCING"));
+    let response;
+    try {
+      response = await this.callAppsScript("supplier.master.batch.publish", {
+        requestId: `SMBATCH-${crypto.randomUUID()}`,
+        changes: drafts.map((draft) => ({
+          draftId: draft.draftId,
+          entityKind: draft.entityKind,
+          entityId: draft.entityId,
+          baseRecordVersion: draft.baseRecordVersion,
+          payload: draft.payload,
+        })),
+      });
+    } catch (error) {
+      drafts.forEach((draft) => this.database.setSupplierMasterDraftStatus(
+        draft.draftId,
+        "FAILED",
+        { code: error.code || "PUBLISH_FAILED", message: error.message },
+      ));
+      throw error;
+    }
+    const results = response.results || [];
+    for (const draft of drafts) {
+      const result = results.find((row) => row.draftId === draft.draftId);
+      const status = result?.status === "SYNCED"
+        ? "SYNCED"
+        : result?.status === "CONFLICT" ? "CONFLICT" : "FAILED";
+      this.database.setSupplierMasterDraftStatus(draft.draftId, status, {
+        code: result?.errorCode || "",
+        message: result?.message || "",
+      });
+    }
+    if (response.catalog) this.database.replaceSupplierMasterCache(response.catalog);
+    return {
+      status: "PUBLISHED",
+      results,
+      summary: response.summary || {},
+      drafts: this.database.listSupplierMasterDrafts(),
+      catalog: this.database.getSupplierMasterCatalog(),
+    };
   }
 
   async selectAndUploadSupplierContract(details = {}) {

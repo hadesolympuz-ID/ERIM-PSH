@@ -545,6 +545,50 @@ test("uses dynamic Supplier Types and only exposes contract rates valid on the s
   assert.equal(saved.days[0].splits[0].serviceType, "RESTAURANT");
 }));
 
+test("stages a complete Supplier Master chain locally before one batch publish", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    supplierTypes: [{
+      supplierTypeId: "STYPE-VENDOR", typeCode: "VENDOR", typeName: "Vendor",
+      status: "ACTIVE", active: true, recordVersion: 1,
+    }],
+  });
+  const supplier = database.saveSupplierMasterDraft("SUPPLIER", {
+    typeCode: "VENDOR",
+    supplierName: "Fast Local Supplier",
+    contacts: [{ contactName: "Reservation", whatsapp: "+62 812-3916-9392" }],
+    recipients: [{ recipientType: "TO", channel: "EMAIL", address: "res@example.com" }],
+    sop: { bookingChannels: ["EMAIL", "WHATSAPP"] },
+  });
+  const supplierId = supplier.draft.entityId;
+  const product = database.saveSupplierMasterDraft("PRODUCT", {
+    supplierId,
+    productName: "Full Day Tour",
+    inclusion: "Guide",
+  });
+  const contract = database.saveSupplierMasterDraft("CONTRACT", {
+    supplierId,
+    contractNumber: "RATE/2026",
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    rates: [{
+      productId: product.draft.entityId,
+      priceBasis: "PER_PAX",
+      amount: 250000,
+    }],
+  });
+
+  assert.equal(database.listSupplierMasterDrafts().length, 3);
+  const catalog = contract.catalog;
+  assert.equal(catalog.suppliers[0].supplierId, supplierId);
+  assert.equal(catalog.contacts[0].whatsapp, "+62 812-3916-9392");
+  assert.equal(catalog.products[0].supplierId, supplierId);
+  assert.equal(catalog.rates[0].productId, product.draft.entityId);
+  assert.equal(catalog.contracts[0].localDraftStatus, "READY_TO_PUBLISH");
+
+  database.setSupplierMasterDraftStatus(supplier.draft.draftId, "SYNCED");
+  assert.equal(database.listSupplierMasterDrafts().length, 2);
+}));
+
 test("requires reason and source for booking-only manual rates", () => withDatabase((database) => {
   const base = {
     customerCode: "MANUAL/RATE",

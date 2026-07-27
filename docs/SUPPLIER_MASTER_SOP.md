@@ -1,7 +1,7 @@
 # ERIM-PSH Supplier Master and Contract Rate SOP
 
 Document status: `APPROVED IMPLEMENTATION BASELINE`
-Effective release: `v1.1.1`
+Effective release: `v1.1.2`
 Owner: `Manager / Admin`
 Authoritative source: `ERIM-PSH Google Sheet + Google Drive`
 
@@ -12,8 +12,10 @@ Luggage Van, Additional Service, and future supplier categories. Operational
 screens consume this source; they do not maintain their own vendor or rate
 lists.
 
-Changes saved by Manager/Admin are immediately active, appended to the audit
-record, and announced to all active ERIM-PSH users.
+Routine changes are saved immediately to the user's local SQLite staging queue.
+They become active centrally only after an authorized user reviews and publishes
+the batch to Google. Successful batch publication is audited per entity and
+announced to all active ERIM-PSH users with one summary notification.
 
 ## 2. Menu and screen
 
@@ -25,9 +27,26 @@ Open `Manager / Admin > Supplier Master`.
 - The right section maintains products/services and contract rates for the
   selected supplier.
 - `Add Type` creates a future category without a backend syntax change.
+- `Pending` opens the local change queue and supports selecting all or part of a batch.
+- `Publish to Google` sends the reviewed dependency-ordered batch and refreshes
+  the central catalog once.
+- The gear button opens protected `System Maintenance`.
 
 Archived records remain in history but are removed from new operational
 selection.
+
+## 2.1 Local save and batch publish
+
+1. Save each Type, Supplier, Product, Contract, or archive action locally.
+2. Continue entering the remaining supplier catalogue without waiting for Google.
+3. Open `Pending` and review the selected changes.
+4. Publish all or only the checked changes.
+5. Review any `CONFLICT` or `FAILED` item. A conflict means the Google record
+   version changed after the local edit began; refresh and reconcile it before retrying.
+
+Local statuses are `READY_TO_PUBLISH`, `SYNCING`, `SYNCED`, `CONFLICT`, and
+`FAILED`. New Supplier records are published before their Products; Products
+before Contracts and Rates. A successful batch refreshes the local cache once.
 
 ## 3. Supplier Type procedure
 
@@ -170,7 +189,9 @@ timestamp, entity, and change context in `AUDIT_LOG` and
 
 ## 10. Initial seed and migration
 
-Initialization creates the Supplier Master tables and migrates the existing
+Initialization is an infrequent Admin/Owner maintenance operation, not a routine
+save or publish action. Open the gear menu and type `INITIALIZE` to unlock it.
+The operation is idempotent: it creates or repairs the Supplier Master tables and migrates the existing
 `VENDOR_RATE_MASTER` and `TOC_MASTER` records. It also seeds temporary Transport
 and Luggage Van examples and:
 
