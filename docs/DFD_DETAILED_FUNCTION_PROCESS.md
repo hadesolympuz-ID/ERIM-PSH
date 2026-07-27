@@ -256,9 +256,10 @@ PROD
 
 ```text
 1. DASHBOARD
-  1.1 Inbox [I]
-    1.1.1 Load notifications
-    1.1.2 Open notification action target
+  1.1 Notification Inbox [I]
+    1.1.1 Load job-description-permitted summary and latest information
+    1.1.2 Display only; no business mutation or claim
+    1.1.3 Subgroup classification/deep links [F/P]
   1.2 Reservation pending follow-up [I]
     1.2.1 Save pending reason
     1.2.2 Resolve follow-up
@@ -311,15 +312,21 @@ PROD
     2.4.4 Resolution age
 
 3. VENDOR BOOKING [F/P]
-  3.1 Daily Inbox and Claim
+  3.0 Vendor role Dashboard
+    3.0.1 Urgent
+    3.0.2 Pending
+    3.0.3 Replied
+    3.0.4 Done
+  3.1 Shared Notification Inbox + separate Work Claim
   3.2 New Confirmation
-  3.3 Revised Confirmation
-  3.4 Universal Lookup
-  3.5 Daywise and micro-item split
-  3.6 Supplier booking generation
-  3.7 Email / WhatsApp / Portal action
-  3.8 Per-micro-item review and confirmation
-  3.9 Booking Complete publication
+  3.3 Generating Booking
+  3.4 Revised Confirmation
+  3.5 Universal Lookup
+  3.6 Daywise and micro-item split
+  3.7 Supplier booking grouping
+  3.8 Email / WhatsApp / Portal action
+  3.9 Per-micro-item review and confirmation
+  3.10 Booking Complete publication
 
 4. TRANSPORT [F/P]
   4.1 Daywise transport queue
@@ -676,15 +683,20 @@ flowchart TD
 
 ```text
 3. VENDOR BOOKING
-  3.1 Daily Inbox [P]
-    3.1.1 New Itinerary received
-    3.1.2 Revised Itinerary received
-    3.1.3 Review reply received
-    3.1.4 Booking Complete/final handoff
-    3.1.5 Claim item
-    3.1.6 Release claim
-    3.1.7 Finish claim
-    3.1.8 Manager takeover
+  3.0 Vendor role Dashboard [P]
+    3.0.1 Urgent - unresolved more than 72 hours from Reservation publication
+    3.0.2 Pending - micro split exists but outbound action is not SENT
+    3.0.3 Replied - linked inbound vendor reply awaits human review
+    3.0.4 Done - read-only; completed and check-in tomorrow through +7 days
+
+  3.1 Shared Notification Inbox + Work Claim [P]
+    3.1.1 Display general permitted event totals/information
+    3.1.2 Same Inbox component for every department
+    3.1.3 Server filters recipients by job description/role/oversight
+    3.1.4 Claim item from actionable work/dashboard context
+    3.1.5 Release claim
+    3.1.6 Finish claim
+    3.1.7 Manager/All Rounder takeover
 
   3.2 New Confirmation [P]
     3.2.1 Open exact Reservation publication
@@ -693,39 +705,160 @@ flowchart TD
     3.2.4 Split daywise into micro services
     3.2.5 Assign vendor/program/channel
     3.2.6 Group services into supplier bookings
-    3.2.7 Generate and preview communication
-    3.2.8 Send/record communication
-    3.2.9 Re-check per micro item
+    3.2.7 Route supplier package to Generating Booking
 
-  3.3 Revised Confirmation [P]
-    3.3.1 Compare old/new itinerary revision
-    3.3.2 Classify each affected micro item
+  3.3 Generating Booking [P]
+    3.3.1 Load Customer Code, booking ID, source revision, and action
+    3.3.2 Generate approved template
+    3.3.3 Preview To/CC/body/attachments
+    3.3.4 Send/record communication
+    3.3.5 Route to Re-check Booking
+
+  3.4 Revised Confirmation [P]
+    3.4.1 Compare old/new itinerary revision
+    3.4.2 Classify each affected micro item
       UNCHANGED
       ADD
       CHANGE
       REBOOK
       CANCEL
-    3.3.3 Require human decision and note
-    3.3.4 Generate new/amend/cancel booking action
-    3.3.5 Re-check affected item
+    3.4.3 Require human decision and note
+    3.4.4 Generate new/amend/cancel booking action
+    3.4.5 Re-check affected item
 
-  3.4 Universal Lookup [P]
-    3.4.1 Vendor lookup
-    3.4.2 Program/activity lookup
-    3.4.3 Alias resolution
-    3.4.4 Contextual ranking
-    3.4.5 Keyboard navigation
-    3.4.6 Show all fallback
+  3.5 Universal Lookup [P]
+    3.5.1 Vendor lookup
+    3.5.2 Program/activity lookup
+    3.5.3 Alias resolution
+    3.5.4 Contextual ranking
+    3.5.5 Keyboard navigation
+    3.5.6 Show all fallback
 
-  3.5 Micro-item Confirmation [P]
-    3.5.1 Open linked Gmail/WhatsApp/portal evidence
-    3.5.2 Append EMAIL_REVIEW_OPENED/review attempt
-    3.5.3 CONFIRMED
-    3.5.4 NOT_CONFIRMED + mandatory reason
-    3.5.5 REVIEW_AGAIN
-    3.5.6 CANCELED
-    3.5.7 Completion gate
+  3.9 Micro-item Confirmation [P]
+    3.9.1 Open linked Gmail/WhatsApp/portal evidence
+    3.9.2 Append EMAIL_REVIEW_OPENED/review attempt
+    3.9.3 CONFIRMED
+    3.9.4 NOT_CONFIRMED + mandatory reason
+    3.9.5 REVIEW_AGAIN
+    3.9.6 CANCELED
+    3.9.7 Completion gate
 ```
+
+### 8.1.1 Vendor Dashboard read model
+
+| Section | Official source condition | Local behavior | Navigation |
+| --- | --- | --- | --- |
+| Urgent | Applicable New/Revise/Cancel Reservation publication is older than 72 hours and affected Vendor item is unsplit or unresolved. | Derived snapshot cached per user; independent scroll. | Missing split to New/Revised Confirmation; unresolved result to Re-check Booking. |
+| Pending | Micro split exists but required outbound booking/amend/cancel communication is not `SENT`. | Supplier-booking cards; independent scroll. | `Generate Booking` opens Generating Booking with IDs/version/action preloaded. |
+| Replied | Linked inbound supplier reply exists and newest reply has no completed human review attempt. | Reply cards; independent scroll. | Re-check Booking + linked email evidence. |
+| Done | Vendor process complete and check-in date is `today < date <= today + 7 days`. | Read-only Customer Code summary; independent scroll. | Read-only detail. |
+
+The sections are independent operational views. The same stable booking/service
+may appear in Urgent and Replied when both conditions are true; both routes use
+the same central claim and cannot create duplicate editable records.
+Calculations use the configured operational timezone (`Asia/Makassar`
+initially). The dashboard is a derived Apps Script read response backed by
+official tables and locally cached; it is not a second authoritative workflow
+table.
+
+### 8.1.2 Vendor New Itinerary Sprint 1 implementation (v1.0.8)
+
+```mermaid
+flowchart LR
+    Notification["Vendor notification<br/>New Itinerary"]
+    Lookup["Load Customer Code"]
+    SheetRead[("TOURS + ITINERARY_REVISIONS<br/>+ DEPARTMENT_PUBLICATIONS")]
+    Drive["Latest DOCX in Drive"]
+    Extract["Deterministic extraction<br/>NEEDS_REVIEW"]
+    Local[("SQLite Vendor draft<br/>header + hotels + days + splits")]
+    Review["Staff review/edit<br/>organic detail authoritative"]
+    Post["vendor.intake.save"]
+    Tours[("TOURS")]
+    Hotels[("TOUR_HOTEL_STAYS")]
+    Days[("TOUR_DAYS")]
+    Services[("SERVICES")]
+    Audit[("AUDIT_LOG")]
+
+    Notification --> Lookup
+    Lookup --> SheetRead
+    Lookup --> Drive
+    SheetRead --> Extract
+    Drive --> Extract
+    Extract --> Review
+    Review --> Local
+    Local --> Post
+    Post --> Tours
+    Post --> Hotels
+    Post --> Days
+    Post --> Services
+    Post --> Audit
+```
+
+#### Implemented desktop functions
+
+```text
+Vendor Booking
+  Dashboard
+    Urgent       independently scrollable, >72-hour baseline
+    Pending      split/outbound-action baseline
+    Replied      linked inbound reply baseline
+    Done         read-only, arrival tomorrow through +7 days
+
+  Inbox          shared general display-only notification list
+  Generate       prepared route/placeholder; no generation or send
+  New Itinerary
+    Load itinerary by Customer Code
+    Read latest TOURS/revision/publication and Drive DOCX
+    Extract and display editable:
+      Customer Code / Customer Name
+      Arrival Date / Flight / Sector / Time
+      Departure Date / Flight / Sector / Time
+      Unlimited Hotel + Check-in Date + Check-out Date
+    Generate inclusive Day 1..N from arrival through departure
+    Left: staff-pasted Day Wise text
+    Right: independently scrollable posted DOCX
+    Split each day:
+      Type = VENDOR | TOC | VEHICLE | ADDITIONAL_SERVICES
+      Activity/detail
+      Suggested vendor name
+      Add/remove split
+    Save local draft
+    Post structured data
+
+  Revise Itinerary     prepared placeholder and notification route
+  Cancel All Service   safe placeholder; no mutation
+  Cek KPI              prepared placeholder; no calculation
+```
+
+#### Local SQLite ownership
+
+| Local table | Key | Purpose | Online target |
+| --- | --- | --- | --- |
+| `vendor_intake_drafts` | `vendor_draft_id`; unique `customer_code` | Source/version/file references plus editable tour header, Adult/Child/Infant pax, and extraction state. | `TOURS` through Apps Script. |
+| `vendor_hotel_drafts` | `hotel_stay_id` | Unlimited ordered hotel stays; no hotel check-in time. | `TOUR_HOTEL_STAYS`. |
+| `vendor_day_drafts` | `tour_day_id` | Inclusive Day 1..N, service date, pasted Day Wise text. | `TOUR_DAYS`. |
+| `vendor_service_splits` | `service_id` | Pre-generation micro items and suggested vendor snapshot. | `SERVICES`. |
+
+Saving locally replaces only the current Customer Code's child draft rows
+inside one SQLite transaction. Stable IDs returned by the first save are reused
+on later edits. A failure rolls the entire draft write back.
+
+#### `vendor.intake.save` online contract
+
+| Gate | Rule |
+| --- | --- |
+| Client | `clientMode` must be `DESKTOP`. |
+| Identity | Google access token must resolve to an active `EMPLOYEES` row. |
+| Permission | Department `VENDOR`, or role `ADMIN`, `MANAGER`, or `ALL_ROUNDER`. |
+| Source safety | When a Reservation publication ID is present, it must still be `PUBLISHED` and its record version must match. |
+| Idempotency | Unique `requestId`; a successful matching `AUDIT_LOG` row is replayed. |
+| Concurrency | Apps Script script lock covers the official mutation. |
+| Schema safety | TOURS pax/flight fields, SERVICES suggested-vendor fields, and `TOUR_HOTEL_STAYS` are ensured before writing. |
+| Audit | `VENDOR_INTAKE_SAVED` records actor, source publication/version, Adult/Child/Infant pax, and hotel/day/split counts. |
+
+No supplier booking, communication, generated file, Gmail send, WhatsApp
+timestamp, or confirmation decision is created by this endpoint. Those remain
+behind later workflow gates.
 
 ### 8.2 Universal Lookup data flow
 
@@ -790,7 +923,9 @@ Staff remains authoritative for:
 
 | Vendor process | Read tables | Local work | Published writes | External store |
 | --- | --- | --- | --- | --- |
-| Daily Inbox | `WORK_ITEMS`, `NOTIFICATIONS`, `NOTIF_RECIPIENTS`, `TOURS` | Local inbox/cache | Claim state to `WORK_ITEMS`; audit to `AUDIT_LOG` | None |
+| Vendor Dashboard | `TOURS`, Reservation publications, `WORK_ITEMS`, `SERVICES`, `SUPPLIER_BOOKINGS`, `COMMUNICATIONS`, review attempts | User-specific dashboard cache | None; dashboard is derived/read-only except routed actions | Linked Gmail metadata loaded on demand |
+| Notification Inbox | `NOTIFICATIONS`, `NOTIF_RECIPIENTS` | Initial generic display cache only | None in initial phase; display-only | None |
+| Work claim | `WORK_ITEMS`, permitted case context | Current work/dashboard state | Claim/release/finish/takeover to `WORK_ITEMS`; audit to `AUDIT_LOG` | None |
 | Load New Confirmation | `TOURS`, `ITINERARY_REVISIONS`, `DEPARTMENT_PUBLICATIONS`, `PUBLICATION_LINKS` | `local_source_snapshots`, `local_drafts` | None until Post | Drive itinerary; Gmail confirmation |
 | Daywise split | Source publication, `VENDORS`, program mappings | Draft day/service/micro items | `TOUR_DAYS`, `SERVICES` after Post | None |
 | Supplier grouping | `SERVICES`, `VENDORS` | Draft supplier packages | `SUPPLIER_BOOKINGS`, `BOOKING_SERVICES` | None |
@@ -1469,18 +1604,21 @@ Open email from system
 
 ### 14.4 Notification behavior `[G]`
 
-Current itinerary broadcast sends to every active user with desktop or mobile
-access. Target routing must use:
+The initial Inbox is one shared generic display component. It shows permitted
+event totals such as New Itinerary and Revised Itinerary plus latest information
+without business mutation, claim, or subgroup workflow. Recipient routing must
+be performed by Apps Script using:
 
 - event category;
 - department;
-- role;
+- job description and role;
 - assignment;
-- oversight rule;
-- per-user read/acknowledge state.
+- oversight rules for All Rounder/Manager/Administrator.
 
-Local Inbox retention of 90 days is planned but not yet backed by a dedicated
-local notification table.
+The current broad broadcast must be replaced by targeted `NOTIF_RECIPIENTS`.
+Subgroup classification, deep links, per-user read/acknowledge state, and local
+Inbox retention of 90 days remain later enhancements and are not part of the
+initial generic Inbox.
 
 ---
 

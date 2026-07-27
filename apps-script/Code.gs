@@ -27,6 +27,11 @@ function doPost(event) {
       return json_({ ok: true, data: recordItineraryEvent_(request, actor) });
     }
 
+    if (route === "vendor.intake.save") {
+      requireDesktop_(request, actor);
+      return json_({ ok: true, data: saveVendorIntake_(request, actor) });
+    }
+
     if (route === "tour.detail") {
       return json_({ ok: true, data: getTourDetail_(request.customerCode, actor) });
     }
@@ -106,6 +111,234 @@ function requireDesktop_(request, actor) {
   if (request.draft && request.draft.department !== actor.department && actor.role !== "ADMIN") {
     throw apiError_("DEPARTMENT_DENIED", "You cannot publish another department's work.");
   }
+}
+
+function saveVendorIntake_(request, actor) {
+  if (request.apiVersion !== API_VERSION) {
+    throw apiError_("API_VERSION_UNSUPPORTED", "Desktop application must be updated before saving Vendor intake.");
+  }
+  const intake = request.intake || {};
+  if (!request.requestId || !intake.customerCode || !intake.tourId) {
+    throw apiError_("VALIDATION_ERROR", "Request ID, Customer Code, and Tour ID are required.");
+  }
+  validateVendorIntakePayload_(intake);
+  const role = String(actor.role || "").toUpperCase().replace(/[ -]+/g, "_");
+  if (String(actor.department || "").toUpperCase() !== "VENDOR"
+      && !["ADMIN", "MANAGER", "ALL_ROUNDER"].includes(role)) {
+    throw apiError_("DEPARTMENT_DENIED", "Vendor intake can only be posted by Vendor or oversight users.");
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const replay = findRecord_("AUDIT_LOG", "request_id", request.requestId);
+    if (replay && replay.result === "SUCCESS") {
+      return { customerCode: intake.customerCode, tourId: intake.tourId, replayed: true };
+    }
+    validateVendorSource_(request);
+    ensureVendorSchema_();
+    const now = new Date().toISOString();
+    const code = String(intake.customerCode).trim().toUpperCase();
+    const tour = findRecord_("TOURS", "customer_code", code);
+    if (!tour) throw apiError_("TOUR_NOT_FOUND", "Customer Code was not found in TOURS.");
+    if (String(tour.tour_id || "") !== String(intake.tourId || "")) {
+      throw apiError_("TOUR_MISMATCH", "Customer Code and Tour ID do not refer to the same record.");
+    }
+    updateRecord_("TOURS", "customer_code", code, {
+      client_name: intake.customerName || tour.client_name || "",
+      pax_adult: Number(intake.adultPax || 0),
+      pax_child: Number(intake.childPax || 0),
+      pax_infant: Number(intake.infantPax || 0),
+      arrival_date: intake.arrivalDate || "",
+      arrival_flight: intake.arrivalFlight || "",
+      arrival_sector: intake.arrivalSector || "",
+      arrival_time: intake.arrivalTime || "",
+      departure_date: intake.departureDate || "",
+      departure_flight: intake.departureFlight || "",
+      departure_sector: intake.departureSector || "",
+      departure_time: intake.departureTime || "",
+      record_version: Number(tour.record_version || 0) + 1,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    });
+    (intake.hotels || []).forEach((hotel, index) => {
+      const hotelStayId = hotel.hotelStayId || uuid_("HST");
+      upsertVersionedRecord_(
+        "TOUR_HOTEL_STAYS",
+        "hotel_stay_id",
+        hotelStayId,
+        {
+        hotel_stay_id: hotelStayId,
+        tour_id: tour.tour_id,
+        revision_id: intake.sourceRevisionId || "",
+        stay_sequence: index + 1,
+        hotel_name: hotel.hotelName || "",
+        check_in_date: hotel.checkInDate || "",
+        check_out_date: hotel.checkOutDate || "",
+        status: "ACTIVE",
+        record_version: 1,
+        created_at: now,
+        created_by: actor.employeeId,
+        updated_at: now,
+        updated_by: actor.employeeId,
+        },
+        actor,
+        now,
+      );
+    });
+    let splitCount = 0;
+    (intake.days || []).forEach((day) => {
+      const dayId = day.tourDayId || uuid_("TDAY");
+      upsertVersionedRecord_("TOUR_DAYS", "tour_day_id", dayId, {
+        tour_day_id: dayId,
+        tour_id: tour.tour_id,
+        revision_id: intake.sourceRevisionId || "",
+        day_number: day.dayNumber,
+        service_date: day.serviceDate || "",
+        day_title: `Day ${day.dayNumber}`,
+        location: "",
+        arrival_departure_flag: Number(day.dayNumber) === 1 ? "ARRIVAL" : "",
+        day_notes: day.daywiseText || "",
+        status: "VENDOR_INTAKE_RECORDED",
+        record_version: 1,
+        created_at: now,
+        created_by: actor.employeeId,
+        updated_at: now,
+        updated_by: actor.employeeId,
+      }, actor, now);
+      (day.splits || []).forEach((split, index) => {
+        const serviceId = split.serviceId || uuid_("SVC");
+        upsertVersionedRecord_("SERVICES", "service_id", serviceId, {
+          service_id: serviceId,
+          tour_day_id: dayId,
+          tour_id: tour.tour_id,
+          revision_id: intake.sourceRevisionId || "",
+          service_sequence: index + 1,
+          service_type: String(split.serviceType || "VENDOR").toUpperCase(),
+          service_name: split.activityText || "",
+          service_description: split.activityText || "",
+          start_time: "",
+          end_time: "",
+          pickup_location: "",
+          dropoff_location: "",
+          quantity: 1,
+          unit: "SERVICE",
+          booking_required: String(split.serviceType || "").toUpperCase() === "VENDOR",
+          status: "SPLIT_READY",
+          notes: "",
+          suggested_vendor_id: split.vendorId || "",
+          suggested_vendor_name: split.vendorName || "",
+          record_version: 1,
+          created_at: now,
+          created_by: actor.employeeId,
+          updated_at: now,
+          updated_by: actor.employeeId,
+        }, actor, now);
+        splitCount += 1;
+      });
+    });
+    const auditId = uuid_("AUD");
+    appendRecord_("AUDIT_LOG", {
+      audit_id: auditId,
+      event_timestamp: now,
+      actor_employee_id: actor.employeeId,
+      actor_email: actor.email,
+      client_mode: "DESKTOP",
+      action: "VENDOR_INTAKE_SAVED",
+      entity_type: "TOUR",
+      entity_id: tour.tour_id,
+      tour_id: tour.tour_id,
+      request_id: request.requestId,
+      before_json: "",
+      after_json: JSON.stringify({
+        customerCode: code,
+        sourcePublicationId: request.sourcePublicationId || "",
+        sourceRecordVersion: Number(request.sourceRecordVersion || 0),
+        adultPax: Number(intake.adultPax || 0),
+        childPax: Number(intake.childPax || 0),
+        infantPax: Number(intake.infantPax || 0),
+        hotelCount: (intake.hotels || []).length,
+        dayCount: (intake.days || []).length,
+        splitCount,
+      }),
+      reason: "",
+      result: "SUCCESS",
+      error_code: "",
+    });
+    return {
+      customerCode: code,
+      tourId: tour.tour_id,
+      auditId,
+      hotelCount: (intake.hotels || []).length,
+      dayCount: (intake.days || []).length,
+      splitCount,
+      replayed: false,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function validateVendorIntakePayload_(intake) {
+  const required = ["customerCode", "customerName", "tourId", "arrivalDate", "departureDate"];
+  const missing = required.filter((field) => !String(intake[field] || "").trim());
+  if (missing.length) {
+    throw apiError_("VALIDATION_ERROR", `Missing Vendor intake fields: ${missing.join(", ")}.`);
+  }
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoDate.test(String(intake.arrivalDate)) || !isoDate.test(String(intake.departureDate))) {
+    throw apiError_("VALIDATION_ERROR", "Arrival and departure dates must use YYYY-MM-DD.");
+  }
+  if (String(intake.departureDate) < String(intake.arrivalDate)) {
+    throw apiError_("VALIDATION_ERROR", "Departure date cannot be earlier than arrival date.");
+  }
+  ["adultPax", "childPax", "infantPax"].forEach((field) => {
+    const value = Number(intake[field] ?? 0);
+    if (!Number.isInteger(value) || value < 0) {
+      throw apiError_("VALIDATION_ERROR", "Adult, Child, and Infant must be whole numbers starting from 0.");
+    }
+  });
+  const allowedTypes = ["VENDOR", "TOC", "VEHICLE", "ADDITIONAL_SERVICES"];
+  const dayNumbers = {};
+  (intake.days || []).forEach((day) => {
+    const number = Number(day.dayNumber);
+    if (!Number.isInteger(number) || number < 1 || dayNumbers[number]) {
+      throw apiError_("VALIDATION_ERROR", "Day Wise numbers must be unique positive integers.");
+    }
+    dayNumbers[number] = true;
+    (day.splits || []).forEach((split) => {
+      if (!allowedTypes.includes(String(split.serviceType || "").toUpperCase())) {
+        throw apiError_("VALIDATION_ERROR", "Unsupported Vendor micro split type.");
+      }
+    });
+  });
+}
+
+function validateVendorSource_(request) {
+  if (!request.sourcePublicationId) return;
+  const source = findRecord_("DEPARTMENT_PUBLICATIONS", "publication_id", request.sourcePublicationId);
+  if (!source || String(source.status) !== "PUBLISHED") {
+    throw apiError_("VERSION_CONFLICT", "Reservation source is no longer current. Reload the itinerary.");
+  }
+  if (Number(source.published_record_version || 0) !== Number(request.sourceRecordVersion || 0)) {
+    throw apiError_("VERSION_CONFLICT", "Reservation published a newer version. Reload before posting.", {
+      expectedVersion: Number(source.published_record_version || 0),
+      submittedVersion: Number(request.sourceRecordVersion || 0),
+    });
+  }
+}
+
+function ensureVendorSchema_() {
+  ensureHeaders_("TOURS", [
+    "pax_adult", "pax_child", "pax_infant",
+    "arrival_flight", "arrival_sector", "arrival_time",
+    "departure_flight", "departure_sector", "departure_time",
+  ]);
+  ensureSheetWithHeaders_("TOUR_HOTEL_STAYS", [
+    "hotel_stay_id", "tour_id", "revision_id", "stay_sequence", "hotel_name",
+    "check_in_date", "check_out_date", "status", "record_version",
+    "created_at", "created_by", "updated_at", "updated_by",
+  ]);
+  ensureHeaders_("SERVICES", ["suggested_vendor_id", "suggested_vendor_name"]);
 }
 
 function publishDepartmentResult_(request, actor) {
@@ -306,14 +539,23 @@ function broadcastItineraryNotification_(details, actor, now) {
     title: `${details.customerCode} - ${revisionLabel}`,
     message: `${actor.fullName || actor.employeeId} ${details.eventType === "REVISION" ? "posted a revision" : "posted a new itinerary"}.${details.note ? ` Note: ${details.note}` : ""}`,
     source_module: "RESERVATION",
-    action_url: `reservation-recheck:${details.customerCode}`,
+    action_url: details.eventType === "REVISION"
+      ? `vendor-revise-itinerary:${details.customerCode}`
+      : `vendor-new-itinerary:${details.customerCode}`,
     created_at: now,
     created_by: actor.employeeId,
     expires_at: "",
   });
   const recipients = allRecords_("EMPLOYEES")
     .filter((employee) => truthy_(employee.active)
-      && (truthy_(employee.desktop_access) || truthy_(employee.mobile_access)));
+      && (truthy_(employee.desktop_access) || truthy_(employee.mobile_access)))
+    .filter((employee) => {
+      const department = String(employee.department || "").toUpperCase();
+      const role = String(employee.role || "").toUpperCase().replace(/[ -]+/g, "_");
+      return department === "VENDOR"
+        || ["ADMIN", "MANAGER", "ALL_ROUNDER"].includes(role)
+        || String(employee.employee_id || "") === String(actor.employeeId || "");
+    });
   recipients.forEach((employee) => {
     appendRecord_("NOTIF_RECIPIENTS", {
       notification_recipient_id: uuid_("NREC"),
@@ -483,6 +725,36 @@ function ensureHeaders_(sheetName, requiredHeaders) {
     if (!headers.includes(header)) headers.push(header);
   });
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function ensureSheetWithHeaders_(sheetName, requiredHeaders) {
+  const spreadsheet = spreadsheet_();
+  let sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String).filter(Boolean);
+  requiredHeaders.forEach((header) => {
+    if (!headers.includes(header)) headers.push(header);
+  });
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
+  return sheet;
+}
+
+function upsertVersionedRecord_(sheetName, key, value, record, actor, now) {
+  const existing = findRecord_(sheetName, key, value);
+  const versioned = Object.assign({}, record, {
+    record_version: existing ? Number(existing.record_version || 0) + 1 : 1,
+    created_at: existing && existing.created_at || record.created_at || now,
+    created_by: existing && existing.created_by || record.created_by || actor.employeeId,
+    updated_at: now,
+    updated_by: actor.employeeId,
+  });
+  if (existing) {
+    updateRecord_(sheetName, key, value, versioned);
+  } else {
+    appendRecord_(sheetName, versioned);
+  }
 }
 
 function updateRecord_(sheetName, key, value, changes) {

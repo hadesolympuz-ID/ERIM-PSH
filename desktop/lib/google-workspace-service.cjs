@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const mammoth = require("mammoth");
+const { extractItineraryFromHtml } = require("./itinerary-extractor.cjs");
 
 class GoogleWorkspaceService {
   constructor({ database, authService, chooseFile, downloadDirectory }) {
@@ -239,6 +240,9 @@ class GoogleWorkspaceService {
     return {
       customerCode: code,
       customerName: tour.client_name || tour.customer_name || "",
+      adultPax: Number(tour.pax_adult || 0),
+      childPax: Number(tour.pax_child || 0),
+      infantPax: Number(tour.pax_infant || 0),
       tourId: tour.tour_id || "",
       tourStatus: tour.status || tour.tour_status || "",
       days,
@@ -248,6 +252,7 @@ class GoogleWorkspaceService {
         || matchingRevisions.length
         || 0
       ),
+      currentRevisionId: latestRevision.revision_id || "",
       driveFileId,
       driveFileName: metadata.name,
       driveFileUrl: metadata.webViewLink || `https://drive.google.com/open?id=${driveFileId}`,
@@ -255,6 +260,136 @@ class GoogleWorkspaceService {
       documentHtml: sanitizeDocumentHtml(converted.value),
       conversionWarnings: converted.messages.map((message) => message.message),
     };
+  }
+
+  async getVendorIntakeContext(customerCode) {
+    const itinerary = await this.getRevisionContext(customerCode);
+    const publications = await this.sheetRecords("DEPARTMENT_PUBLICATIONS");
+    const source = publications
+      .filter((row) =>
+        String(row.customer_code || "").trim().toUpperCase() === itinerary.customerCode
+        && String(row.department || "").toUpperCase() === "RESERVATION"
+        && String(row.status || "").toUpperCase() === "PUBLISHED"
+      )
+      .sort((a, b) =>
+        Number(b.published_record_version || 0) - Number(a.published_record_version || 0)
+      )[0] || {};
+    const extracted = extractItineraryFromHtml(itinerary.documentHtml);
+    const local = this.database.getVendorIntakeDraftByCode(itinerary.customerCode);
+    if (local) {
+      return {
+        ...local,
+        sourcePublicationId: source.publication_id || local.sourcePublicationId,
+        sourceRecordVersion: Number(source.published_record_version || local.sourceRecordVersion || 0),
+        sourceRevisionId: itinerary.currentRevisionId || local.sourceRevisionId,
+        driveFileId: itinerary.driveFileId,
+        driveFileName: itinerary.driveFileName,
+        driveFileUrl: itinerary.driveFileUrl,
+        documentHtml: itinerary.documentHtml,
+        conversionWarnings: itinerary.conversionWarnings,
+        sourceRefreshedAt: new Date().toISOString(),
+      };
+    }
+    return {
+      vendorDraftId: "",
+      customerCode: itinerary.customerCode,
+      customerName: extracted.customerName || itinerary.customerName,
+      adultPax: itinerary.adultPax,
+      childPax: itinerary.childPax,
+      infantPax: itinerary.infantPax,
+      tourId: itinerary.tourId,
+      sourcePublicationId: source.publication_id || "",
+      sourceRecordVersion: Number(source.published_record_version || 0),
+      sourceRevisionId: itinerary.currentRevisionId || "",
+      driveFileId: itinerary.driveFileId,
+      driveFileName: itinerary.driveFileName,
+      driveFileUrl: itinerary.driveFileUrl,
+      documentHtml: itinerary.documentHtml,
+      arrivalDate: extracted.arrivalDate || "",
+      arrivalFlight: extracted.arrivalFlight || "",
+      arrivalSector: extracted.arrivalSector || "",
+      arrivalTime: extracted.arrivalTime || "",
+      departureDate: extracted.departureDate || "",
+      departureFlight: extracted.departureFlight || "",
+      departureSector: extracted.departureSector || "",
+      departureTime: extracted.departureTime || "",
+      hotels: extracted.hotels || [],
+      days: buildVendorDays(extracted.arrivalDate, extracted.departureDate),
+      extractionStatus: "NEEDS_REVIEW",
+      localStatus: "LOCAL_DRAFT",
+      conversionWarnings: itinerary.conversionWarnings,
+    };
+  }
+
+  async publishVendorIntake(input) {
+    const saved = this.database.saveVendorIntakeDraft(input);
+    const result = await this.callAppsScript("vendor.intake.save", {
+      requestId: `VINT-${crypto.randomUUID()}`,
+      sourcePublicationId: saved.sourcePublicationId,
+      sourceRecordVersion: saved.sourceRecordVersion,
+      intake: saved,
+    });
+    this.database.markVendorIntakePublished(saved.customerCode);
+    return { ...result, local: this.database.getVendorIntakeDraftByCode(saved.customerCode) };
+  }
+
+  async getVendorDashboard() {
+    const settings = this.database.getPublicSettings();
+    if (!settings.spreadsheetId || !this.authService?.status().connected) {
+      return { urgent: [], pending: [], replied: [], done: [], offline: true };
+    }
+    const [tours, publications, services, bookings, communications] = await Promise.all([
+      this.sheetRecords("TOURS"),
+      this.sheetRecords("DEPARTMENT_PUBLICATIONS"),
+      this.sheetRecords("SERVICES"),
+      this.sheetRecords("SUPPLIER_BOOKINGS"),
+      this.sheetRecords("COMMUNICATIONS"),
+    ]);
+    const now = Date.now();
+    const plusSeven = now + (7 * 86_400_000);
+    const tourById = new Map(tours.map((tour) => [String(tour.tour_id || ""), tour]));
+    const serviceById = new Map(services.map((service) => [String(service.service_id || ""), service]));
+    const latestReservation = new Map();
+    publications
+      .filter((row) =>
+        String(row.department || "").toUpperCase() === "RESERVATION"
+        && String(row.status || "").toUpperCase() === "PUBLISHED"
+      )
+      .forEach((row) => {
+        const key = String(row.tour_id || row.customer_code || "");
+        const previous = latestReservation.get(key);
+        if (!previous || Number(row.published_record_version || 0) > Number(previous.published_record_version || 0)) {
+          latestReservation.set(key, row);
+        }
+      });
+    const urgent = [...latestReservation.values()]
+      .filter((row) => now - new Date(row.published_at || row.created_at || 0).getTime() > 72 * 3_600_000)
+      .filter((row) => !services.some((service) =>
+        String(service.tour_id || "") === String(row.tour_id || "")
+      ))
+      .map((row) => dashboardTourItem(row, tourById.get(String(row.tour_id || ""))));
+    const pending = bookings
+      .filter((row) => !["SENT", "CONFIRMED", "CANCELED"].includes(String(row.status || "").toUpperCase()))
+      .map((row) => {
+        const service = serviceById.get(String(row.service_id || "")) || {};
+        return dashboardTourItem(row, tourById.get(String(row.tour_id || service.tour_id || "")), {
+          serviceName: service.service_name || service.service_description || "",
+        });
+      });
+    const replied = communications
+      .filter((row) =>
+        String(row.direction || "").toUpperCase() === "INBOUND"
+        && !["REVIEWED", "CLOSED"].includes(String(row.status || "").toUpperCase())
+      )
+      .map((row) => dashboardTourItem(row, tourById.get(String(row.tour_id || ""))));
+    const done = tours
+      .filter((tour) => ["DONE", "COMPLETE", "COMPLETED"].includes(String(tour.overall_status || tour.status || "").toUpperCase()))
+      .filter((tour) => {
+        const arrival = new Date(tour.arrival_date || 0).getTime();
+        return arrival > now && arrival <= plusSeven;
+      })
+      .map((tour) => dashboardTourItem(tour, tour));
+    return { urgent, pending, replied, done, offline: false };
   }
 
   async getRecheckContext(customerCode) {
@@ -439,6 +574,7 @@ class GoogleWorkspaceService {
           createdAt: row.created_at || "",
           readAt: recipient.read_at || "",
           deliveryStatus: recipient.delivery_status || "",
+          actionUrl: row.action_url || "",
         };
       })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -546,6 +682,36 @@ class GoogleWorkspaceService {
       },
     );
   }
+}
+
+function buildVendorDays(arrivalDate, departureDate) {
+  const start = new Date(`${arrivalDate || ""}T00:00:00Z`);
+  const end = new Date(`${departureDate || ""}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+  const days = [];
+  for (let cursor = start.getTime(), dayNumber = 1; cursor <= end.getTime(); cursor += 86_400_000, dayNumber += 1) {
+    days.push({
+      tourDayId: "",
+      dayNumber,
+      serviceDate: new Date(cursor).toISOString().slice(0, 10),
+      daywiseText: "",
+      status: "DRAFT",
+      splits: [],
+    });
+  }
+  return days;
+}
+
+function dashboardTourItem(source, tour = {}, extra = {}) {
+  return {
+    customerCode: tour.customer_code || source.customer_code || "",
+    customerName: tour.client_name || tour.customer_name || source.client_name || "",
+    tourId: tour.tour_id || source.tour_id || "",
+    arrivalDate: tour.arrival_date || source.arrival_date || "",
+    status: source.status || tour.overall_status || tour.status || "",
+    updatedAt: source.updated_at || source.published_at || source.created_at || "",
+    ...extra,
+  };
 }
 
 function mimeTypeFor(extension) {

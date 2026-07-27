@@ -8,8 +8,8 @@ dibatalkan.
 **Repository:** `hadesolympuz-ID/ERIM-PSH`  
 **Local project:** `C:\PROJECT\ERIM-PSH`  
 **Target application:** `https://status.peakseasonholidays.com`  
-**Last updated:** 2026-07-26  
-**Current phase:** Desktop v1.0 Dummy Operational Modeling
+**Last updated:** 2026-07-27
+**Current phase:** Vendor Booking implementation preparation — VB-01
 
 ---
 
@@ -364,9 +364,13 @@ official data.
 
 | Deliverable | Status | Acceptance condition |
 | --- | --- | --- |
+| Focused implementation baseline | `DONE` | Approved ownership, menu hierarchy, separate state machines, online/local table contract, claim rules, notification routing, delivery phases, and VB-01 acceptance tests are consolidated in `docs/VENDOR_BOOKING_BASE_PLAN.md`. |
+| Vendor role dashboard design | `DONE` | Vendor-specific dashboard has independently scrolling Urgent, Pending, Replied, and Done sections with exact source conditions, navigation behavior, timezone/window rules, and no automatic reply-to-confirmed assumption. |
+| Vendor role dashboard implementation | `IN PROGRESS` | v1.0.8 role-aware home screen renders independently scrolling Urgent, Pending, Replied, and Done sections. Online derived-data stabilization, exact Pending-to-Generate preload, and dummy UAT remain. |
+| Shared generic Notification Inbox baseline | `DONE` | Every department uses the same display-only Inbox component; visible totals/information are filtered server-side by job description/role/assignment, while approved All Rounder/oversight roles may receive broader events. Subgroups and action lifecycle remain later work. |
 | Universal Lookup foundation | `PENDING` | Reusable keyboard-friendly typeahead searches active vendors, aliases, programs, hotels, agents, staff, and Customer Codes on every keystroke; results are ranked contextually while manual organic detail remains available. |
-| Daywise input workspace | `PENDING` | Staff works without editing raw Sheet. |
-| Service split | `PENDING` | Services grouped into supplier bookings. |
+| Daywise input workspace | `IN PROGRESS` | v1.0.8 loads the latest Drive DOCX, extracts editable arrival/departure/hotels, generates Day 1..N, and stores pasted staff text locally before controlled Post. Live dummy-case UAT remains. |
+| Service split | `IN PROGRESS` | v1.0.8 records per-day Vendor/TOC/Vehicle/Additional Services micro splits into `SERVICES`; supplier grouping and booking generation remain later phases. |
 | Vendor search/assignment | `PENDING` | Vendor is selected through Universal Lookup using a stable `vendor_id`; active approved matches appear first, aliases resolve to the canonical vendor, and staff can intentionally expand to all authorized vendors. |
 | Booking generation | `PENDING` | Uses approved SOP/template. |
 | Email/WhatsApp helper | `PENDING` | Snapshot and communication evidence recorded. |
@@ -465,7 +469,7 @@ must remain testable with dummy data before the next release starts.
 
 | Proposed version | Scope | Status | Acceptance condition |
 | --- | --- | --- | --- |
-| v1.0.8 | Vendor Daily Inbox and work queue | `PENDING` | Vendor receives New Itinerary, Revised Itinerary, and Booking Process Done events; each item shows Customer Code, source version, received time, priority, owner/claim status, and acknowledgement. |
+| v1.0.8 | Vendor role dashboard, generic Notification Inbox, and work queue | `PENDING` | Vendor receives independently scrolling Urgent, Pending, Replied, and Done sections; the shared Inbox only displays job-description-permitted totals/information; Pending routes to Generating Booking, Done shows check-ins from tomorrow through +7 days read-only, and work items own claim/action state. |
 | v1.0.9 | Universal Lookup, daywise service input, and supplier split | `PENDING` | Vendor can create/revise stable daywise service items; find programs/vendors through live per-keystroke typeahead with keyboard navigation, contextual ranking, aliases, and canonical IDs; retain manual organic booking detail; group services into supplier bookings; and validate unassigned/duplicate items before saving. |
 | v1.0.10 | Booking template, preview, and Gmail send | `PENDING` | System generates versioned SOP-based subject/body/attachments, requires recipient and content preview, sends through the connected user, and stores Gmail thread/message IDs plus the exact sent snapshot. |
 | v1.0.11 | Revision impact and booking amendment | `PENDING` | System compares the new Reservation publication with the Vendor working version and requires a per-item decision: unchanged, add, change, rebook, or cancel; confirmed bookings are never silently overwritten. |
@@ -519,10 +523,11 @@ must remain testable with dummy data before the next release starts.
    `CANCELED`, including actor, time, recipient, Gmail thread/message ID, and
    reason.
 
-#### Confirmed Vendor workflow decisions — discussion only
+#### Confirmed Vendor workflow decisions — approved implementation baseline
 
 These decisions are approved for the future Vendor Booking releases but are not
-implemented yet.
+implemented yet. The focused build contract and phase gates are maintained in
+`docs/VENDOR_BOOKING_BASE_PLAN.md`.
 
 | Point | Approved decision | Planned implementation |
 | --- | --- | --- |
@@ -555,7 +560,7 @@ implemented yet.
 | Template versioning | Save the template version and final sent-content snapshot so later SOP edits do not change historical evidence. | `PENDING` |
 | Gmail evidence | Store thread ID, message ID, recipient snapshot, sent timestamp, attachment Drive IDs, and sender. Do not depend only on a Gmail URL. | `PENDING` |
 | WhatsApp and portal vendors | Use manual evidence/reference workflows; never store passwords. Email automation must not be treated as the only booking channel. | `PENDING` |
-| Notification lifecycle | Add unread/read, acknowledge, claim, resolved, and escalation state. v1.0.7 creates recipients, but full acknowledgement controls are not yet implemented. | `PENDING` |
+| Notification lifecycle | Initial shared Inbox is display-only. Add subgroup classification, deep links, unread/read, acknowledge, resolved, escalation, and 90-day local lifecycle later; work claim remains separate from notification state. | `PENDING` |
 | KPI timestamps | Capture received, acknowledged, claimed, first action, sent, supplier confirmed, revised, canceled, and completed timestamps per actor. | `PENDING` |
 | Daywise drill-down privacy/performance | Load linked details on demand and apply role filtering; do not download every Gmail trail or financial field when a day is opened. | `PENDING` |
 
@@ -629,6 +634,13 @@ implemented yet.
 | 2026-07-27 | Overall product progress recorded at approximately 30%. Workbook/master data will be completed just in time with each workflow; immediate priorities are employee access/position, vendor identity and contacts, versioned transport pricing, and TOC data. Employee passwords will never be stored in the workbook. | `DONE` |
 | 2026-07-27 | Future Sales & Production chain recorded as a later phase after the operational core: effective-dated contract rates, daywise rate calculation, derived/implied selling rates, quotation/version/reply trail, accepted confirmation handoff, rate sheet, Cost Sheet, invoicing, payment, and variance linkage. Issued commercial records preserve rate snapshots and are never silently recalculated by later contract updates. | `DONE` |
 | 2026-07-27 | Credential-protection hardening completed for current scope: GitHub Secret Scanning and Push Protection enabled with zero initial open alerts; ignore rules expanded and verified; detailed DFD controls, pre-commit/pre-release scanning, incident response, and planned 72-hour interactive reauthentication recorded. Legacy OAuth Client Secret remains temporarily in local SQLite by project-owner decision and must never enter Git, logs, installer resources, Sheets, or Drive. | `DONE` |
+| 2026-07-27 | Vendor Booking focused implementation baseline approved and consolidated: ownership, menu hierarchy, independent work/service/booking/communication/result states, online/local table contract, atomic claim rules, Universal Lookup, New/Revised Confirmation flows, evidence handling, notification routing, VB-01–VB-08 delivery phases, and first-sprint dummy UAT are recorded in `docs/VENDOR_BOOKING_BASE_PLAN.md`. | `DONE` |
+| 2026-07-27 | Department-specific dashboard principle approved. Vendor Dashboard baseline now contains independent-scroll Urgent (>72 hours from applicable Reservation New/Revise/Cancel publication and unresolved), Pending (micro split but outbound action not sent, with Generate Booking route), Replied (linked inbound vendor reply awaiting human review), and Done (read-only completed Customer Codes checking in tomorrow through +7 days). | `DONE` |
+| 2026-07-27 | Notification Inbox scope clarified: one shared generic display-only component for all departments, initially showing permitted event totals/latest information without claim or mutation. Apps Script filters recipients by job description, department, role, assignment, and oversight; All Rounder and approved higher roles may receive broader events. Inbox subgroup classification and full lifecycle are deferred. | `DONE` |
+| 2026-07-27 | Desktop v1.0.8 Vendor Booking Sprint 1 implemented locally: six Vendor submenus, four-panel role dashboard, notification deep-link for New/Revise events, editable Adult/Child/Infant pax and flight/hotel intake, unlimited hotel rows, generated Day 1..N, side-by-side Drive DOCX viewer, micro split editor, SQLite draft persistence, and controlled `vendor.intake.save` Apps Script mutation. Existing `TOURS.pax_adult`, `pax_child`, and `pax_infant` columns are reused end-to-end. | `IN PROGRESS` |
+| 2026-07-27 | Apps Script Version 7 deployed on the existing `/exec` URL. Version 6 Vendor intake controls remain, while Vendor New Itinerary now persists validated Adult/Child/Infant values to existing `TOURS.pax_adult`, `pax_child`, and `pax_infant` fields and records them in the audit payload. | `DONE` |
+| 2026-07-27 | Workbook foundation aligned for Vendor Sprint 1: `TOUR_HOTEL_STAYS` added, TOURS flight fields and SERVICES suggested-vendor fields appended, SHEET_INDEX/DATA_DICTIONARY updated, formula scan clean, and visual table preview verified. | `DONE` |
+| 2026-07-27 | Vendor Sprint 1 automated suite passes 17/17 tests; isolated-profile Electron startup smoke test completed without application errors. Live authenticated Post/readback dummy UAT remains before v1.0.8 installer release. | `IN PROGRESS` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |

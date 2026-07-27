@@ -12,6 +12,8 @@ const state = {
   recheckContext: null,
   onlineNotifications: [],
   followups: [],
+  vendorDashboard: { urgent: [], pending: [], replied: [], done: [], offline: true },
+  vendorIntake: null,
 };
 
 const moduleDescriptions = {
@@ -82,13 +84,25 @@ async function refresh() {
   } catch {
     state.onlineNotifications = [];
   }
+  try {
+    state.vendorDashboard = state.auth.connected
+      ? await window.erim.vendor.getDashboard()
+      : { urgent: [], pending: [], replied: [], done: [], offline: true };
+  } catch {
+    state.vendorDashboard = { urgent: [], pending: [], replied: [], done: [], offline: true };
+  }
   renderChrome();
   renderDashboard();
+  renderVendorDashboard();
+  renderVendorInbox();
   renderWorkspace();
   renderReservationFollowups();
   renderPersonalKpi();
   renderSync();
   renderSettings();
+  if (state.currentView === "dashboard" && state.bootstrap.settings.department === "VENDOR") {
+    showView("vendor-dashboard", "VENDOR");
+  }
 }
 
 function renderChrome() {
@@ -110,7 +124,7 @@ function renderDashboard() {
   const notifications = buildNotifications();
   $("#inbox-count").textContent = notifications.length;
   $("#notification-inbox").innerHTML = notifications.length ? notifications.map((item) => `
-    <article class="notification-item ${item.tone}">
+    <article class="notification-item ${item.tone} ${item.actionUrl ? "actionable" : ""}" ${item.actionUrl ? `data-notification-action="${escapeHtml(item.actionUrl)}"` : ""}>
       <span class="notification-dot" aria-hidden="true"></span>
       <div class="notification-copy">
         <strong>${escapeHtml(item.title)}</strong>
@@ -127,6 +141,7 @@ function buildNotifications() {
     title: item.title,
     message: item.message,
     updatedAt: item.createdAt,
+    actionUrl: item.actionUrl || "",
   }));
   state.syncQueue
     .filter((job) => ["FAILED", "CONFLICT", "PENDING_SYNC"].includes(job.status))
@@ -153,6 +168,41 @@ function buildNotifications() {
       updatedAt: item.updated_at,
     }));
   return notifications.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+}
+
+function renderVendorDashboard() {
+  const data = state.vendorDashboard || {};
+  ["urgent", "pending", "replied", "done"].forEach((bucket) => {
+    const items = Array.isArray(data[bucket]) ? data[bucket] : [];
+    $(`#vendor-${bucket}-count`).textContent = items.length;
+    $(`#vendor-${bucket}-list`).innerHTML = items.length ? items.map((item) => `
+      <article class="vendor-dashboard-item">
+        <div>
+          <strong>${escapeHtml(item.customerCode || "No customer code")}</strong>
+          <small>${escapeHtml([
+            item.customerName,
+            item.serviceName,
+            item.arrivalDate ? `Arrival ${item.arrivalDate}` : "",
+            item.status,
+          ].filter(Boolean).join(" · "))}</small>
+        </div>
+        ${bucket === "done" ? "" : `<button class="button ghost small" type="button" data-vendor-open-code="${escapeHtml(item.customerCode || "")}">Open</button>`}
+      </article>
+    `).join("") : `<div class="empty-notifications">${data.offline ? "Connect Google to load online Vendor data." : `No ${bucket} item.`}</div>`;
+  });
+}
+
+function renderVendorInbox() {
+  const notifications = state.onlineNotifications;
+  $("#vendor-inbox-count").textContent = notifications.length;
+  $("#vendor-notification-inbox").innerHTML = notifications.length ? notifications.map((item) => `
+    <article class="notification-item ${item.readAt ? "" : "success"} ${item.actionUrl ? "actionable" : ""}"
+      ${item.actionUrl ? `data-notification-action="${escapeHtml(item.actionUrl)}"` : ""}>
+      <span class="notification-dot" aria-hidden="true"></span>
+      <div class="notification-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p></div>
+      <time class="notification-time">${formatDate(item.createdAt)}</time>
+    </article>
+  `).join("") : `<div class="empty-notifications">No Vendor notifications.</div>`;
 }
 
 function renderWorkspace() {
@@ -297,6 +347,13 @@ function showView(view, module = null) {
   state.currentModule = module;
   $$(".view").forEach((node) => node.classList.toggle("active", node.id === `${view}-view`));
   $$(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.view === view && (!module || node.dataset.module === module)));
+  $$("[data-vendor-action]").forEach((node) => {
+    const map = {
+      inbox: "vendor-inbox", generate: "vendor-generate", new: "vendor-new-itinerary",
+      revise: "vendor-revise-itinerary", cancel: "vendor-cancel", kpi: "vendor-kpi",
+    };
+    node.classList.toggle("active", map[node.dataset.vendorAction] === view);
+  });
   const titles = {
     dashboard: ["Local workspace", "Operations dashboard"],
     workspace: ["Department workspace", module?.replaceAll("_", " ") || "Workspace"],
@@ -305,6 +362,13 @@ function showView(view, module = null) {
     settings: ["Application configuration", "Desktop settings"],
     "reservation-recheck": ["Reservation final checking", "Re Check Itinerary"],
     "reservation-kpi": ["Reservation personal performance", "KPI Saya"],
+    "vendor-dashboard": ["Vendor Booking", "Daily control dashboard"],
+    "vendor-inbox": ["Vendor Booking", "Inbox"],
+    "vendor-generate": ["Vendor Booking", "Generate"],
+    "vendor-new-itinerary": ["Vendor Booking intake", "New Itinerary"],
+    "vendor-revise-itinerary": ["Vendor Booking", "Revise Itinerary"],
+    "vendor-cancel": ["Vendor Booking", "Cancel All Service"],
+    "vendor-kpi": ["Vendor Booking", "Cek KPI"],
   };
   $("#view-eyebrow").textContent = titles[view][0];
   $("#view-title").textContent = titles[view][1];
@@ -677,8 +741,226 @@ async function handleDraftAction(action, id) {
   }
 }
 
+function vendorDateRange(arrivalDate, departureDate, existingDays = []) {
+  const start = new Date(`${arrivalDate || ""}T00:00:00Z`);
+  const end = new Date(`${departureDate || ""}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+  const existingByDate = new Map(existingDays.map((day) => [day.serviceDate, day]));
+  const rows = [];
+  for (let cursor = start.getTime(), dayNumber = 1; cursor <= end.getTime(); cursor += 86_400_000, dayNumber += 1) {
+    const serviceDate = new Date(cursor).toISOString().slice(0, 10);
+    const existing = existingByDate.get(serviceDate) || {};
+    rows.push({
+      tourDayId: existing.tourDayId || "",
+      dayNumber,
+      serviceDate,
+      daywiseText: existing.daywiseText || "",
+      status: existing.status || "DRAFT",
+      splits: existing.splits || [],
+    });
+  }
+  return rows;
+}
+
+function renderVendorHotels(hotels = []) {
+  $("#vendor-hotel-list").innerHTML = hotels.length ? hotels.map((hotel, index) => `
+    <div class="hotel-row" data-hotel-stay-id="${escapeHtml(hotel.hotelStayId || "")}">
+      <span class="hotel-sequence">#${index + 1}</span>
+      <label>Hotel<input data-vendor-hotel-field="hotelName" value="${escapeHtml(hotel.hotelName || "")}" placeholder="Hotel name" /></label>
+      <label>Check-in date<input data-vendor-hotel-field="checkInDate" type="date" value="${escapeHtml(hotel.checkInDate || "")}" /></label>
+      <label>Check-out date<input data-vendor-hotel-field="checkOutDate" type="date" value="${escapeHtml(hotel.checkOutDate || "")}" /></label>
+      <button class="button ghost small" type="button" data-remove-vendor-hotel="${index}">Remove</button>
+    </div>
+  `).join("") : `<div class="empty-notifications">No hotel extracted. Add hotel manually if required.</div>`;
+}
+
+function vendorSplitRow(split = {}, index = 0) {
+  const type = String(split.serviceType || "VENDOR").toUpperCase();
+  return `
+    <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}">
+      <select data-vendor-split-field="serviceType" aria-label="Split type">
+        ${[
+          ["VENDOR", "Vendor"], ["TOC", "TOC"], ["VEHICLE", "Vehicle"],
+          ["ADDITIONAL_SERVICES", "Additional Services"],
+        ].map(([value, label]) => `<option value="${value}" ${type === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select>
+      <input data-vendor-split-field="activityText" value="${escapeHtml(split.activityText || "")}" placeholder="Activity / service detail" />
+      <input data-vendor-split-field="vendorName" value="${escapeHtml(split.vendorName || "")}" placeholder="Vendor name" />
+      <button class="button ghost small" type="button" data-remove-vendor-split="${index}">Remove</button>
+    </div>
+  `;
+}
+
+function renderVendorDays(days = []) {
+  $("#vendor-day-list").innerHTML = days.length ? days.map((day) => `
+    <article class="vendor-day-card" data-tour-day-id="${escapeHtml(day.tourDayId || "")}" data-day-number="${Number(day.dayNumber)}">
+      <div class="vendor-day-heading">
+        <strong>Day ${Number(day.dayNumber)}</strong>
+        <input data-vendor-day-field="serviceDate" type="date" value="${escapeHtml(day.serviceDate || "")}" />
+        <span class="muted-text">${escapeHtml((day.splits || []).length ? `${day.splits.length} split item` : "Not split")}</span>
+        <button class="button ghost small" type="button" data-toggle-vendor-split>Split</button>
+      </div>
+      <textarea data-vendor-day-field="daywiseText" placeholder="Paste Day ${Number(day.dayNumber)} itinerary detail here">${escapeHtml(day.daywiseText || "")}</textarea>
+      <div class="vendor-split-panel" ${(day.splits || []).length ? "" : "hidden"}>
+        <div class="vendor-split-list">${(day.splits || []).map(vendorSplitRow).join("")}</div>
+        <div class="vendor-split-actions"><button class="button ghost small" type="button" data-add-vendor-split>Add split</button></div>
+      </div>
+    </article>
+  `).join("") : `<div class="empty-notifications">Arrival and departure dates must form a valid range.</div>`;
+}
+
+function collectVendorIntake() {
+  const form = $("#vendor-intake-form");
+  const base = state.vendorIntake || {};
+  return {
+    ...base,
+    vendorDraftId: form.elements.vendorDraftId.value,
+    customerCode: form.elements.customerCode.value.trim().toUpperCase(),
+    customerName: form.elements.customerName.value.trim(),
+    adultPax: Number(form.elements.adultPax.value || 0),
+    childPax: Number(form.elements.childPax.value || 0),
+    infantPax: Number(form.elements.infantPax.value || 0),
+    tourId: form.elements.tourId.value,
+    sourcePublicationId: form.elements.sourcePublicationId.value,
+    sourceRecordVersion: Number(form.elements.sourceRecordVersion.value || 0),
+    sourceRevisionId: form.elements.sourceRevisionId.value,
+    driveFileId: form.elements.driveFileId.value,
+    driveFileName: form.elements.driveFileName.value,
+    driveFileUrl: form.elements.driveFileUrl.value,
+    arrivalDate: form.elements.arrivalDate.value,
+    arrivalFlight: form.elements.arrivalFlight.value.trim(),
+    arrivalSector: form.elements.arrivalSector.value.trim(),
+    arrivalTime: form.elements.arrivalTime.value,
+    departureDate: form.elements.departureDate.value,
+    departureFlight: form.elements.departureFlight.value.trim(),
+    departureSector: form.elements.departureSector.value.trim(),
+    departureTime: form.elements.departureTime.value,
+    hotels: $$("#vendor-hotel-list .hotel-row").map((row, index) => ({
+      hotelStayId: row.dataset.hotelStayId || "",
+      staySequence: index + 1,
+      hotelName: row.querySelector('[data-vendor-hotel-field="hotelName"]').value.trim(),
+      checkInDate: row.querySelector('[data-vendor-hotel-field="checkInDate"]').value,
+      checkOutDate: row.querySelector('[data-vendor-hotel-field="checkOutDate"]').value,
+    })),
+    days: $$("#vendor-day-list .vendor-day-card").map((card) => ({
+      tourDayId: card.dataset.tourDayId || "",
+      dayNumber: Number(card.dataset.dayNumber),
+      serviceDate: card.querySelector('[data-vendor-day-field="serviceDate"]').value,
+      daywiseText: card.querySelector('[data-vendor-day-field="daywiseText"]').value,
+      status: "DRAFT",
+      splits: [...card.querySelectorAll(".vendor-split-row")].map((row, index) => ({
+        serviceId: row.dataset.serviceId || "",
+        splitSequence: index + 1,
+        serviceType: row.querySelector('[data-vendor-split-field="serviceType"]').value,
+        activityText: row.querySelector('[data-vendor-split-field="activityText"]').value,
+        vendorId: "",
+        vendorName: row.querySelector('[data-vendor-split-field="vendorName"]').value,
+        status: "DRAFT",
+      })),
+    })),
+  };
+}
+
+function populateVendorIntake(context) {
+  state.vendorIntake = context;
+  const form = $("#vendor-intake-form");
+  const scalarFields = [
+    "vendorDraftId", "customerCode", "customerName", "tourId", "sourcePublicationId",
+    "sourceRecordVersion", "sourceRevisionId", "driveFileId", "driveFileName", "driveFileUrl",
+    "adultPax", "childPax", "infantPax",
+    "arrivalDate", "arrivalFlight", "arrivalSector", "arrivalTime",
+    "departureDate", "departureFlight", "departureSector", "departureTime",
+  ];
+  scalarFields.forEach((field) => {
+    if (form.elements[field]) form.elements[field].value = context[field] ?? "";
+  });
+  form.hidden = false;
+  $("#vendor-extraction-status").textContent = context.extractionStatus || "NEEDS REVIEW";
+  $("#vendor-itinerary-name").textContent = context.driveFileName || "Posted itinerary";
+  $("#vendor-drive-link").href = context.driveFileUrl || "#";
+  $("#vendor-itinerary-preview").innerHTML = context.documentHtml || `<div class="empty-notifications">No readable DOCX content.</div>`;
+  renderVendorHotels(context.hotels || []);
+  renderVendorDays((context.days || []).length
+    ? context.days
+    : vendorDateRange(context.arrivalDate, context.departureDate));
+}
+
+async function loadVendorItinerary(customerCode = "") {
+  const code = String(customerCode || $("#vendor-customer-code").value || "").trim().toUpperCase();
+  if (!code) return toast("Input Customer Code first.", true);
+  const button = $("#load-vendor-itinerary");
+  button.disabled = true;
+  button.textContent = "Loading...";
+  try {
+    const context = await window.erim.vendor.getIntakeContext(code);
+    $("#vendor-customer-code").value = context.customerCode;
+    populateVendorIntake(context);
+    toast(context.vendorDraftId ? "Local Vendor draft and latest source loaded." : "Itinerary extracted. Review all fields.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Load itinerary";
+  }
+}
+
+async function saveVendorIntake(publish = false) {
+  const payload = collectVendorIntake();
+  if (!payload.customerName || !payload.arrivalDate || !payload.departureDate) {
+    return toast("Customer Name, Arrival Date, and Departure Date are required.", true);
+  }
+  if (![payload.adultPax, payload.childPax, payload.infantPax]
+    .every((value) => Number.isInteger(value) && value >= 0)) {
+    return toast("Adult, Child, and Infant must be whole numbers starting from 0.", true);
+  }
+  const button = publish ? $("#post-vendor-intake") : $("#save-vendor-draft");
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = publish ? "Posting..." : "Saving...";
+  try {
+    const result = publish
+      ? await window.erim.vendor.publishIntake({ ...payload, extractionStatus: "CONFIRMED" })
+      : await window.erim.vendor.saveIntakeDraft(payload);
+    const saved = publish ? result.local : result;
+    populateVendorIntake(saved);
+    await refresh();
+    toast(publish
+      ? `Structured data posted: ${result.dayCount} day, ${result.splitCount} split.`
+      : "Vendor intake saved safely on this PC.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+function openVendorNotification(actionUrl) {
+  const [action, ...codeParts] = String(actionUrl || "").split(":");
+  const code = codeParts.join(":");
+  if (action === "vendor-new-itinerary") {
+    showView("vendor-new-itinerary", "VENDOR");
+    $("#vendor-customer-code").value = code;
+    return loadVendorItinerary(code);
+  }
+  if (action === "vendor-revise-itinerary") {
+    showView("vendor-revise-itinerary", "VENDOR");
+    toast(`${code} opened in Vendor revision queue.`);
+  }
+}
+
 function bindEvents() {
   $("#main-nav").addEventListener("click", (event) => {
+    const vendorAction = event.target.closest("[data-vendor-action]");
+    if (vendorAction) {
+      const views = {
+        inbox: "vendor-inbox", generate: "vendor-generate", new: "vendor-new-itinerary",
+        revise: "vendor-revise-itinerary", cancel: "vendor-cancel", kpi: "vendor-kpi",
+      };
+      showView(views[vendorAction.dataset.vendorAction], "VENDOR");
+      if (vendorAction.dataset.vendorAction === "new") $("#vendor-customer-code").focus();
+      return;
+    }
     const reservationAction = event.target.closest("[data-reservation-action]");
     if (reservationAction?.dataset.reservationAction === "recheck") {
       state.currentModule = "RESERVATION";
@@ -699,7 +981,13 @@ function bindEvents() {
       return;
     }
     const button = event.target.closest(".nav-item");
-    if (button) showView(button.dataset.view, button.dataset.module || null);
+    if (button) {
+      if (button.dataset.view === "dashboard" && state.bootstrap.settings.department === "VENDOR") {
+        showView("vendor-dashboard", "VENDOR");
+      } else {
+        showView(button.dataset.view, button.dataset.module || null);
+      }
+    }
   });
   $("#workspace-new-draft").addEventListener("click", () => {
     if (state.currentModule === "RESERVATION") openItineraryDialog("new");
@@ -754,8 +1042,70 @@ function bindEvents() {
     loadConfirmationTrail(selected.dataset.threadId);
   });
   $("#post-itinerary-file").addEventListener("click", postItineraryFile);
+  $("#load-vendor-itinerary").addEventListener("click", () => loadVendorItinerary());
+  $("#vendor-customer-code").addEventListener("change", () => loadVendorItinerary());
+  $("#save-vendor-draft").addEventListener("click", () => saveVendorIntake(false));
+  $("#post-vendor-intake").addEventListener("click", () => saveVendorIntake(true));
+  $("#add-vendor-hotel").addEventListener("click", () => {
+    const payload = collectVendorIntake();
+    payload.hotels.push({ hotelStayId: "", hotelName: "", checkInDate: "", checkOutDate: "" });
+    state.vendorIntake = payload;
+    renderVendorHotels(payload.hotels);
+  });
+  $("#rebuild-vendor-days").addEventListener("click", () => {
+    const payload = collectVendorIntake();
+    payload.days = vendorDateRange(payload.arrivalDate, payload.departureDate, payload.days);
+    state.vendorIntake = payload;
+    renderVendorDays(payload.days);
+    toast(`${payload.days.length} Day Wise rows prepared.`);
+  });
 
   document.body.addEventListener("click", (event) => {
+    const notification = event.target.closest("[data-notification-action]");
+    if (notification) return openVendorNotification(notification.dataset.notificationAction);
+    const vendorOpen = event.target.closest("[data-vendor-open-code]");
+    if (vendorOpen) {
+      showView("vendor-new-itinerary", "VENDOR");
+      $("#vendor-customer-code").value = vendorOpen.dataset.vendorOpenCode;
+      return loadVendorItinerary(vendorOpen.dataset.vendorOpenCode);
+    }
+    const removeHotel = event.target.closest("[data-remove-vendor-hotel]");
+    if (removeHotel) {
+      const payload = collectVendorIntake();
+      payload.hotels.splice(Number(removeHotel.dataset.removeVendorHotel), 1);
+      state.vendorIntake = payload;
+      return renderVendorHotels(payload.hotels);
+    }
+    const splitToggle = event.target.closest("[data-toggle-vendor-split]");
+    if (splitToggle) {
+      const panel = splitToggle.closest(".vendor-day-card").querySelector(".vendor-split-panel");
+      panel.hidden = !panel.hidden;
+      return;
+    }
+    const addSplit = event.target.closest("[data-add-vendor-split]");
+    if (addSplit) {
+      const card = addSplit.closest(".vendor-day-card");
+      const payload = collectVendorIntake();
+      const day = payload.days.find((item) => Number(item.dayNumber) === Number(card.dataset.dayNumber));
+      day.splits.push({
+        serviceId: "", serviceType: "VENDOR", activityText: "", vendorId: "", vendorName: "", status: "DRAFT",
+      });
+      state.vendorIntake = payload;
+      renderVendorDays(payload.days);
+      const updated = $(`#vendor-day-list [data-day-number="${day.dayNumber}"] .vendor-split-panel`);
+      if (updated) updated.hidden = false;
+      return;
+    }
+    const removeSplit = event.target.closest("[data-remove-vendor-split]");
+    if (removeSplit) {
+      const card = removeSplit.closest(".vendor-day-card");
+      const payload = collectVendorIntake();
+      const day = payload.days.find((item) => Number(item.dayNumber) === Number(card.dataset.dayNumber));
+      day.splits.splice(Number(removeSplit.dataset.removeVendorSplit), 1);
+      state.vendorIntake = payload;
+      renderVendorDays(payload.days);
+      return;
+    }
     const email = event.target.closest("[data-recheck-thread-id]");
     if (email) {
       $$("#recheck-email-panel .selection-item").forEach((item) => item.classList.toggle("selected", item === email));

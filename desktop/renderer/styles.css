@@ -244,6 +244,72 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .health-card small { color: var(--muted); }
 .empty-health { grid-column: 1 / -1; color: var(--muted); }
 
+.vendor-dashboard-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.vendor-dashboard-card { min-width: 0; }
+.vendor-dashboard-card.urgent { border-color: #eab2ad; }
+.vendor-dashboard-card.pending { border-color: #ead49f; }
+.vendor-dashboard-card.done { border-color: #add8c5; }
+.vendor-dashboard-scroll { height: 270px; overflow: auto; }
+.vendor-dashboard-item {
+  display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px;
+  padding: 14px 16px; border-top: 1px solid var(--line);
+}
+.vendor-dashboard-item:first-child { border-top: 0; }
+.vendor-dashboard-item strong, .vendor-dashboard-item small { display: block; }
+.vendor-dashboard-item small { margin-top: 4px; color: var(--muted); }
+.vendor-dashboard-item button { align-self: center; }
+.empty-notifications { padding: 32px 20px; color: var(--muted); text-align: center; }
+.notification-item.actionable { cursor: pointer; }
+.notification-item.actionable:hover { background: var(--blue-50); }
+.vendor-intake-lookup {
+  display: grid; grid-template-columns: minmax(280px,520px) auto auto; gap: 10px;
+  align-items: end; padding: 18px 20px; border-bottom: 1px solid var(--line); background: var(--blue-50);
+}
+.vendor-intake-lookup label, .vendor-summary-fields label, .hotel-row label {
+  color: var(--muted); font-size: 12px; font-weight: 750;
+}
+.vendor-intake-lookup input, .vendor-summary-fields input, .hotel-row input { margin-top: 6px; }
+.vendor-summary-fields {
+  display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 13px; padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.vendor-hotels, .vendor-daywise-section { padding: 20px; border-bottom: 1px solid var(--line); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+.section-heading h3 { margin: 0; }
+#vendor-hotel-list { display: grid; gap: 9px; }
+.hotel-row {
+  display: grid; grid-template-columns: 52px minmax(220px,1fr) minmax(145px,.45fr) minmax(145px,.45fr) auto;
+  gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50);
+}
+.hotel-sequence { align-self: center; color: var(--navy-700); font-weight: 850; }
+.vendor-work-columns { display: grid; grid-template-columns: minmax(420px,.95fr) minmax(500px,1.05fr); gap: 15px; }
+.vendor-day-list { display: grid; gap: 11px; max-height: 670px; overflow: auto; padding-right: 3px; }
+.vendor-day-card { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: #fff; }
+.vendor-day-heading {
+  display: grid; grid-template-columns: auto 155px minmax(0,1fr) auto; gap: 10px;
+  align-items: center; padding: 11px 12px; background: var(--blue-50);
+}
+.vendor-day-heading strong { white-space: nowrap; }
+.vendor-day-card textarea { min-height: 92px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.vendor-split-panel { padding: 12px; border-top: 1px dashed #b9c6cf; background: #fbfdfe; }
+.vendor-split-list { display: grid; gap: 8px; }
+.vendor-split-row {
+  display: grid; grid-template-columns: 145px minmax(180px,1fr) minmax(150px,.65fr) auto;
+  gap: 8px; align-items: center;
+}
+.vendor-split-actions { display: flex; justify-content: flex-end; margin-top: 9px; }
+.vendor-document-pane { min-width: 0; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+.vendor-document-pane .pane-heading { justify-content: space-between; gap: 12px; }
+.vendor-document-scroll { height: 670px; }
+.vendor-intake-actions {
+  display: flex; align-items: center; justify-content: flex-end; gap: 9px;
+  padding: 16px 20px; background: var(--blue-50);
+}
+.vendor-intake-actions .muted-text { margin-right: auto; }
+
 @media (max-width: 1180px) {
   .health-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .vendor-summary-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .vendor-work-columns { grid-template-columns: 1fr; }
+  .vendor-document-scroll { height: 520px; }
 }

@@ -26,7 +26,15 @@
             <button class="nav-subitem" data-reservation-action="recheck">Re Check Itinerary</button>
             <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
           </div>
-          <button class="nav-item" data-view="workspace" data-module="VENDOR">Vendor Booking</button>
+          <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR">Vendor Booking</button>
+          <div class="nav-submenu" aria-label="Vendor Booking actions">
+            <button class="nav-subitem" data-vendor-action="inbox">Inbox</button>
+            <button class="nav-subitem" data-vendor-action="generate">Generate</button>
+            <button class="nav-subitem" data-vendor-action="new">New Itinerary</button>
+            <button class="nav-subitem" data-vendor-action="revise">Revise Itinerary</button>
+            <button class="nav-subitem" data-vendor-action="cancel">Cancel All Service</button>
+            <button class="nav-subitem" data-vendor-action="kpi">Cek KPI</button>
+          </div>
           <button class="nav-item" data-view="workspace" data-module="TRANSPORT">Transport</button>
           <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
           <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
@@ -62,7 +70,7 @@
 
         <main>
           <section id="dashboard-view" class="view active">
-            <div class="panel">
+            <div id="general-dashboard-panel" class="panel">
               <div class="panel-heading">
                 <div><p class="eyebrow">Notifications</p><h2>Inbox</h2></div>
                 <span id="inbox-count" class="inbox-count">0</span>
@@ -81,6 +89,129 @@
                 </table>
               </div>
             </div>
+          </section>
+
+          <section id="vendor-dashboard-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Vendor Booking</p>
+                <h2>Daily control dashboard</h2>
+                <p>Operational views may overlap; one stable micro-item remains the source of truth.</p>
+              </div>
+            </div>
+            <div class="vendor-dashboard-grid">
+              <section class="panel vendor-dashboard-card urgent">
+                <div class="panel-heading"><div><p class="eyebrow">Over 72 hours</p><h2>Urgent</h2></div><span id="vendor-urgent-count" class="inbox-count">0</span></div>
+                <div id="vendor-urgent-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card pending">
+                <div class="panel-heading"><div><p class="eyebrow">Split, not sent</p><h2>Pending</h2></div><span id="vendor-pending-count" class="inbox-count">0</span></div>
+                <div id="vendor-pending-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card replied">
+                <div class="panel-heading"><div><p class="eyebrow">Email linked</p><h2>Replied</h2></div><span id="vendor-replied-count" class="inbox-count">0</span></div>
+                <div id="vendor-replied-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card done">
+                <div class="panel-heading"><div><p class="eyebrow">Check-in D+1 to D+7</p><h2>Done</h2></div><span id="vendor-done-count" class="inbox-count">0</span></div>
+                <div id="vendor-done-list" class="vendor-dashboard-scroll"></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="vendor-inbox-view" class="view">
+            <div class="panel">
+              <div class="panel-heading"><div><p class="eyebrow">Vendor Booking</p><h2>Inbox</h2></div><span id="vendor-inbox-count" class="inbox-count">0</span></div>
+              <div class="callout">Inbox sementara bersifat general dan hanya menampilkan informasi. Membuka notifikasi tidak mengubah data booking.</div>
+              <div id="vendor-notification-inbox" class="notification-inbox"></div>
+            </div>
+          </section>
+
+          <section id="vendor-new-itinerary-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Vendor Booking intake</p>
+                <h2>New Itinerary</h2>
+                <p>Review hasil ekstraksi, isi Day Wise, lalu split layanan. Belum ada generate atau send email pada tahap ini.</p>
+              </div>
+            </div>
+            <div class="panel vendor-intake-panel">
+              <div class="vendor-intake-lookup">
+                <label>Customer Code<input id="vendor-customer-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-vendor-itinerary" class="button primary" type="button">Load itinerary</button>
+                <span id="vendor-extraction-status" class="status">Not loaded</span>
+              </div>
+              <form id="vendor-intake-form" hidden>
+                <input type="hidden" name="vendorDraftId" />
+                <input type="hidden" name="tourId" />
+                <input type="hidden" name="sourcePublicationId" />
+                <input type="hidden" name="sourceRecordVersion" />
+                <input type="hidden" name="sourceRevisionId" />
+                <input type="hidden" name="driveFileId" />
+                <input type="hidden" name="driveFileName" />
+                <input type="hidden" name="driveFileUrl" />
+                <section class="vendor-summary-fields">
+                  <label>Customer Code<input name="customerCode" readonly /></label>
+                  <label>Customer Name<input name="customerName" required /></label>
+                  <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
+                  <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
+                  <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
+                  <label>Arrival Date<input name="arrivalDate" type="date" required /></label>
+                  <label>Arrival Flight<input name="arrivalFlight" /></label>
+                  <label>Arrival Time<input name="arrivalTime" type="time" /></label>
+                  <label>Arrival Sector<input name="arrivalSector" /></label>
+                  <label>Departure Date<input name="departureDate" type="date" required /></label>
+                  <label>Departure Flight<input name="departureFlight" /></label>
+                  <label>Departure Time<input name="departureTime" type="time" /></label>
+                  <label>Departure Sector<input name="departureSector" /></label>
+                </section>
+                <section class="vendor-hotels">
+                  <div class="section-heading">
+                    <div><p class="eyebrow">Repeatable records</p><h3>Hotel stays</h3></div>
+                    <button id="add-vendor-hotel" class="button ghost small" type="button">Add hotel</button>
+                  </div>
+                  <div id="vendor-hotel-list"></div>
+                </section>
+                <section class="vendor-daywise-section">
+                  <div class="section-heading">
+                    <div><p class="eyebrow">Arrival to departure</p><h3>Day Wise & micro split</h3></div>
+                    <button id="rebuild-vendor-days" class="button ghost small" type="button">Rebuild dates</button>
+                  </div>
+                  <div class="vendor-work-columns">
+                    <div id="vendor-day-list" class="vendor-day-list"></div>
+                    <section class="vendor-document-pane">
+                      <div class="pane-heading">
+                        <div><strong id="vendor-itinerary-name">Posted itinerary</strong><small>Read-only DOCX content from Google Drive</small></div>
+                        <a id="vendor-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open Drive</a>
+                      </div>
+                      <div id="vendor-itinerary-preview" class="document-preview vendor-document-scroll"></div>
+                    </section>
+                  </div>
+                </section>
+                <div class="vendor-intake-actions">
+                  <span id="vendor-save-note" class="muted-text">Review all extracted fields before posting online.</span>
+                  <button id="save-vendor-draft" class="button ghost" type="button">Save local draft</button>
+                  <button id="post-vendor-intake" class="button primary" type="button">Post structured data</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section id="vendor-generate-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Generate</h2><p>Queue mikro berjenis Vendor yang sudah di-split dan siap masuk proses generating booking.</p></div></div>
+            <div class="panel"><div class="empty-notifications">Booking generator dan pengiriman email belum diaktifkan pada sprint ini.</div></div>
+          </section>
+          <section id="vendor-revise-itinerary-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Area perbandingan revisi dan dampak mikro booking sudah disiapkan sebagai tahap berikutnya.</p></div></div>
+            <div class="panel"><div class="empty-notifications">Belum ada perubahan booking otomatis pada sprint New Itinerary.</div></div>
+          </section>
+          <section id="vendor-cancel-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cancel All Service</h2><p>Placeholder aman sampai aturan cancel, approval, dan notifikasinya disepakati.</p></div></div>
+            <div class="panel"><div class="empty-notifications">Tidak ada aksi cancel yang aktif.</div></div>
+          </section>
+          <section id="vendor-kpi-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cek KPI</h2><p>Submenu personal KPI siap; rumus dan indikator akan mengikuti workflow final Vendor.</p></div></div>
+            <div class="panel"><div class="empty-notifications">KPI Vendor belum dihitung pada sprint ini.</div></div>
           </section>
 
           <section id="workspace-view" class="view">

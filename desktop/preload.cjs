@@ -41,6 +41,14 @@ contextBridge.exposeInMainWorld("erim", {
     updateFollowup: (id, details) => ipcRenderer.invoke("reservation:followup-update", id, details),
     resolveFollowup: (id) => ipcRenderer.invoke("reservation:followup-resolve", id),
   },
+  vendor: {
+    getDashboard: () => ipcRenderer.invoke("vendor:dashboard"),
+    getIntakeContext: (customerCode) => ipcRenderer.invoke("vendor:intake-context", customerCode),
+    getIntakeDraft: (customerCode) => ipcRenderer.invoke("vendor:intake-draft-get", customerCode),
+    listIntakeDrafts: () => ipcRenderer.invoke("vendor:intake-draft-list"),
+    saveIntakeDraft: (details) => ipcRenderer.invoke("vendor:intake-draft-save", details),
+    publishIntake: (details) => ipcRenderer.invoke("vendor:intake-publish", details),
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

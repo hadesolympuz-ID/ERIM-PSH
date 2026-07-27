@@ -38,6 +38,11 @@
 ## Phase 4 - Department workflows
 
 - Vendor/daywise/booking
+  - Focused build contract: `docs/VENDOR_BOOKING_BASE_PLAN.md`
+  - v1.0.8 Sprint 1: Vendor role dashboard, general Inbox, New Itinerary intake,
+    DOCX extraction/review, unlimited hotel stays, Day Wise paste workspace,
+    and pre-generation micro split are implemented; live dummy Post/readback
+    UAT remains before release.
   - Universal Lookup foundation for live per-keystroke vendor/program search
   - Canonical vendor IDs, historical aliases, contextual ranking, and keyboard navigation
   - Organic manual activity detail remains editable and authoritative

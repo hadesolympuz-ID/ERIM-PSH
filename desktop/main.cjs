@@ -84,6 +84,12 @@ function registerIpc() {
   ipcMain.handle("reservation:followup-update", (_event, id, details) => database.updateReservationFollowup(id, details));
   ipcMain.handle("reservation:followup-resolve", (_event, id) => database.resolveReservationFollowup(id));
   ipcMain.handle("workspace:gmail-thread", (_event, threadId) => googleWorkspace.getGmailThread(threadId));
+  ipcMain.handle("vendor:dashboard", () => googleWorkspace.getVendorDashboard());
+  ipcMain.handle("vendor:intake-context", (_event, customerCode) => googleWorkspace.getVendorIntakeContext(customerCode));
+  ipcMain.handle("vendor:intake-draft-get", (_event, customerCode) => database.getVendorIntakeDraftByCode(customerCode));
+  ipcMain.handle("vendor:intake-draft-list", () => database.listVendorIntakeDrafts());
+  ipcMain.handle("vendor:intake-draft-save", (_event, details) => database.saveVendorIntakeDraft(details));
+  ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 

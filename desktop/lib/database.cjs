@@ -134,8 +134,82 @@ class LocalDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_reservation_followups_status_age
         ON reservation_followups(status, started_at);
+
+      CREATE TABLE IF NOT EXISTS vendor_intake_drafts (
+        vendor_draft_id TEXT PRIMARY KEY,
+        customer_code TEXT NOT NULL UNIQUE,
+        customer_name TEXT NOT NULL DEFAULT '',
+        adult_pax INTEGER NOT NULL DEFAULT 0,
+        child_pax INTEGER NOT NULL DEFAULT 0,
+        infant_pax INTEGER NOT NULL DEFAULT 0,
+        tour_id TEXT,
+        source_publication_id TEXT,
+        source_record_version INTEGER,
+        source_revision_id TEXT,
+        itinerary_drive_file_id TEXT,
+        itinerary_drive_file_name TEXT,
+        itinerary_drive_file_url TEXT,
+        document_html TEXT NOT NULL DEFAULT '',
+        arrival_date TEXT,
+        arrival_flight TEXT,
+        arrival_sector TEXT,
+        arrival_time TEXT,
+        departure_date TEXT,
+        departure_flight TEXT,
+        departure_sector TEXT,
+        departure_time TEXT,
+        extraction_status TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
+        local_status TEXT NOT NULL DEFAULT 'LOCAL_DRAFT',
+        owner_employee_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS vendor_hotel_drafts (
+        hotel_stay_id TEXT PRIMARY KEY,
+        vendor_draft_id TEXT NOT NULL,
+        stay_sequence INTEGER NOT NULL,
+        hotel_name TEXT NOT NULL DEFAULT '',
+        check_in_date TEXT,
+        check_out_date TEXT,
+        FOREIGN KEY(vendor_draft_id) REFERENCES vendor_intake_drafts(vendor_draft_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_hotel_draft
+        ON vendor_hotel_drafts(vendor_draft_id, stay_sequence);
+
+      CREATE TABLE IF NOT EXISTS vendor_day_drafts (
+        tour_day_id TEXT PRIMARY KEY,
+        vendor_draft_id TEXT NOT NULL,
+        day_number INTEGER NOT NULL,
+        service_date TEXT,
+        daywise_text TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        FOREIGN KEY(vendor_draft_id) REFERENCES vendor_intake_drafts(vendor_draft_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_day_draft
+        ON vendor_day_drafts(vendor_draft_id, day_number);
+
+      CREATE TABLE IF NOT EXISTS vendor_service_splits (
+        service_id TEXT PRIMARY KEY,
+        tour_day_id TEXT NOT NULL,
+        split_sequence INTEGER NOT NULL,
+        service_type TEXT NOT NULL CHECK(service_type IN ('VENDOR','TOC','VEHICLE','ADDITIONAL_SERVICES')),
+        activity_text TEXT NOT NULL DEFAULT '',
+        vendor_id TEXT,
+        vendor_name TEXT,
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        FOREIGN KEY(tour_day_id) REFERENCES vendor_day_drafts(tour_day_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_split_day
+        ON vendor_service_splits(tour_day_id, split_sequence);
     `);
     this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
+    this.ensureColumn("vendor_intake_drafts", "adult_pax", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("vendor_intake_drafts", "child_pax", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("vendor_intake_drafts", "infant_pax", "INTEGER NOT NULL DEFAULT 0");
   }
 
   ensureColumn(tableName, columnName, definition) {
@@ -318,6 +392,243 @@ class LocalDatabase {
     `).run(now, now, id);
     this.log("RESERVATION_FOLLOWUP_RESOLVED", "RESERVATION_FOLLOWUP", id, {});
     return this.getReservationFollowup(id);
+  }
+
+  getVendorIntakeDraftByCode(customerCode) {
+    const code = String(customerCode || "").trim().toUpperCase();
+    if (!code) return null;
+    const draft = this.db.prepare(
+      "SELECT * FROM vendor_intake_drafts WHERE customer_code = ?",
+    ).get(code);
+    if (!draft) return null;
+    const hotels = this.db.prepare(`
+      SELECT hotel_stay_id, stay_sequence, hotel_name, check_in_date, check_out_date
+      FROM vendor_hotel_drafts WHERE vendor_draft_id = ? ORDER BY stay_sequence
+    `).all(draft.vendor_draft_id);
+    const dayRows = this.db.prepare(`
+      SELECT tour_day_id, day_number, service_date, daywise_text, status
+      FROM vendor_day_drafts WHERE vendor_draft_id = ? ORDER BY day_number
+    `).all(draft.vendor_draft_id);
+    const splitStatement = this.db.prepare(`
+      SELECT service_id, split_sequence, service_type, activity_text,
+        vendor_id, vendor_name, status
+      FROM vendor_service_splits WHERE tour_day_id = ? ORDER BY split_sequence
+    `);
+    return {
+      vendorDraftId: draft.vendor_draft_id,
+      customerCode: draft.customer_code,
+      customerName: draft.customer_name,
+      adultPax: Number(draft.adult_pax || 0),
+      childPax: Number(draft.child_pax || 0),
+      infantPax: Number(draft.infant_pax || 0),
+      tourId: draft.tour_id || "",
+      sourcePublicationId: draft.source_publication_id || "",
+      sourceRecordVersion: Number(draft.source_record_version || 0),
+      sourceRevisionId: draft.source_revision_id || "",
+      driveFileId: draft.itinerary_drive_file_id || "",
+      driveFileName: draft.itinerary_drive_file_name || "",
+      driveFileUrl: draft.itinerary_drive_file_url || "",
+      documentHtml: draft.document_html || "",
+      arrivalDate: draft.arrival_date || "",
+      arrivalFlight: draft.arrival_flight || "",
+      arrivalSector: draft.arrival_sector || "",
+      arrivalTime: draft.arrival_time || "",
+      departureDate: draft.departure_date || "",
+      departureFlight: draft.departure_flight || "",
+      departureSector: draft.departure_sector || "",
+      departureTime: draft.departure_time || "",
+      extractionStatus: draft.extraction_status,
+      localStatus: draft.local_status,
+      ownerEmployeeId: draft.owner_employee_id,
+      createdAt: draft.created_at,
+      updatedAt: draft.updated_at,
+      hotels: hotels.map((hotel) => ({
+        hotelStayId: hotel.hotel_stay_id,
+        staySequence: Number(hotel.stay_sequence),
+        hotelName: hotel.hotel_name,
+        checkInDate: hotel.check_in_date || "",
+        checkOutDate: hotel.check_out_date || "",
+      })),
+      days: dayRows.map((day) => ({
+        tourDayId: day.tour_day_id,
+        dayNumber: Number(day.day_number),
+        serviceDate: day.service_date || "",
+        daywiseText: day.daywise_text,
+        status: day.status,
+        splits: splitStatement.all(day.tour_day_id).map((split) => ({
+          serviceId: split.service_id,
+          splitSequence: Number(split.split_sequence),
+          serviceType: split.service_type,
+          activityText: split.activity_text,
+          vendorId: split.vendor_id || "",
+          vendorName: split.vendor_name || "",
+          status: split.status,
+        })),
+      })),
+    };
+  }
+
+  listVendorIntakeDrafts() {
+    return this.db.prepare(`
+      SELECT vendor_draft_id, customer_code, customer_name, arrival_date,
+        departure_date, extraction_status, local_status, owner_employee_id, updated_at
+      FROM vendor_intake_drafts ORDER BY updated_at DESC
+    `).all();
+  }
+
+  saveVendorIntakeDraft(input) {
+    const code = String(input.customerCode || "").trim().toUpperCase();
+    if (!code) throw new Error("Customer Code is required.");
+    if (!String(input.customerName || "").trim()) throw new Error("Customer Name is required.");
+    const allowedTypes = new Set(["VENDOR", "TOC", "VEHICLE", "ADDITIONAL_SERVICES"]);
+    const existing = this.getVendorIntakeDraftByCode(code);
+    const pax = {
+      adultPax: Number(input.adultPax ?? 0),
+      childPax: Number(input.childPax ?? 0),
+      infantPax: Number(input.infantPax ?? 0),
+    };
+    if (!Object.values(pax).every((value) => Number.isInteger(value) && value >= 0)) {
+      throw new Error("Adult, Child, and Infant must be whole numbers starting from 0.");
+    }
+    const draftId = existing?.vendorDraftId || input.vendorDraftId || this.id("VDR");
+    const now = this.now();
+    const owner = this.settings().employee_id || "DEV-USER";
+    const hotels = Array.isArray(input.hotels) ? input.hotels : [];
+    const days = Array.isArray(input.days) ? input.days : [];
+    const dayNumbers = new Set();
+    days.forEach((day) => {
+      const dayNumber = Number(day.dayNumber);
+      if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumbers.has(dayNumber)) {
+        throw new Error("Each Day Wise row must have a unique positive day number.");
+      }
+      dayNumbers.add(dayNumber);
+      (day.splits || []).forEach((split) => {
+        if (!allowedTypes.has(String(split.serviceType || "").toUpperCase())) {
+          throw new Error("Split type must be Vendor, TOC, Vehicle, or Additional Services.");
+        }
+      });
+    });
+
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO vendor_intake_drafts (
+          vendor_draft_id, customer_code, customer_name, adult_pax, child_pax, infant_pax, tour_id,
+          source_publication_id, source_record_version, source_revision_id,
+          itinerary_drive_file_id, itinerary_drive_file_name, itinerary_drive_file_url,
+          document_html, arrival_date, arrival_flight, arrival_sector, arrival_time,
+          departure_date, departure_flight, departure_sector, departure_time,
+          extraction_status, local_status, owner_employee_id, created_at, updated_at
+        ) VALUES (
+          @vendorDraftId, @customerCode, @customerName, @adultPax, @childPax, @infantPax, @tourId,
+          @sourcePublicationId, @sourceRecordVersion, @sourceRevisionId,
+          @driveFileId, @driveFileName, @driveFileUrl,
+          @documentHtml, @arrivalDate, @arrivalFlight, @arrivalSector, @arrivalTime,
+          @departureDate, @departureFlight, @departureSector, @departureTime,
+          @extractionStatus, @localStatus, @ownerEmployeeId, @createdAt, @updatedAt
+        )
+        ON CONFLICT(customer_code) DO UPDATE SET
+          customer_name=excluded.customer_name, adult_pax=excluded.adult_pax,
+          child_pax=excluded.child_pax, infant_pax=excluded.infant_pax, tour_id=excluded.tour_id,
+          source_publication_id=excluded.source_publication_id,
+          source_record_version=excluded.source_record_version,
+          source_revision_id=excluded.source_revision_id,
+          itinerary_drive_file_id=excluded.itinerary_drive_file_id,
+          itinerary_drive_file_name=excluded.itinerary_drive_file_name,
+          itinerary_drive_file_url=excluded.itinerary_drive_file_url,
+          document_html=excluded.document_html, arrival_date=excluded.arrival_date,
+          arrival_flight=excluded.arrival_flight, arrival_sector=excluded.arrival_sector,
+          arrival_time=excluded.arrival_time, departure_date=excluded.departure_date,
+          departure_flight=excluded.departure_flight, departure_sector=excluded.departure_sector,
+          departure_time=excluded.departure_time, extraction_status=excluded.extraction_status,
+          local_status=excluded.local_status, owner_employee_id=excluded.owner_employee_id,
+          updated_at=excluded.updated_at
+      `).run({
+        vendorDraftId: draftId,
+        customerCode: code,
+        customerName: String(input.customerName || "").trim(),
+        adultPax: pax.adultPax,
+        childPax: pax.childPax,
+        infantPax: pax.infantPax,
+        tourId: input.tourId || "",
+        sourcePublicationId: input.sourcePublicationId || "",
+        sourceRecordVersion: Number(input.sourceRecordVersion || 0),
+        sourceRevisionId: input.sourceRevisionId || "",
+        driveFileId: input.driveFileId || "",
+        driveFileName: input.driveFileName || "",
+        driveFileUrl: input.driveFileUrl || "",
+        documentHtml: input.documentHtml || "",
+        arrivalDate: input.arrivalDate || "",
+        arrivalFlight: input.arrivalFlight || "",
+        arrivalSector: input.arrivalSector || "",
+        arrivalTime: input.arrivalTime || "",
+        departureDate: input.departureDate || "",
+        departureFlight: input.departureFlight || "",
+        departureSector: input.departureSector || "",
+        departureTime: input.departureTime || "",
+        extractionStatus: input.extractionStatus || "NEEDS_REVIEW",
+        localStatus: input.localStatus || "LOCAL_DRAFT",
+        ownerEmployeeId: owner,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      });
+      this.db.prepare("DELETE FROM vendor_hotel_drafts WHERE vendor_draft_id = ?").run(draftId);
+      this.db.prepare(`
+        DELETE FROM vendor_service_splits WHERE tour_day_id IN (
+          SELECT tour_day_id FROM vendor_day_drafts WHERE vendor_draft_id = ?
+        )
+      `).run(draftId);
+      this.db.prepare("DELETE FROM vendor_day_drafts WHERE vendor_draft_id = ?").run(draftId);
+      const insertHotel = this.db.prepare(`
+        INSERT INTO vendor_hotel_drafts (
+          hotel_stay_id, vendor_draft_id, stay_sequence, hotel_name, check_in_date, check_out_date
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      hotels.forEach((hotel, index) => insertHotel.run(
+        hotel.hotelStayId || this.id("HST"), draftId, index + 1,
+        String(hotel.hotelName || "").trim(), hotel.checkInDate || "", hotel.checkOutDate || "",
+      ));
+      const insertDay = this.db.prepare(`
+        INSERT INTO vendor_day_drafts (
+          tour_day_id, vendor_draft_id, day_number, service_date, daywise_text, status
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const insertSplit = this.db.prepare(`
+        INSERT INTO vendor_service_splits (
+          service_id, tour_day_id, split_sequence, service_type,
+          activity_text, vendor_id, vendor_name, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      days.forEach((day) => {
+        const dayId = day.tourDayId || this.id("TDAY");
+        insertDay.run(
+          dayId, draftId, Number(day.dayNumber), day.serviceDate || "",
+          String(day.daywiseText || ""), day.status || "DRAFT",
+        );
+        (day.splits || []).forEach((split, index) => insertSplit.run(
+          split.serviceId || this.id("SVC"), dayId, index + 1,
+          String(split.serviceType || "VENDOR").toUpperCase(),
+          String(split.activityText || ""), split.vendorId || "",
+          String(split.vendorName || ""), split.status || "DRAFT",
+        ));
+      });
+    })();
+    const saved = this.getVendorIntakeDraftByCode(code);
+    this.log("VENDOR_INTAKE_DRAFT_SAVED", "VENDOR_INTAKE", draftId, {
+      customerCode: code,
+      hotelCount: saved.hotels.length,
+      dayCount: saved.days.length,
+      splitCount: saved.days.reduce((sum, day) => sum + day.splits.length, 0),
+    });
+    return saved;
+  }
+
+  markVendorIntakePublished(customerCode) {
+    const code = String(customerCode || "").trim().toUpperCase();
+    this.db.prepare(`
+      UPDATE vendor_intake_drafts SET local_status = 'PUBLISHED', updated_at = ?
+      WHERE customer_code = ?
+    `).run(this.now(), code);
+    return this.getVendorIntakeDraftByCode(code);
   }
 
   listDrafts(filters = {}) {

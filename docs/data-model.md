@@ -16,6 +16,10 @@ Recommended local tables:
 - `LOCAL_SYNC_QUEUE`
 - `LOCAL_SYNC_RESULTS`
 - `LOCAL_ACTIVITY_LOG`
+- `VENDOR_INTAKE_DRAFTS`
+- `VENDOR_HOTEL_DRAFTS`
+- `VENDOR_DAY_DRAFTS`
+- `VENDOR_SERVICE_SPLITS`
 
 Required local control fields include:
 
@@ -59,6 +63,7 @@ Published/official tables:
 - `NOTIFICATIONS`
 - `NOTIFICATION_RECIPIENTS`
 - `TOUR_DAYS`
+- `TOUR_HOTEL_STAYS`
 - `SERVICES`
 - `SUPPLIER_BOOKINGS`
 - `COMMUNICATIONS`
@@ -191,4 +196,3 @@ in Sheets or the shared source repository.
 
 The API converts permitted references into safe open links for the current
 authenticated user.
-

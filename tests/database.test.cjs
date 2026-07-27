@@ -262,3 +262,88 @@ test("tracks Reservation follow-up aging, reason, and resolution", () => withDat
   assert.equal(resolved.status, "RESOLVED");
   assert.ok(resolved.resolved_at);
 }));
+
+test("persists Vendor intake with unlimited hotel rows, daywise text, and micro splits", () => withDatabase((database) => {
+  const saved = database.saveVendorIntakeDraft({
+    customerCode: "ak/pshbali4804",
+    customerName: "MUKESH THAKKAR",
+    adultPax: 4,
+    childPax: 2,
+    infantPax: 1,
+    tourId: "TOUR-1",
+    sourcePublicationId: "PUB-1",
+    sourceRecordVersion: 3,
+    driveFileId: "DRIVE-1",
+    documentHtml: "<p>Itinerary</p>",
+    arrivalDate: "2026-07-22",
+    arrivalFlight: "MH853",
+    arrivalTime: "18:30",
+    departureDate: "2026-08-01",
+    departureFlight: "MH850",
+    departureTime: "16:25",
+    hotels: Array.from({ length: 7 }, (_, index) => ({
+      hotelName: `Hotel ${index + 1}`,
+      checkInDate: "2026-07-22",
+      checkOutDate: "2026-07-23",
+    })),
+    days: [{
+      dayNumber: 1,
+      serviceDate: "2026-07-22",
+      daywiseText: "Arrival and transfer to hotel.",
+      splits: [
+        { serviceType: "VEHICLE", activityText: "Airport transfer", vendorName: "Transport A" },
+        { serviceType: "VENDOR", activityText: "Welcome dinner", vendorName: "Restaurant B" },
+      ],
+    }],
+  });
+  assert.equal(saved.customerCode, "AK/PSHBALI4804");
+  assert.equal(saved.adultPax, 4);
+  assert.equal(saved.childPax, 2);
+  assert.equal(saved.infantPax, 1);
+  assert.equal(saved.hotels.length, 7);
+  assert.equal(saved.days[0].splits.length, 2);
+  assert.match(saved.hotels[0].hotelStayId, /^HST-/);
+  assert.match(saved.days[0].tourDayId, /^TDAY-/);
+  assert.match(saved.days[0].splits[0].serviceId, /^SVC-/);
+
+  const updated = database.saveVendorIntakeDraft({
+    ...saved,
+    customerName: "MUKESH THAKKAR UPDATED",
+    hotels: saved.hotels.slice(0, 2),
+    days: [{
+      ...saved.days[0],
+      daywiseText: "Updated arrival.",
+      splits: saved.days[0].splits.slice(0, 1),
+    }],
+  });
+  assert.equal(updated.vendorDraftId, saved.vendorDraftId);
+  assert.equal(updated.hotels.length, 2);
+  assert.equal(updated.days[0].daywiseText, "Updated arrival.");
+  assert.equal(updated.days[0].splits.length, 1);
+  assert.equal(database.listVendorIntakeDrafts().length, 1);
+}));
+
+test("rejects invalid pax, duplicate day numbers, and unsupported Vendor split types", () => withDatabase((database) => {
+  const base = {
+    customerCode: "GA/PSHBALI1325",
+    customerName: "GANESH BISWAL",
+  };
+  assert.throws(() => database.saveVendorIntakeDraft({
+    ...base,
+    adultPax: -1,
+    days: [],
+  }), /whole numbers starting from 0/i);
+  assert.throws(() => database.saveVendorIntakeDraft({
+    ...base,
+    childPax: 1.5,
+    days: [],
+  }), /whole numbers starting from 0/i);
+  assert.throws(() => database.saveVendorIntakeDraft({
+    ...base,
+    days: [{ dayNumber: 1, splits: [] }, { dayNumber: 1, splits: [] }],
+  }), /unique positive day number/i);
+  assert.throws(() => database.saveVendorIntakeDraft({
+    ...base,
+    days: [{ dayNumber: 1, splits: [{ serviceType: "EMAIL" }] }],
+  }), /Split type/i);
+}));
