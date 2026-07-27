@@ -554,32 +554,56 @@ function fillSupplierForm(supplier) {
   $("#add-supplier-contract").disabled = false;
 }
 
-function supplierContactMarkup(row = {}) {
+function normalizeInternationalPhone(value) {
+  let normalized = String(value || "").trim().replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (normalized.startsWith("00")) normalized = `+${normalized.slice(2)}`;
+  if (!normalized.startsWith("+")) normalized = `+${normalized}`;
+  return normalized;
+}
+
+function isValidInternationalPhone(value) {
+  const normalized = normalizeInternationalPhone(value);
+  return !normalized || /^\+\d[\d\s().-]{5,24}$/.test(normalized);
+}
+
+function supplierPhoneForTransport(value) {
+  const normalized = normalizeInternationalPhone(value);
+  return normalized ? `'${normalized}` : "";
+}
+
+function supplierContactMarkup(row = {}, index = 0) {
   return `
-    <div class="supplier-repeatable-row" data-contact-id="${escapeHtml(row.contactId || "")}">
+    <div class="supplier-repeatable-row supplier-contact-row" data-contact-id="${escapeHtml(row.contactId || "")}">
+      <div class="supplier-repeatable-heading">
+        <div><strong>Contact person ${index + 1}</strong><small>Identity and direct communication details</small></div>
+        <button class="supplier-repeatable-remove" data-remove-supplier-contact type="button" aria-label="Remove contact person">×</button>
+      </div>
       <label>Name<input data-supplier-contact="contactName" value="${escapeHtml(row.contactName || "")}" /></label>
       <label>Position<input data-supplier-contact="position" value="${escapeHtml(row.position || "")}" /></label>
       <label>Department<input data-supplier-contact="department" value="${escapeHtml(row.department || "")}" /></label>
-      <label>Phone<input data-supplier-contact="phone" value="${escapeHtml(row.phone || "")}" /></label>
-      <label>WhatsApp<input data-supplier-contact="whatsapp" value="${escapeHtml(row.whatsapp || "")}" /></label>
-      <label>Email<input data-supplier-contact="email" type="email" value="${escapeHtml(row.email || "")}" /></label>
       <label>Preferred channel<select data-supplier-contact="preferredChannel">${["EMAIL","WHATSAPP","PHONE","PORTAL","OTHERS"].map((value) => `<option${row.preferredChannel === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label>Phone<input data-supplier-contact="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+62 812-3916-9392" value="${escapeHtml(row.phone || "")}" /></label>
+      <label>WhatsApp<input data-supplier-contact="whatsapp" type="tel" inputmode="tel" autocomplete="tel" placeholder="+62 812-3916-9392" value="${escapeHtml(row.whatsapp || "")}" /></label>
+      <label class="wide">Email<input data-supplier-contact="email" type="email" autocomplete="email" value="${escapeHtml(row.email || "")}" /></label>
       <label>Operational hours<input data-supplier-contact="operationalHours" value="${escapeHtml(row.operationalHours || "")}" /></label>
+      <label class="supplier-emergency-option"><input data-supplier-contact="isEmergency" type="checkbox" ${row.isEmergency ? "checked" : ""} /><span><strong>Emergency contact</strong><small>May be contacted outside normal hours</small></span></label>
       <label class="wide">Responsibility<input data-supplier-contact="responsibility" value="${escapeHtml(row.responsibility || "")}" /></label>
-      <label><input data-supplier-contact="isEmergency" type="checkbox" ${row.isEmergency ? "checked" : ""} /> Emergency</label>
-      <button class="supplier-repeatable-remove" data-remove-supplier-contact type="button">×</button>
     </div>
   `;
 }
 
-function supplierRecipientMarkup(row = {}) {
+function supplierRecipientMarkup(row = {}, index = 0) {
   return `
-    <div class="supplier-repeatable-row" data-recipient-id="${escapeHtml(row.recipientId || "")}">
+    <div class="supplier-repeatable-row supplier-recipient-row" data-recipient-id="${escapeHtml(row.recipientId || "")}">
+      <div class="supplier-repeatable-heading">
+        <div><strong>Booking recipient ${index + 1}</strong><small>Destination used by the booking SOP</small></div>
+        <button class="supplier-repeatable-remove" data-remove-supplier-recipient type="button" aria-label="Remove booking recipient">×</button>
+      </div>
       <label>Type<select data-supplier-recipient="recipientType">${["TO","CC","BCC","WHATSAPP"].map((value) => `<option${row.recipientType === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
       <label>Channel<select data-supplier-recipient="channel">${["EMAIL","WHATSAPP","PORTAL","OTHERS"].map((value) => `<option${row.channel === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
-      <label class="wide">Email / number / account<input data-supplier-recipient="address" value="${escapeHtml(row.address || "")}" /></label>
-      <label>Purpose<input data-supplier-recipient="purpose" value="${escapeHtml(row.purpose || "")}" /></label>
-      <button class="supplier-repeatable-remove" data-remove-supplier-recipient type="button">×</button>
+      <label class="wide">Email / number / account<input data-supplier-recipient="address" inputmode="${row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP" ? "tel" : "text"}" placeholder="${row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP" ? "+62 812-3916-9392" : "Email address, portal account, or number"}" value="${escapeHtml(row.address || "")}" /></label>
+      <label class="wide">Purpose<input data-supplier-recipient="purpose" placeholder="Example: reservation confirmation" value="${escapeHtml(row.purpose || "")}" /></label>
     </div>
   `;
 }
@@ -597,6 +621,21 @@ function collectRepeatable(containerSelector, fieldSelector, idKey, idAttribute)
 
 function collectSupplierForm() {
   const form = $("#supplier-master-form");
+  const contacts = collectRepeatable(
+    "#supplier-contact-list", "data-supplier-contact", "contactId", "contactId",
+  ).map((row) => ({
+    ...row,
+    phone: normalizeInternationalPhone(row.phone),
+    whatsapp: normalizeInternationalPhone(row.whatsapp),
+  }));
+  const recipients = collectRepeatable(
+    "#supplier-recipient-list", "data-supplier-recipient", "recipientId", "recipientId",
+  ).map((row, index) => ({
+    ...row,
+    address: row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP"
+      ? normalizeInternationalPhone(row.address) : row.address,
+    sequence: index + 1,
+  }));
   return {
     supplierId: form.elements.supplierId.value,
     typeCode: form.elements.typeCode.value || state.selectedSupplierTypeCode,
@@ -609,9 +648,8 @@ function collectSupplierForm() {
     taxId: form.elements.taxId.value.trim(),
     internalPicEmployeeId: form.elements.internalPicEmployeeId.value.trim(),
     operationalNotes: form.elements.operationalNotes.value.trim(),
-    contacts: collectRepeatable("#supplier-contact-list", "data-supplier-contact", "contactId", "contactId"),
-    recipients: collectRepeatable("#supplier-recipient-list", "data-supplier-recipient", "recipientId", "recipientId")
-      .map((row, index) => ({ ...row, sequence: index + 1 })),
+    contacts,
+    recipients,
     sop: {
       bookingChannels: $$('input[name="bookingChannels"]:checked').map((node) => node.value),
       leadTime: form.elements.leadTime.value.trim(),
@@ -633,8 +671,33 @@ async function saveSupplierMasterForm(event) {
   event.preventDefault();
   const payload = collectSupplierForm();
   if (!payload.supplierName) return toast("Supplier name is required.", true);
+  const invalidContact = payload.contacts.find((row) =>
+    !isValidInternationalPhone(row.phone) || !isValidInternationalPhone(row.whatsapp)
+  );
+  const invalidRecipient = payload.recipients.find((row) =>
+    (row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP")
+    && !isValidInternationalPhone(row.address)
+  );
+  if (invalidContact || invalidRecipient) {
+    return toast("Phone and WhatsApp numbers must start with + and use international format.", true);
+  }
+  const transportPayload = {
+    ...payload,
+    contacts: payload.contacts.map((row) => ({
+      ...row,
+      phone: supplierPhoneForTransport(row.phone),
+      whatsapp: supplierPhoneForTransport(row.whatsapp),
+    })),
+    recipients: payload.recipients.map((row) => ({
+      ...row,
+      address: row.channel === "WHATSAPP" || row.recipientType === "WHATSAPP"
+        ? supplierPhoneForTransport(row.address) : row.address,
+    })),
+  };
   try {
-    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveSupplier(payload));
+    state.supplierMaster = supplierCatalogFrom(
+      await window.erim.supplierMaster.saveSupplier(transportPayload),
+    );
     const saved = state.supplierMaster.suppliers.find((row) =>
       row.supplierName === payload.supplierName && row.typeCode === payload.typeCode
     );
@@ -2055,6 +2118,35 @@ function bindEvents() {
     if (editProduct) return openSupplierProductDialog(editProduct.dataset.editSupplierProduct);
     const editContract = event.target.closest("[data-edit-supplier-contract]");
     if (editContract) return openSupplierContractDialog(editContract.dataset.editSupplierContract);
+  });
+  $("#supplier-master-view").addEventListener("focusout", (event) => {
+    const contactPhone = event.target.closest(
+      '[data-supplier-contact="phone"], [data-supplier-contact="whatsapp"]',
+    );
+    const recipientAddress = event.target.closest('[data-supplier-recipient="address"]');
+    if (contactPhone) contactPhone.value = normalizeInternationalPhone(contactPhone.value);
+    if (recipientAddress) {
+      const row = recipientAddress.closest(".supplier-repeatable-row");
+      const channel = row.querySelector('[data-supplier-recipient="channel"]')?.value;
+      const type = row.querySelector('[data-supplier-recipient="recipientType"]')?.value;
+      if (channel === "WHATSAPP" || type === "WHATSAPP") {
+        recipientAddress.value = normalizeInternationalPhone(recipientAddress.value);
+      }
+    }
+  });
+  $("#supplier-master-view").addEventListener("change", (event) => {
+    if (!event.target.matches(
+      '[data-supplier-recipient="channel"], [data-supplier-recipient="recipientType"]',
+    )) return;
+    const row = event.target.closest(".supplier-repeatable-row");
+    const address = row.querySelector('[data-supplier-recipient="address"]');
+    const channel = row.querySelector('[data-supplier-recipient="channel"]').value;
+    const type = row.querySelector('[data-supplier-recipient="recipientType"]').value;
+    const isWhatsApp = channel === "WHATSAPP" || type === "WHATSAPP";
+    address.inputMode = isWhatsApp ? "tel" : "text";
+    address.placeholder = isWhatsApp
+      ? "+62 812-3916-9392" : "Email address, portal account, or number";
+    if (isWhatsApp) address.value = normalizeInternationalPhone(address.value);
   });
   $("#supplier-contract-rate-list").addEventListener("click", (event) => {
     const remove = event.target.closest("[data-remove-contract-rate]");

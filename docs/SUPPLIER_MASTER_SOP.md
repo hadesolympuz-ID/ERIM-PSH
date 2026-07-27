@@ -1,8 +1,8 @@
 # ERIM-PSH Supplier Master and Contract Rate SOP
 
-Document status: `APPROVED IMPLEMENTATION BASELINE`  
-Effective release: `v1.1.0`  
-Owner: `Manager / Admin`  
+Document status: `APPROVED IMPLEMENTATION BASELINE`
+Effective release: `v1.1.1`
+Owner: `Manager / Admin`
 Authoritative source: `ERIM-PSH Google Sheet + Google Drive`
 
 ## 1. Purpose
@@ -67,6 +67,13 @@ CC addresses without storing them inside one text field.
 
 Save the supplier only after checking that the primary booking destination and
 escalation path are usable.
+
+Phone and WhatsApp fields use international text format and must start with
+`+`, for example `+62 812-3916-9392`. Spaces, parentheses, dots, and hyphens
+may be retained for readability. ERIM-PSH stores these fields as plain text so
+Google Sheets never interprets the leading `+` as a formula. Existing
+formula-error cells are converted back to literal text by the Supplier Master
+schema repair.
 
 ## 5. Product/service procedure
 
@@ -172,4 +179,3 @@ and Luggage Van examples and:
 
 Temporary records must be replaced with verified supplier and contract data
 before production financial use.
-

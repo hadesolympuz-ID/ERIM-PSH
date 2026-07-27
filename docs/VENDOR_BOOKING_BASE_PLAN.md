@@ -4,7 +4,7 @@ Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
 Target sequence: v1.0.8-v1.1.x
 
-## Supplier Master foundation — v1.1.0
+## Supplier Master foundation — v1.1.0-v1.1.1
 
 The Manager/Admin `Supplier Master` submenu is the shared foundation for all
 Vendor Booking rate and booking-address selection. It supports data-driven
@@ -17,6 +17,10 @@ expired contract produces `PENDING_RATE` but does not block booking delivery.
 A booking-only manual rate requires reason and source and does not alter the
 master contract. The operating procedure is recorded in
 `docs/SUPPLIER_MASTER_SOP.md`.
+
+The v1.1.1 contact-field hotfix reorganizes repeatable contacts and recipients
+into responsive cards and preserves international `+` phone/WhatsApp values as
+literal text across the desktop, Apps Script, and Google Sheet boundary.
 
 ## 1. Purpose
 

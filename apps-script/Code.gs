@@ -225,6 +225,34 @@ function ensureSupplierMasterSchema_() {
     headerRange.setFontWeight("bold").setBackground("#e8eef2");
     if (sheet.getLastColumn() > 0) sheet.autoResizeColumns(1, sheet.getLastColumn());
   });
+  repairSupplierTextFields_();
+}
+
+function repairSupplierTextFields_() {
+  const fields = {
+    SUPPLIER_CONTACTS: ["phone", "whatsapp"],
+    SUPPLIER_RECIPIENTS: ["address"],
+  };
+  let repaired = 0;
+  Object.keys(fields).forEach((sheetName) => {
+    const sheet = sheet_(sheetName);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+    fields[sheetName].forEach((field) => {
+      const column = headers.indexOf(field) + 1;
+      if (!column) return;
+      const height = Math.max(sheet.getLastRow() - 1, 1);
+      const range = sheet.getRange(2, column, height, 1);
+      const formulas = range.getFormulas();
+      range.setNumberFormat("@");
+      formulas.forEach((row, index) => {
+        if (!row[0]) return;
+        const literal = String(row[0]).replace(/^=/, "");
+        range.getCell(index + 1, 1).setValue(safeSheetValue_(literal));
+        repaired += 1;
+      });
+    });
+  });
+  return repaired;
 }
 
 function initializeSupplierMaster_(request, actor) {
@@ -504,8 +532,8 @@ function saveSupplier_(request, actor) {
       contact_name: row.contactName || "",
       position: row.position || "",
       department: row.department || "",
-      phone: row.phone || "",
-      whatsapp: row.whatsapp || "",
+      phone: normalizeSupplierPhone_(row.phone, "Phone"),
+      whatsapp: normalizeSupplierPhone_(row.whatsapp, "WhatsApp"),
       email: row.email || "",
       preferred_channel: row.preferredChannel || "",
       operational_hours: row.operationalHours || "",
@@ -514,16 +542,21 @@ function saveSupplier_(request, actor) {
       status: "ACTIVE",
     }), actor, now);
   replaceSupplierChildren_("SUPPLIER_RECIPIENTS", "recipient_id", "supplier_id", id,
-    input.recipients || [], (row, index) => ({
-      recipient_id: row.recipientId || uuid_("SREC"),
-      supplier_id: id,
-      recipient_type: row.recipientType || "TO",
-      address: row.address || "",
-      channel: row.channel || "EMAIL",
-      purpose: row.purpose || "",
-      sequence: Number(row.sequence || index + 1),
-      status: "ACTIVE",
-    }), actor, now);
+    input.recipients || [], (row, index) => {
+      const isWhatsApp = String(row.channel).toUpperCase() === "WHATSAPP"
+        || String(row.recipientType).toUpperCase() === "WHATSAPP";
+      return {
+        recipient_id: row.recipientId || uuid_("SREC"),
+        supplier_id: id,
+        recipient_type: row.recipientType || "TO",
+        address: isWhatsApp
+          ? normalizeSupplierPhone_(row.address, "Recipient WhatsApp") : row.address || "",
+        channel: row.channel || "EMAIL",
+        purpose: row.purpose || "",
+        sequence: Number(row.sequence || index + 1),
+        status: "ACTIVE",
+      };
+    }, actor, now);
   const sopInput = input.sop || {};
   const existingSop = allRecords_("SUPPLIER_SOPS").find((row) => String(row.supplier_id) === id);
   const sopId = sopInput.sopId || existingSop && existingSop.sop_id || uuid_("SSOP");
@@ -1389,7 +1422,7 @@ function appendRecords_(sheetName, records) {
   const sheet = sheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   const rows = records.map((record) => headers.map((header) =>
-    record[header] === undefined ? "" : record[header]
+    safeSheetValue_(record[header] === undefined ? "" : record[header])
   ));
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
 }
@@ -1625,7 +1658,9 @@ function findRecord_(sheetName, key, value) {
 function appendRecord_(sheetName, record) {
   const sheet = sheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-  sheet.appendRow(headers.map((header) => record[header] === undefined ? "" : record[header]));
+  sheet.appendRow(headers.map((header) =>
+    safeSheetValue_(record[header] === undefined ? "" : record[header])
+  ));
 }
 
 function ensureHeaders_(sheetName, requiredHeaders) {
@@ -1678,7 +1713,9 @@ function updateRecord_(sheetName, key, value, changes) {
   if (rowIndex < 1) throw apiError_("RECORD_NOT_FOUND", `${sheetName} record was not found.`);
   Object.entries(changes).forEach(([field, fieldValue]) => {
     const columnIndex = headers.indexOf(field);
-    if (columnIndex >= 0) sheet.getRange(rowIndex + 1, columnIndex + 1).setValue(fieldValue);
+    if (columnIndex >= 0) {
+      sheet.getRange(rowIndex + 1, columnIndex + 1).setValue(safeSheetValue_(fieldValue));
+    }
   });
 }
 
@@ -1721,6 +1758,25 @@ function json_(payload) {
 
 function truthy_(value) {
   return value === true || String(value).toUpperCase() === "TRUE" || String(value) === "1";
+}
+
+function safeSheetValue_(value) {
+  if (typeof value === "string" && /^[=+\-@]/.test(value)) return `'${value}`;
+  return value;
+}
+
+function normalizeSupplierPhone_(value, label) {
+  let normalized = String(value || "").trim().replace(/^'/, "").replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (normalized.startsWith("00")) normalized = `+${normalized.slice(2)}`;
+  if (!normalized.startsWith("+")) normalized = `+${normalized}`;
+  if (!/^\+\d[\d\s().-]{5,24}$/.test(normalized)) {
+    throw apiError_(
+      "VALIDATION_ERROR",
+      `${label || "Phone"} must use international format, for example +62 812-3916-9392.`,
+    );
+  }
+  return normalized;
 }
 
 function uuid_(prefix) {

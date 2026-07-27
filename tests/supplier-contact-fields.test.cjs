@@ -1,0 +1,55 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const root = path.resolve(__dirname, "..");
+const renderer = fs.readFileSync(path.join(root, "desktop", "renderer", "app.js"), "utf8");
+const styles = fs.readFileSync(path.join(root, "desktop", "renderer", "styles.css"), "utf8");
+const appsScript = fs.readFileSync(path.join(root, "apps-script", "Code.gs"), "utf8");
+
+function rendererPhoneHelpers() {
+  const normalize = renderer.match(
+    /function normalizeInternationalPhone\(value\) \{[\s\S]*?\n\}/,
+  )[0];
+  const validate = renderer.match(
+    /function isValidInternationalPhone\(value\) \{[\s\S]*?\n\}/,
+  )[0];
+  const transport = renderer.match(
+    /function supplierPhoneForTransport\(value\) \{[\s\S]*?\n\}/,
+  )[0];
+  return vm.runInNewContext(
+    `${normalize}\n${validate}\n${transport}\n({ normalizeInternationalPhone, isValidInternationalPhone, supplierPhoneForTransport })`,
+  );
+}
+
+test("international phone helper preserves formatted +62 numbers and adds a missing prefix", () => {
+  const helpers = rendererPhoneHelpers();
+  assert.equal(
+    helpers.normalizeInternationalPhone("+62 812-3916-9392"),
+    "+62 812-3916-9392",
+  );
+  assert.equal(helpers.normalizeInternationalPhone("62 812 3916 9392"), "+62 812 3916 9392");
+  assert.equal(helpers.normalizeInternationalPhone("0062 812 3916"), "+62 812 3916");
+  assert.equal(helpers.isValidInternationalPhone("+62 812-3916-9392"), true);
+  assert.equal(helpers.isValidInternationalPhone("+#ERROR!"), false);
+  assert.equal(helpers.supplierPhoneForTransport("+62 812-3916-9392"), "'+62 812-3916-9392");
+});
+
+test("supplier contact and recipient cards expose phone-friendly fields and responsive layout", () => {
+  assert.match(renderer, /data-supplier-contact="whatsapp" type="tel" inputmode="tel"/);
+  assert.match(renderer, /data-supplier-recipient="address" inputmode=/);
+  assert.match(renderer, /supplier-repeatable-heading/);
+  assert.match(styles, /container-type:\s*inline-size/);
+  assert.match(styles, /@container \(max-width: 390px\)/);
+});
+
+test("Apps Script stores formula-like text safely and repairs existing phone formula cells", () => {
+  assert.match(appsScript, /function safeSheetValue_\(value\)/);
+  assert.match(appsScript, /\^\[=\+\\-@\]/);
+  assert.match(appsScript, /repairSupplierTextFields_\(\)/);
+  assert.match(appsScript, /SUPPLIER_CONTACTS: \["phone", "whatsapp"\]/);
+  assert.match(appsScript, /safeSheetValue_\(fieldValue\)/);
+  assert.match(appsScript, /normalizeSupplierPhone_\(row\.whatsapp, "WhatsApp"\)/);
+});
