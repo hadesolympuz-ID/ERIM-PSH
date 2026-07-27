@@ -2,6 +2,38 @@
 config/env.js
 apps/pwa/config.js
 
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Google / OAuth / service credentials
+apps-script/Config.gs
+apps-script/Config.local.gs
+credentials.json
+credentials.*.json
+client_secret*.json
+oauth-client*.json
+service-account*.json
+service_account*.json
+token.json
+tokens.json
+secrets/
+.secrets/
+
+# Private keys and certificate bundles
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# ERIM-PSH local authentication/session artifacts
+google-session.secure
+google-auth-diagnostic.log
+
 # Local tooling
 .DS_Store
 Thumbs.db
