@@ -9,7 +9,7 @@ dibatalkan.
 **Local project:** `C:\PROJECT\ERIM-PSH`  
 **Target application:** `https://status.peakseasonholidays.com`  
 **Last updated:** 2026-07-28
-**Current phase:** Supplier Master and contract-rate foundation — v1.1.0
+**Current phase:** Vendor Booking templates and delivery — v1.1.1
 
 ---
 
@@ -371,8 +371,8 @@ official data.
 | Universal Lookup foundation | `PENDING` | Reusable keyboard-friendly typeahead searches active vendors, aliases, programs, hotels, agents, staff, and Customer Codes on every keystroke; results are ranked contextually while manual organic detail remains available. |
 | Daywise input workspace | `IN PROGRESS` | v1.0.8 loads the latest Drive DOCX, extracts editable arrival/departure/hotels, generates Day 1..N, and stores pasted staff text locally before controlled Post. Live dummy-case UAT remains. |
 | Service split | `IN PROGRESS` | v1.0.8 records per-day Vendor/TOC/Vehicle/Additional Services micro splits into `SERVICES`; supplier grouping and booking generation remain later phases. |
-| Central Supplier Master | `IN PROGRESS` | v1.1.0 adds one Manager/Admin submenu for data-driven types, suppliers, repeatable contacts/recipients/SOPs, products, contracts, dated rates, archive, audit, and user-wide change notifications. Live central initialization and release verification remain. |
-| Contract-aware micro split | `IN PROGRESS` | Type, Supplier, and Product use the same central catalog; valid service-date contracts load automatically, missing/expired contracts become `PENDING_RATE`, and booking-only manual rates require reason/source. Live UAT remains. |
+| Central Supplier Master | `DONE` | v1.1.0 provides one Manager/Admin submenu for data-driven types, suppliers, repeatable contacts/recipients/SOPs, products, contracts, dated rates, archive, audit, and user-wide change notifications. Central Google tables, migrated/seed data, Web App Version 15, and daily expiry trigger are active. |
+| Contract-aware micro split | `DONE` | Type, Supplier, and Product use the same central catalog; valid service-date contracts load automatically, missing/expired contracts become `PENDING_RATE`, and booking-only manual rates require reason/source. Packaged v1.1.0 and automated tests verify the flow. |
 | Vendor search/assignment | `PENDING` | Vendor is selected through Universal Lookup using a stable `vendor_id`; active approved matches appear first, aliases resolve to the canonical vendor, and staff can intentionally expand to all authorized vendors. |
 | Booking generation | `PENDING` | Uses approved SOP/template. |
 | Email/WhatsApp helper | `PENDING` | Snapshot and communication evidence recorded. |
@@ -419,7 +419,7 @@ official data.
 | KPI engine | `PENDING` | Metrics use approved visible definitions. |
 | Access review | `PENDING` | Active user and role review auditable. |
 | Audit review | `PENDING` | Official events searchable and protected. |
-| Supplier/rate administration | `IN PROGRESS` | Manager/Admin changes are immediate, audited, centrally stored, and broadcast; archive preserves booking history. |
+| Supplier/rate administration | `DONE` | Manager/Admin changes are immediate, audited, centrally stored, and broadcast; archive preserves booking history. |
 | Backup/recovery test | `PENDING` | Recovery owner and procedure verified. |
 
 ### Milestone 8 — UAT and production readiness
@@ -476,7 +476,7 @@ must remain testable with dummy data before the next release starts.
 | v1.0.9 | Universal Lookup, daywise service input, and supplier split | `PENDING` | Vendor can create/revise stable daywise service items; find programs/vendors through live per-keystroke typeahead with keyboard navigation, contextual ranking, aliases, and canonical IDs; retain manual organic booking detail; group services into supplier bookings; and validate unassigned/duplicate items before saving. |
 | v1.0.10 | Five-type micro split and independent rate status | `DONE` | Vendor, TOC, Transport, Luggage Van, and Additional Service use type-aware provider/service lookup and price snapshots; `PENDING_RATE` does not block booking communication. |
 | v1.0.11 | Micro split Type dropdown hotfix | `DONE` | Type is a fixed five-option select, so Vendor, TOC, Transport, Luggage Van, and Additional Service remain visible regardless of the current selection. |
-| v1.1.0 | Supplier Master and contract-rate foundation | `IN PROGRESS` | One Manager/Admin menu maintains dynamic types, suppliers, unlimited contacts/recipients/SOPs, products, contract documents, validity and rates. Changes are immediate, audited, broadcast, and consumed by Micro Split with pending/manual-rate rules. |
+| v1.1.0 | Supplier Master and contract-rate foundation | `DONE` | One Manager/Admin menu maintains dynamic types, suppliers, unlimited contacts/recipients/SOPs, products, contract documents, validity and rates. Changes are immediate, audited, broadcast, and consumed by Micro Split with pending/manual-rate rules. Apps Script Version 15 and GitHub Release v1.1.0 are live. |
 | v1.1.1 | Booking template, preview, and Gmail send | `PENDING` | System generates versioned SOP-based subject/body/attachments, requires recipient and content preview, sends through the connected user, and stores Gmail thread/message IDs plus the exact sent snapshot. |
 | v1.1.2 | Revision impact and booking amendment | `PENDING` | System compares the new Reservation publication with the Vendor working version and requires a per-item decision: unchanged, add, change, rebook, or cancel; confirmed bookings are never silently overwritten. |
 | v1.1.3 | Vendor re-check and booking completion | `PENDING` | Every supplier booking is marked Sent, Pending, Confirmed, Changed, or Canceled with actor/time/note/evidence; incomplete items block Booking Complete publication and the resulting notification reaches Reservation. |
@@ -661,6 +661,7 @@ implemented yet. The focused build contract and phase gates are maintained in
 | 2026-07-27 | GitHub Release v1.0.10 published from implementation commit `8e36769` with the NSIS installer, blockmap, and `latest.yml`. GitHub marks v1.0.10 Latest; the packaged application starts successfully and the installer SHA-256 is `801BB8D5D5878BDCB80FE3BEC3DAF8EEDC1B9A8291276569D25CE875B42E14AB`. | `DONE` |
 | 2026-07-27 | Micro split Type control corrected from a filtered datalist to a fixed native select. Vendor, TOC, Transport, Luggage Van, and Additional Service are now always available in the dropdown; v1.0.11 is reserved as the desktop UI hotfix so existing v1.0.10 clients can receive it through the updater. | `DONE` |
 | 2026-07-27 | GitHub Release v1.0.11 hotfix published from commit `9deac7a` with installer, blockmap, and `latest.yml`, and marked Latest. Packaged ASAR confirms the native five-option Type select and absence of the old Type datalist; the installer SHA-256 is `75145686F681C7979EF22755E8AAC70F233259B897AC4658559515EC66075752`. | `DONE` |
+| 2026-07-28 | Supplier Master and contract-rate foundation completed. Manager/Admin now has one two-panel CRUD menu for dynamic types, supplier profiles, unlimited contacts/recipients, SOPs, products, contracts, dated rates, archive, audit, all-user notifications, and Drive contract documents. Micro Split consumes the same catalog and allows booking with `PENDING_RATE` or a controlled booking-only manual rate. Google Supplier Master tables are initialized with legacy migration plus Transport/Luggage and Additional–Garland/Water seed data; the expiry trigger is active. Apps Script Web App Version 15 and GitHub Release v1.1.0 are live from commit `2994872`; 23 tests, syntax checks, visual QA, packaged ASAR verification, and isolated smoke start passed. Installer SHA-256: `AFDEF43A425BAFCE56FD253DDA3724006C09697A7296590A4090C8AE4EE83075`. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |
