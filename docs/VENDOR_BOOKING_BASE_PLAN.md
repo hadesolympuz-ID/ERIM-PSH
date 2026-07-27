@@ -2,7 +2,7 @@
 
 Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
-Target sequence: v1.0.8-v1.0.14
+Target sequence: v1.0.8-v1.0.15
 
 ## 1. Purpose
 
@@ -326,11 +326,12 @@ event and recipient records remain available for the future lifecycle.
 | VB-01 | v1.0.8 | Vendor role dashboard + generic Notification Inbox + claim/read-only concurrency | `PENDING` | Four independently scrolling dashboard sections follow the approved filters; two-user claim test passes; shared Inbox displays only job-description-permitted totals/information. |
 | VB-02 | v1.0.9a | Vendor/program/contact master cache + Universal Lookup | `IN PROGRESS` | Google Sheet source of truth now supplies 82 TOC entries and 232 Vendor rate rows through 2026-12-16; every desktop startup cross-checks content checksum and atomically refreshes SQLite only when changed. Full keyboard navigation, aliases, contacts, stable official vendor IDs, and fallback UAT remain. |
 | VB-03 | v1.0.9-v1.0.10 | Daywise + micro-item + supplier split workspace | `IN PROGRESS` | New itinerary can be fully split without raw Sheet editing; each Day derives active/changeover hotels, requires Start Time before Split, permits optional Finish Time, uses a wide resizable two-pane editor, and Save Split persists only to local SQLite until a separate controlled Generate/online stage. Five type-aware catalogues and independent booking/rate status are implemented in v1.0.10. |
-| VB-04 | v1.0.11 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
-| VB-05 | v1.0.11/13 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
-| VB-06 | v1.0.12 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
-| VB-07 | v1.0.13 | Completion gate + Vendor publication | `PENDING` | Incomplete item blocks completion; resolved case notifies Reservation. |
-| VB-08 | v1.0.14 | Reservation drill-down + communication viewer | `PENDING` | Daywise, item, status, PIC, and permitted email trail load on demand. |
+| VB-03A | v1.0.11 | Micro split Type dropdown hotfix | `DONE` | All five types remain visible in a fixed select regardless of the current selection. |
+| VB-04 | v1.0.12 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
+| VB-05 | v1.0.12/14 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
+| VB-06 | v1.0.13 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
+| VB-07 | v1.0.14 | Completion gate + Vendor publication | `PENDING` | Incomplete item blocks completion; resolved case notifies Reservation. |
+| VB-08 | v1.0.15 | Reservation drill-down + communication viewer | `PENDING` | Daywise, item, status, PIC, and permitted email trail load on demand. |
 
 ## 14. First implementation sprint — VB-01
 

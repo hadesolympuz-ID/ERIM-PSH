@@ -962,6 +962,12 @@ function vendorSplitRateMarkup(split = {}) {
 function vendorSplitRow(split = {}, index = 0) {
   const type = vendorSplitTypeLabel(split.serviceType || "VENDOR");
   const normalizedType = normalizeVendorSplitType(type);
+  const typeOptions = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"]
+    .map((value) => `
+      <option value="${value}" ${value === normalizedType ? "selected" : ""}>
+        ${vendorSplitTypeLabel(value)}
+      </option>
+    `).join("");
   const serviceList = vendorSplitServiceList(normalizedType);
   const provider = vendorSplitProviderConfig(normalizedType);
   const vendorName = normalizedType === "TOC" ? "TOC Master" : String(split.vendorName || "");
@@ -974,9 +980,9 @@ function vendorSplitRow(split = {}, index = 0) {
       data-rate-snapshot-at="${escapeHtml(split.rateSnapshotAt || "")}">
       <label class="vendor-split-field">
         <span>Type</span>
-        <input data-vendor-split-field="serviceType" data-flexible-input data-min-size="16" data-max-size="26"
-          list="vendor-split-type-options" size="${flexibleInputSize(type, 16, 26)}"
-          value="${escapeHtml(type)}" placeholder="Type" autocomplete="off" />
+        <select data-vendor-split-field="serviceType">
+          ${typeOptions}
+        </select>
       </label>
       <label class="vendor-split-field">
         <span data-vendor-provider-label>${provider.label}</span>
