@@ -31,6 +31,17 @@ ERM-PSH adalah sistem internal operasional Peak Season Holidays untuk sekitar
 9–10 pengguna. Sistem menghubungkan pekerjaan Reservation, Vendor Booking,
 Transport, Ops Accounting, General Cashier, dan Manager/Admin.
 
+### Overall progress estimate
+
+| Measure | Current estimate | Meaning |
+| --- | --- | --- |
+| Entire ERIM-PSH product plan | `30%` | Architecture, desktop foundation, connectivity, updater, and the initial Reservation workflow exist; Vendor, Transport, Accounting, Cashier, Manager controls, production hardening, and mobile completion remain substantial. |
+
+Persentase ini mengukur keseluruhan produk, bukan hanya menu Reservation.
+Workbook/master data menggunakan pendekatan just-in-time: struktur dilengkapi
+bersamaan dengan workflow yang akan dikembangkan agar setiap tabel dan field
+benar-benar terpakai.
+
 ### Application modes
 
 | Mode | Direction | Status |
@@ -145,6 +156,7 @@ User PC
 | Architecture documentation | `DONE` | `docs/architecture.md` |
 | Permission baseline | `DONE` | `docs/permissions.md` |
 | Initial data-model documentation | `DONE` | `docs/data-model.md` |
+| Detailed function/process DFD baseline | `DONE` | `docs/DFD_DETAILED_FUNCTION_PROCESS.md`; Settings/connections, menu/button hierarchy, role ownership, local/online flow, Google table mapping, and implementation gaps documented. |
 | Initial technical roadmap | `DONE` | `docs/roadmap.md` |
 | Desktop dashboard data workbook | `DONE` | `preparation/ERIM-PSH_Desktop_Dashboard_Data_Foundation.xlsx` |
 | Workbook structural verification | `DONE` | 35 sheets, 31 operational tables, 498 field definitions. |
@@ -159,6 +171,12 @@ User PC
 | Administrator DEV Console | `DONE` | Health checks for SQLite, dummy engine, Google account/Gmail/Drive/Sheets, Apps Script, GitHub, and updater. |
 | ADMIN_DEV environment | `DONE` | Dummy publishing remains enabled while optional personal Google DEV connectivity can be tested. |
 | GitHub Releases auto-update client | `DONE` | Check, download, restart-and-install flow implemented. |
+| GitHub Secret Scanning | `DONE` | Enabled on public `hadesolympuz-ID/ERIM-PSH`; initial open-alert count verified as zero. |
+| GitHub Push Protection | `DONE` | Enabled and verified in repository security settings. |
+| Credential-safe `.gitignore` | `DONE` | Environment, Google/OAuth credential JSON, Apps Script local config, private keys/certificates, sessions, databases, logs, releases, and installers excluded. |
+| Credential protection DFD | `DONE` | Credential classes, storage boundary, 72-hour reauthentication, build/release checks, and incident response documented. |
+| Interactive reauthentication every 72 hours | `PENDING` | Implement with encrypted `authenticated_at`, `reauth_required_at`, scope hash, and privileged-action checks; independent from the temporary legacy Client Secret. |
+| Legacy OAuth Client Secret removal | `PENDING` | Retained temporarily by project-owner decision; local SQLite only and forbidden from Git, logs, installers, Sheets, and Drive. |
 | Git commit | `DONE` | Desktop v1.0 foundation committed intentionally. |
 | GitHub push | `DONE` | Branch `agent/desktop-v1` pushed; draft PR #1 opened. |
 
@@ -248,7 +266,7 @@ Tabel tambahan ini sudah masuk workbook preparation dan native Google Sheet.
 
 | Department | Agreed responsibility | Status |
 | --- | --- | --- |
-| Reservation | Confirmation intake, itinerary, revision, final checking, dan delivery ke confirmation email. | `PENDING` |
+| Reservation | Confirmation intake, Customer Code ownership, itinerary post/revision, final checking setelah Vendor selesai, dan final delivery ke confirmation email. | `DONE` |
 | Vendor Booking | Daywise, supplier split, booking, amendment/cancel, confirmation, dan follow-up. | `PENDING` |
 | Transport | Driver/transporter, operational rates, TOC preparation, transport checking, dan transporter invoice. | `PENDING` |
 | Ops Accounting | Customer invoice, final cost sheet, reconciliation, dan payment request. | `PENDING` |
@@ -259,7 +277,7 @@ Tabel tambahan ini sudah masuk workbook preparation dan native Google Sheet.
 
 | Policy | Recommended default | Status |
 | --- | --- | --- |
-| Final itinerary sender | Reservation sends after Vendor marks booking process complete. | `PENDING` |
+| Final itinerary sender | Reservation sends after Vendor marks booking process complete. | `DONE` |
 | Cost sheet ownership | Departments input components; Ops Accounting owns final Cost Sheet. | `PENDING` |
 | Mark `PAID` authority | General Cashier only. | `PENDING` |
 | Transport price changes | Use `effective_from`; never rewrite historical price. | `PENDING` |
@@ -346,9 +364,10 @@ official data.
 
 | Deliverable | Status | Acceptance condition |
 | --- | --- | --- |
+| Universal Lookup foundation | `PENDING` | Reusable keyboard-friendly typeahead searches active vendors, aliases, programs, hotels, agents, staff, and Customer Codes on every keystroke; results are ranked contextually while manual organic detail remains available. |
 | Daywise input workspace | `PENDING` | Staff works without editing raw Sheet. |
 | Service split | `PENDING` | Services grouped into supplier bookings. |
-| Vendor search/assignment | `PENDING` | Approved active vendor only. |
+| Vendor search/assignment | `PENDING` | Vendor is selected through Universal Lookup using a stable `vendor_id`; active approved matches appear first, aliases resolve to the canonical vendor, and staff can intentionally expand to all authorized vendors. |
 | Booking generation | `PENDING` | Uses approved SOP/template. |
 | Email/WhatsApp helper | `PENDING` | Snapshot and communication evidence recorded. |
 | Email booking link | `PENDING` | Each email-channel booking links to its Gmail thread/message. |
@@ -439,13 +458,120 @@ Do these in order:
 | Template Report | `PENDING` | Reusable operational report templates with department, period, and status filters. |
 | Export / Import menu | `PENDING` | Controlled XLSX/CSV export and validated import with preview, error report, duplicate protection, and audit. |
 
+### Scheduled Vendor Booking development
+
+Version numbers below are the proposed incremental delivery order. Each release
+must remain testable with dummy data before the next release starts.
+
+| Proposed version | Scope | Status | Acceptance condition |
+| --- | --- | --- | --- |
+| v1.0.8 | Vendor Daily Inbox and work queue | `PENDING` | Vendor receives New Itinerary, Revised Itinerary, and Booking Process Done events; each item shows Customer Code, source version, received time, priority, owner/claim status, and acknowledgement. |
+| v1.0.9 | Universal Lookup, daywise service input, and supplier split | `PENDING` | Vendor can create/revise stable daywise service items; find programs/vendors through live per-keystroke typeahead with keyboard navigation, contextual ranking, aliases, and canonical IDs; retain manual organic booking detail; group services into supplier bookings; and validate unassigned/duplicate items before saving. |
+| v1.0.10 | Booking template, preview, and Gmail send | `PENDING` | System generates versioned SOP-based subject/body/attachments, requires recipient and content preview, sends through the connected user, and stores Gmail thread/message IDs plus the exact sent snapshot. |
+| v1.0.11 | Revision impact and booking amendment | `PENDING` | System compares the new Reservation publication with the Vendor working version and requires a per-item decision: unchanged, add, change, rebook, or cancel; confirmed bookings are never silently overwritten. |
+| v1.0.12 | Vendor re-check and booking completion | `PENDING` | Every supplier booking is marked Sent, Pending, Confirmed, Changed, or Canceled with actor/time/note/evidence; incomplete items block Booking Complete publication and the resulting notification reaches Reservation. |
+| v1.0.13 | Reservation daywise drill-down and communication viewer | `PENDING` | Clicking a day opens all linked service, vendor booking, transport, TOC, status, PIC, and notes; clicking an email-channel booking opens its complete Gmail thread in a separate system window/panel. |
+
+#### Vendor Daily — New Confirmation
+
+1. Receive and acknowledge the new-itinerary notification.
+2. Load the exact published Reservation version, linked itinerary, confirmation
+   thread, and current daywise record.
+3. Create stable daywise service items from the itinerary without editing raw
+   Google Sheets.
+4. Split the service items into supplier/vendor booking packages.
+5. Select an approved active vendor through Universal Lookup. Each typed
+   character immediately narrows and re-ranks the visible list by exact/prefix
+   match, program relevance, active status, and usage; keyboard navigation is
+   supported, while `Show all vendors` remains available for authorized staff.
+6. Generate the booking communication from the applicable SOP/template.
+7. Preview recipients, subject, body, attachments, and source itinerary version.
+8. Send or record the booking action and retain Gmail/external references.
+9. Re-check each processed booking and mark its result with actor, time, note,
+   and evidence.
+
+#### Vendor Daily — Revised Confirmation
+
+1. Receive and acknowledge the revised-itinerary notification, including its
+   revision number and Reservation note.
+2. Load the previous Vendor publication and the exact new Reservation source
+   version.
+3. Show a per-service impact comparison between the old and new itinerary.
+4. Require an explicit decision for every affected item: unchanged, add,
+   change, rebook, or cancel.
+5. Revise daywise service items without replacing their historical versions.
+6. Revise supplier splits and identify which existing supplier bookings are
+   affected.
+7. Generate amendment/cancellation/new-booking communications using the
+   applicable SOP/template.
+8. Send or record each action, retain the linked thread/evidence, and run the
+   final re-check before publishing the revised Vendor result.
+
+#### Vendor Daily — Itinerary bookings confirmed
+
+1. Receive the booking-process-done task only when all required supplier items
+   have a resolved operational status.
+2. Re-check every itinerary item against the latest confirmation, itinerary,
+   supplier booking status, and evidence.
+3. Resolve or explain every exception before the case can be completed.
+4. Publish `VENDOR_BOOKING_COMPLETE` with the exact source itinerary revision.
+5. Trigger the final-itinerary handoff and record `SENT`, `PENDING`, or
+   `CANCELED`, including actor, time, recipient, Gmail thread/message ID, and
+   reason.
+
+#### Confirmed Vendor workflow decisions — discussion only
+
+These decisions are approved for the future Vendor Booking releases but are not
+implemented yet.
+
+| Point | Approved decision | Planned implementation |
+| --- | --- | --- |
+| Ownership and final delivery | Reservation remains the Customer Code owner and final itinerary sender. Vendor breaks the itinerary into daywise and micro booking items, confirms every required item, and publishes `VENDOR_BOOKING_COMPLETE`; this triggers Reservation final check. | v1.0.12-v1.0.13 |
+| Micro-item confirmation | Every supplier booking has independent `CONFIRMED` and `NOT_CONFIRMED` review actions. `NOT_CONFIRMED` requires category/reason and remains open for additional review attempts until resolved. | v1.0.9-v1.0.12 |
+| Gmail read and review evidence | Gmail read state applies only to the mailbox of the staff who opens it. Opening a notification and successfully loading its email must append `EMAIL_REVIEW_OPENED` online even when no business status changes. | v1.0.10 |
+| Notification routing | Recipients are generated by event/category, department, role, and assignment. Operational departments do not receive unrelated alerts. `NOT_CONFIRMED` reaches the required follow-up departments; `VENDOR_BOOKING_COMPLETE` reaches Reservation and authorized oversight roles. | v1.0.8-v1.0.12 |
+| Local notification retention | Each PC keeps its user Inbox in local SQLite for 90 days. Central notification distribution and long-term audit remain online. | v1.0.8 |
+| Manager audit visibility | Review attempts, opens, status changes, reasons, actors, source revision, and evidence references are append-only online records for Manager/All Rounder oversight. Staff operational screens emphasize current status and relevant history. | v1.0.8-v1.0.12 |
+| Concurrent item claim | The first staff member who opens an unclaimed work item receives edit ownership. Other staff see the current owner and a read-only notice. Claim, release, finish, expiry, and authorized takeover are centrally controlled and audited. | v1.0.8 |
+| DEV sending safety | Real send testing will use approved dummy/whitelisted email addresses supplied by the project owner. Non-whitelisted recipients remain blocked in DEV. | v1.0.10 |
+| Vendor contacts and templates | Each vendor has structured destination and multi-CC contact rules plus approved channel/template/SOP versions. Sample templates will be reviewed in the scheduled Vendor Template discussion. | v1.0.9-v1.0.10 |
+| WhatsApp timestamps | Manual WhatsApp `SENT` and `CONFIRMED` actions record timestamp, actor, channel, attempt, and optional evidence. These timestamps support later vendor response-time review. | v1.0.10-v1.0.12 |
+| Organic-first data entry and Universal Lookup | The system supplies context, suggestions, validation, and coordination without replacing staff judgement. Free-text operational detail such as `02 HRS SPA 13.00` remains editable and authoritative. Vendor/program selection uses a reusable live typeahead component backed by stable IDs, aliases, and contextual ranking. | v1.0.9 |
+
+#### Required decisions and safeguards before implementation
+
+| Notice / decision | Recommendation | Status |
+| --- | --- | --- |
+| Final itinerary sender ownership | Reservation is confirmed as the customer/agent-facing final sender. Vendor publishes `BOOKING_COMPLETE` and triggers the Reservation final-check task. | `DONE` |
+| Two Vendor staff working the same code | Auto-claim the first opener through a central atomic lock; the second opener is read-only and sees owner/time. Add expiry, release, finish, stale-data warning, and controlled takeover. | `DONE` |
+| Booking status separation | Keep service requirement, supplier booking, communication delivery, and supplier confirmation as separate statuses. Generated email must not equal Sent or Confirmed. | `PENDING` |
+| Revision safety | Never auto-cancel or overwrite a confirmed supplier booking from a text comparison. Show the impact and require a human decision with a note. | `PENDING` |
+| DEV email safety | Approved dummy-recipient whitelist will be used for send testing; addresses are still to be provided. | `DONE` |
+| Supplier master readiness | Use structured vendor contacts for destination and multiple CC addresses; include channel, timezone, cutoff, cancellation policy, template/SOP version, and active status. Samples remain pending. | `PENDING` |
+| Canonical vendor and alias mapping | Keep one stable `vendor_id` per official vendor and map historical spelling variants to it. Autocomplete may suggest a canonical match but must not silently replace an intentional staff choice. | `PENDING` |
+| Lookup performance and fallback | Search locally cached authorized master data on every keystroke, support arrow/Enter/Escape controls, show why a result matched, and provide an intentional `Show all` fallback when program filtering is too narrow. | `PENDING` |
+| Stable item identity | Assign immutable IDs to tour days, services, supplier bookings, and communications. Do not identify records only by row order or description text. | `PENDING` |
+| Many-to-many supplier split | Use `BOOKING_SERVICES`; one supplier booking may contain multiple services and one requirement may need multiple suppliers. | `PENDING` |
+| Template versioning | Save the template version and final sent-content snapshot so later SOP edits do not change historical evidence. | `PENDING` |
+| Gmail evidence | Store thread ID, message ID, recipient snapshot, sent timestamp, attachment Drive IDs, and sender. Do not depend only on a Gmail URL. | `PENDING` |
+| WhatsApp and portal vendors | Use manual evidence/reference workflows; never store passwords. Email automation must not be treated as the only booking channel. | `PENDING` |
+| Notification lifecycle | Add unread/read, acknowledge, claim, resolved, and escalation state. v1.0.7 creates recipients, but full acknowledgement controls are not yet implemented. | `PENDING` |
+| KPI timestamps | Capture received, acknowledged, claimed, first action, sent, supplier confirmed, revised, canceled, and completed timestamps per actor. | `PENDING` |
+| Daywise drill-down privacy/performance | Load linked details on demand and apply role filtering; do not download every Gmail trail or financial field when a day is opened. | `PENDING` |
+
 ### Following actions
 
-1. Define the required Booking Template types and fields.
-2. Define the required Report Template layouts and recipients.
-3. Approve which tables are allowed for import and export per department.
-4. Implement preview and validation before any imported data is accepted.
-5. Continue detailed Reservation and Vendor Booking workflow modeling.
+1. Approve final-itinerary sender ownership.
+2. Complete Vendor master fields, alias/program mappings, Universal Lookup
+   ranking rules, and approved status transitions.
+3. Provide one New Confirmation sample, one Revised Confirmation sample, and
+   one complete supplier-booking email trail for dummy UAT.
+4. Define the required Booking Template types, recipients, subject rules, body
+   fields, attachments, and CC rules.
+5. Approve DEV email safety mode: Draft only or recipient whitelist.
+6. Define the required Report Template layouts and recipients.
+7. Approve which tables are allowed for import and export per department.
+8. Implement preview and validation before any imported data is accepted.
 
 ---
 
@@ -495,6 +621,14 @@ Do these in order:
 | 2026-07-26 | GitHub Release v1.0.6 published and installed; updater feed, executable version, persistent Folder ID, running process, and 12 automated tests verified. | `DONE` |
 | 2026-07-26 | Apps Script deployment Version 4 activated on the existing `/exec` URL with append-only itinerary events and broadcast notification recipients for every active system user. | `DONE` |
 | 2026-07-26 | Desktop v1.0.7 released and installed with Re Check Itinerary, independent Gmail/daywise/Drive panes, latest-itinerary download folder actions, central Inbox notifications, and a per-code activity logbook for post/revision/download accountability; GitHub updater feed and 13 automated tests verified. | `DONE` |
+| 2026-07-26 | Vendor Booking development schedule proposed for v1.0.8-v1.0.13, covering Daily Inbox, new/revised daywise, supplier split, SOP email generation, revision impact, booking re-check, final handoff, and Reservation daywise drill-down; ownership and safety decisions remain pending. | `PENDING` |
+| 2026-07-26 | Vendor workflow Point 1 finalized: Reservation retains Customer Code ownership and final delivery; Vendor completes per-micro-item confirmation, online review audit, and `VENDOR_BOOKING_COMPLETE` handoff. Claim/read-only concurrency, event-based notification routing, DEV whitelist, structured multi-CC vendor contacts, and WhatsApp timestamps were approved for later implementation. | `DONE` |
+| 2026-07-27 | Universal Lookup/typeahead added to the Vendor Booking development plan at v1.0.9: live per-keystroke vendor/program filtering, contextual ranking, keyboard navigation, canonical vendor IDs with aliases, `Show all` fallback, and organic manual booking detail retained. | `DONE` |
+| 2026-07-27 | Reservation Role Alignment finalized: Reservation owns the Customer Code, confirmation intake, itinerary post/revision, final checking after Vendor completion, and final itinerary delivery to the confirmation email. | `DONE` |
+| 2026-07-27 | Detailed ERIM-PSH function/process DFD baseline created with hierarchical Settings, shared services, every current/planned department menu, button-to-data mapping, Local SQLite/App Script/Sheets/Drive/Gmail flows, Vendor Universal Lookup placement, and schema-alignment gaps. | `DONE` |
+| 2026-07-27 | Overall product progress recorded at approximately 30%. Workbook/master data will be completed just in time with each workflow; immediate priorities are employee access/position, vendor identity and contacts, versioned transport pricing, and TOC data. Employee passwords will never be stored in the workbook. | `DONE` |
+| 2026-07-27 | Future Sales & Production chain recorded as a later phase after the operational core: effective-dated contract rates, daywise rate calculation, derived/implied selling rates, quotation/version/reply trail, accepted confirmation handoff, rate sheet, Cost Sheet, invoicing, payment, and variance linkage. Issued commercial records preserve rate snapshots and are never silently recalculated by later contract updates. | `DONE` |
+| 2026-07-27 | Credential-protection hardening completed for current scope: GitHub Secret Scanning and Push Protection enabled with zero initial open alerts; ignore rules expanded and verified; detailed DFD controls, pre-commit/pre-release scanning, incident response, and planned 72-hour interactive reauthentication recorded. Legacy OAuth Client Secret remains temporarily in local SQLite by project-owner decision and must never enter Git, logs, installer resources, Sheets, or Drive. | `DONE` |
 | 2026-07-26 | Desktop dashboard data workbook with 35 sheets and 31 native tables prepared and verified. | `DONE` |
 | 2026-07-26 | Workbook imported and verified as native Google Sheets. | `DONE` |
 | 2026-07-26 | Desktop v1.0 shell, SQLite isolation, safe sync queue, Google sign-in, and updater built. | `DONE` |

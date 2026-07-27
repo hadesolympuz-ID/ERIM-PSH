@@ -38,10 +38,26 @@
 ## Phase 4 - Department workflows
 
 - Vendor/daywise/booking
+  - Universal Lookup foundation for live per-keystroke vendor/program search
+  - Canonical vendor IDs, historical aliases, contextual ranking, and keyboard navigation
+  - Organic manual activity detail remains editable and authoritative
+  - Daywise micro-item split, claim control, communication evidence, and per-item confirmation
 - Transport/driver/rates/TOC
 - Ops accounting/invoice/cost
 - Cashier/payment evidence
 - Manager monitoring and KPI
+
+## Phase 5 - Sales and Production commercial chain
+
+This phase starts after the operational core reaches its agreed milestone.
+
+- Versioned vendor and transport contract rates with effective dates
+- Daywise cost and derived/implied selling-rate calculation
+- Quotation, quotation items, approval, sharing, reply trail, and revisions
+- Accepted quotation to New Confirmation/Reservation handoff
+- Rate sheet and commercial snapshot preservation
+- Cost Sheet with quoted, contracted, and actual cost comparison
+- Customer invoicing, payment, and variance linkage
 
 ## Release gates
 
@@ -51,4 +67,3 @@
 - Every official mutation is version-checked and audited
 - Email recipients are restricted in DEV
 - Resource ownership and recovery are documented before PROD migration
-
