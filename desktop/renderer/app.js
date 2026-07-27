@@ -23,6 +23,13 @@ const state = {
     transportRates: [],
     luggageVanRates: [],
   },
+  supplierMaster: {
+    supplierTypes: [], suppliers: [], contacts: [], recipients: [],
+    sops: [], products: [], contracts: [], rates: [],
+  },
+  supplierMasterLoaded: false,
+  selectedSupplierTypeCode: "VENDOR",
+  selectedSupplierId: "",
 };
 
 const moduleDescriptions = {
@@ -357,6 +364,465 @@ function renderHealth() {
   `).join("");
 }
 
+function supplierCatalogFrom(payload) {
+  return payload?.catalog || payload || {
+    supplierTypes: [], suppliers: [], contacts: [], recipients: [],
+    sops: [], products: [], contracts: [], rates: [],
+  };
+}
+
+async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
+  const status = $("#supplier-master-sync-status");
+  status.textContent = initialize ? "INITIALIZING" : "LOADING";
+  try {
+    const result = initialize
+      ? await window.erim.supplierMaster.initialize()
+      : await window.erim.supplierMaster.list({ refresh });
+    state.supplierMaster = supplierCatalogFrom(result);
+    state.supplierMasterLoaded = true;
+    if (!state.supplierMaster.supplierTypes.some((row) =>
+      row.typeCode === state.selectedSupplierTypeCode && row.active !== false
+    )) {
+      state.selectedSupplierTypeCode = state.supplierMaster.supplierTypes.find((row) => row.active !== false)?.typeCode || "";
+    }
+    if (!state.supplierMaster.suppliers.some((row) => row.supplierId === state.selectedSupplierId)) {
+      state.selectedSupplierId = "";
+    }
+    status.textContent = result?.status || "SYNCED";
+    status.className = `status ${String(result?.status || "SYNCED").includes("OFFLINE") ? "conflict" : "synced"}`;
+    renderSupplierMaster();
+    state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
+    renderVendorSuggestions(state.vendorSuggestions);
+  } catch (error) {
+    status.textContent = "FAILED";
+    status.className = "status failed";
+    toast(error.message, true);
+  }
+}
+
+function supplierSuggestionsFromCatalog(catalog, serviceDate = new Date().toISOString().slice(0, 10)) {
+  const suppliers = (catalog.suppliers || []).filter((row) => row.active !== false);
+  const products = (catalog.products || []).filter((row) => row.active !== false);
+  const contracts = (catalog.contracts || []).filter((row) =>
+    row.active !== false && !["ARCHIVED", "CANCELLED", "SUPERSEDED"].includes(String(row.status || "").toUpperCase())
+  );
+  const contractById = new Map(contracts.map((row) => [row.contractId, row]));
+  const productById = new Map(products.map((row) => [row.productId, row]));
+  const supplierById = new Map(suppliers.map((row) => [row.supplierId, row]));
+  const valid = (date, from, to) => (!from || date >= from) && (!to || date <= to);
+  const rates = (catalog.rates || []).filter((row) => row.active !== false).filter((rate) => {
+    const contract = contractById.get(rate.contractId);
+    return contract && valid(
+      serviceDate,
+      rate.validFrom || contract.validFrom,
+      rate.validTo || contract.validTo,
+    );
+  }).map((rate) => {
+    const contract = contractById.get(rate.contractId) || {};
+    const product = productById.get(rate.productId) || {};
+    const supplier = supplierById.get(product.supplierId || contract.supplierId) || {};
+    const basis = String(rate.priceBasis || "PER_SERVICE").toUpperCase();
+    const amount = rate.amount === "" || rate.amount === null ? null : Number(rate.amount);
+    return {
+      serviceMasterId: product.productId || rate.productId,
+      productId: product.productId || rate.productId,
+      supplierId: supplier.supplierId || "",
+      contractId: contract.contractId || rate.contractId,
+      contractRateId: rate.contractRateId,
+      typeCode: supplier.typeCode || "",
+      vendorName: supplier.supplierName || "",
+      serviceName: product.productName || "",
+      adultRateIdr: basis === "PER_ADULT" ? amount : null,
+      childRateIdr: basis === "PER_CHILD" ? amount : null,
+      unitRateIdr: !["PER_ADULT", "PER_CHILD"].includes(basis) ? amount : null,
+      priceBasis: basis,
+      currency: rate.currency || contract.currency || "IDR",
+      validFrom: rate.validFrom || contract.validFrom || "",
+      validTo: rate.validTo || contract.validTo || "",
+      priceSource: "CONTRACT",
+      contractNumber: contract.contractNumber || "",
+    };
+  });
+  const byType = (code) => rates.filter((rate) => rate.typeCode === code);
+  const unique = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return {
+    ...catalog,
+    rates,
+    vendorRates: byType("VENDOR"),
+    tocRates: byType("TOC"),
+    transportRates: byType("TRANSPORT"),
+    luggageVanRates: byType("LUGGAGE_VAN"),
+    vendorNames: unique(byType("VENDOR").map((row) => row.vendorName)),
+    vendorServices: unique(byType("VENDOR").map((row) => row.serviceName)),
+    tocNames: unique(byType("TOC").map((row) => row.serviceName)),
+  };
+}
+
+function renderSupplierMaster() {
+  renderSupplierTypeTabs();
+  renderSupplierList();
+  const selected = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+  if (selected) fillSupplierForm(selected);
+  else resetSupplierForm();
+  renderSupplierProductsAndContracts();
+}
+
+function renderSupplierTypeTabs() {
+  const types = (state.supplierMaster.supplierTypes || [])
+    .filter((row) => row.active !== false)
+    .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
+  $("#supplier-type-tabs").innerHTML = types.map((row) => `
+    <button class="supplier-type-tab ${row.typeCode === state.selectedSupplierTypeCode ? "active" : ""}"
+      type="button" data-supplier-type-code="${escapeHtml(row.typeCode)}">
+      ${escapeHtml(row.typeName)}
+    </button>
+  `).join("") || `<span class="muted-text">Initialize Supplier Master to create types.</span>`;
+}
+
+function filteredSuppliers() {
+  const query = $("#supplier-master-search")?.value.trim().toLowerCase() || "";
+  return (state.supplierMaster.suppliers || [])
+    .filter((row) => row.active !== false && row.typeCode === state.selectedSupplierTypeCode)
+    .filter((row) => !query || [
+      row.supplierName, row.supplierCode, ...(row.destinations || []),
+    ].join(" ").toLowerCase().includes(query))
+    .sort((a, b) => String(a.supplierName).localeCompare(String(b.supplierName)));
+}
+
+function renderSupplierList() {
+  const rows = filteredSuppliers();
+  $("#supplier-master-list").innerHTML = rows.length ? rows.map((row) => `
+    <button class="supplier-list-item ${row.supplierId === state.selectedSupplierId ? "active" : ""}"
+      type="button" data-supplier-id="${escapeHtml(row.supplierId)}">
+      <strong>${escapeHtml(row.supplierName)}</strong>
+      <small>${escapeHtml(row.supplierCode || "No code")} · ${escapeHtml((row.destinations || []).join(", ") || "All destinations")}</small>
+    </button>
+  `).join("") : `<div class="empty-notifications">No active supplier in this Type.</div>`;
+}
+
+function resetSupplierForm() {
+  const form = $("#supplier-master-form");
+  form.reset();
+  form.elements.supplierId.value = "";
+  form.elements.typeCode.value = state.selectedSupplierTypeCode || "";
+  $("#supplier-form-title").textContent = "New supplier";
+  $("#supplier-form-status").textContent = "NEW";
+  $("#archive-supplier").hidden = true;
+  $("#supplier-contact-list").innerHTML = supplierContactMarkup({});
+  $("#supplier-recipient-list").innerHTML = supplierRecipientMarkup({});
+  $("#supplier-product-heading").textContent = "Select or save a supplier";
+  $("#supplier-product-subheading").textContent = "Products, contracts, and rates will appear here.";
+  $("#add-supplier-product").disabled = true;
+  $("#add-supplier-contract").disabled = true;
+}
+
+function fillSupplierForm(supplier) {
+  const form = $("#supplier-master-form");
+  form.reset();
+  form.elements.supplierId.value = supplier.supplierId || "";
+  form.elements.typeCode.value = supplier.typeCode || "";
+  ["supplierCode", "supplierName", "legalName", "address", "website", "taxId",
+    "internalPicEmployeeId", "operationalNotes"].forEach((field) => {
+    form.elements[field].value = supplier[field] || "";
+  });
+  form.elements.destinations.value = (supplier.destinations || []).join(", ");
+  const contacts = state.supplierMaster.contacts.filter((row) =>
+    row.supplierId === supplier.supplierId && row.active !== false
+  );
+  const recipients = state.supplierMaster.recipients.filter((row) =>
+    row.supplierId === supplier.supplierId && row.active !== false
+  );
+  const sop = state.supplierMaster.sops.find((row) =>
+    row.supplierId === supplier.supplierId && row.active !== false
+  ) || {};
+  $("#supplier-contact-list").innerHTML = (contacts.length ? contacts : [{}]).map(supplierContactMarkup).join("");
+  $("#supplier-recipient-list").innerHTML = (recipients.length ? recipients : [{}]).map(supplierRecipientMarkup).join("");
+  $$('input[name="bookingChannels"]').forEach((node) => {
+    node.checked = (sop.bookingChannels || []).includes(node.value);
+  });
+  ["leadTime", "cutoffTime", "requiredInformation", "confirmationProcedure",
+    "amendmentProcedure", "cancellationProcedure", "emergencyProcedure", "portalUrl",
+    "accountReference", "subjectTemplate", "bodyTemplate"].forEach((field) => {
+    form.elements[field].value = sop[field] || "";
+  });
+  $("#supplier-form-title").textContent = supplier.supplierName;
+  $("#supplier-form-status").textContent = supplier.status || "ACTIVE";
+  $("#archive-supplier").hidden = false;
+  $("#supplier-product-heading").textContent = supplier.supplierName;
+  $("#supplier-product-subheading").textContent = `${supplier.typeCode} · ${supplier.supplierCode || "No code"}`;
+  $("#add-supplier-product").disabled = false;
+  $("#add-supplier-contract").disabled = false;
+}
+
+function supplierContactMarkup(row = {}) {
+  return `
+    <div class="supplier-repeatable-row" data-contact-id="${escapeHtml(row.contactId || "")}">
+      <label>Name<input data-supplier-contact="contactName" value="${escapeHtml(row.contactName || "")}" /></label>
+      <label>Position<input data-supplier-contact="position" value="${escapeHtml(row.position || "")}" /></label>
+      <label>Department<input data-supplier-contact="department" value="${escapeHtml(row.department || "")}" /></label>
+      <label>Phone<input data-supplier-contact="phone" value="${escapeHtml(row.phone || "")}" /></label>
+      <label>WhatsApp<input data-supplier-contact="whatsapp" value="${escapeHtml(row.whatsapp || "")}" /></label>
+      <label>Email<input data-supplier-contact="email" type="email" value="${escapeHtml(row.email || "")}" /></label>
+      <label>Preferred channel<select data-supplier-contact="preferredChannel">${["EMAIL","WHATSAPP","PHONE","PORTAL","OTHERS"].map((value) => `<option${row.preferredChannel === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label>Operational hours<input data-supplier-contact="operationalHours" value="${escapeHtml(row.operationalHours || "")}" /></label>
+      <label class="wide">Responsibility<input data-supplier-contact="responsibility" value="${escapeHtml(row.responsibility || "")}" /></label>
+      <label><input data-supplier-contact="isEmergency" type="checkbox" ${row.isEmergency ? "checked" : ""} /> Emergency</label>
+      <button class="supplier-repeatable-remove" data-remove-supplier-contact type="button">×</button>
+    </div>
+  `;
+}
+
+function supplierRecipientMarkup(row = {}) {
+  return `
+    <div class="supplier-repeatable-row" data-recipient-id="${escapeHtml(row.recipientId || "")}">
+      <label>Type<select data-supplier-recipient="recipientType">${["TO","CC","BCC","WHATSAPP"].map((value) => `<option${row.recipientType === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label>Channel<select data-supplier-recipient="channel">${["EMAIL","WHATSAPP","PORTAL","OTHERS"].map((value) => `<option${row.channel === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label class="wide">Email / number / account<input data-supplier-recipient="address" value="${escapeHtml(row.address || "")}" /></label>
+      <label>Purpose<input data-supplier-recipient="purpose" value="${escapeHtml(row.purpose || "")}" /></label>
+      <button class="supplier-repeatable-remove" data-remove-supplier-recipient type="button">×</button>
+    </div>
+  `;
+}
+
+function collectRepeatable(containerSelector, fieldSelector, idKey, idAttribute) {
+  return [...document.querySelectorAll(`${containerSelector} .supplier-repeatable-row`)].map((row) => {
+    const result = { [idKey]: row.dataset[idAttribute] || "" };
+    row.querySelectorAll(`[${fieldSelector}]`).forEach((input) => {
+      const key = input.getAttribute(fieldSelector);
+      result[key] = input.type === "checkbox" ? input.checked : input.value.trim();
+    });
+    return result;
+  }).filter((row) => Object.entries(row).some(([key, value]) => key !== idKey && value !== "" && value !== false));
+}
+
+function collectSupplierForm() {
+  const form = $("#supplier-master-form");
+  return {
+    supplierId: form.elements.supplierId.value,
+    typeCode: form.elements.typeCode.value || state.selectedSupplierTypeCode,
+    supplierCode: form.elements.supplierCode.value.trim(),
+    supplierName: form.elements.supplierName.value.trim(),
+    legalName: form.elements.legalName.value.trim(),
+    destinations: form.elements.destinations.value.split(",").map((x) => x.trim()).filter(Boolean),
+    address: form.elements.address.value.trim(),
+    website: form.elements.website.value.trim(),
+    taxId: form.elements.taxId.value.trim(),
+    internalPicEmployeeId: form.elements.internalPicEmployeeId.value.trim(),
+    operationalNotes: form.elements.operationalNotes.value.trim(),
+    contacts: collectRepeatable("#supplier-contact-list", "data-supplier-contact", "contactId", "contactId"),
+    recipients: collectRepeatable("#supplier-recipient-list", "data-supplier-recipient", "recipientId", "recipientId")
+      .map((row, index) => ({ ...row, sequence: index + 1 })),
+    sop: {
+      bookingChannels: $$('input[name="bookingChannels"]:checked').map((node) => node.value),
+      leadTime: form.elements.leadTime.value.trim(),
+      cutoffTime: form.elements.cutoffTime.value.trim(),
+      requiredInformation: form.elements.requiredInformation.value.trim(),
+      confirmationProcedure: form.elements.confirmationProcedure.value.trim(),
+      amendmentProcedure: form.elements.amendmentProcedure.value.trim(),
+      cancellationProcedure: form.elements.cancellationProcedure.value.trim(),
+      emergencyProcedure: form.elements.emergencyProcedure.value.trim(),
+      portalUrl: form.elements.portalUrl.value.trim(),
+      accountReference: form.elements.accountReference.value.trim(),
+      subjectTemplate: form.elements.subjectTemplate.value.trim(),
+      bodyTemplate: form.elements.bodyTemplate.value.trim(),
+    },
+  };
+}
+
+async function saveSupplierMasterForm(event) {
+  event.preventDefault();
+  const payload = collectSupplierForm();
+  if (!payload.supplierName) return toast("Supplier name is required.", true);
+  try {
+    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveSupplier(payload));
+    const saved = state.supplierMaster.suppliers.find((row) =>
+      row.supplierName === payload.supplierName && row.typeCode === payload.typeCode
+    );
+    state.selectedSupplierId = saved?.supplierId || payload.supplierId;
+    renderSupplierMaster();
+    toast(`${payload.supplierName} saved, activated, and notified to all users.`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderSupplierProductsAndContracts() {
+  const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+  if (!supplier) {
+    $("#supplier-product-contract-list").innerHTML = `<div class="empty-notifications">Choose a supplier from the left.</div>`;
+    return;
+  }
+  const products = state.supplierMaster.products.filter((row) => row.supplierId === supplier.supplierId && row.active !== false);
+  const contracts = state.supplierMaster.contracts.filter((row) => row.supplierId === supplier.supplierId && row.active !== false);
+  const rates = state.supplierMaster.rates.filter((row) => row.active !== false);
+  const productCards = products.map((product) => `
+    <article class="supplier-product-card">
+      <div class="supplier-product-card-heading">
+        <div><strong>${escapeHtml(product.productName)}</strong><small>${escapeHtml(product.productCode || "No code")} · ${escapeHtml(product.category || supplier.typeCode)}</small></div>
+        <button class="button ghost small" data-edit-supplier-product="${escapeHtml(product.productId)}" type="button">Edit</button>
+      </div>
+      <div class="supplier-product-detail">${escapeHtml(product.description || "No description")}</div>
+    </article>
+  `).join("");
+  const contractCards = contracts.map((contract) => {
+    const contractRates = rates.filter((rate) => rate.contractId === contract.contractId);
+    return `
+      <article class="supplier-contract-card">
+        <div class="supplier-contract-card-heading">
+          <div><strong>${escapeHtml(contract.contractNumber)}</strong><small>${escapeHtml(contract.validFrom)} – ${escapeHtml(contract.validTo)} · ${escapeHtml(contract.status)}</small></div>
+          <button class="button ghost small" data-edit-supplier-contract="${escapeHtml(contract.contractId)}" type="button">Edit</button>
+        </div>
+        <table class="supplier-rate-table"><thead><tr><th>Product</th><th>Basis</th><th>Rate</th><th>Validity</th></tr></thead><tbody>
+          ${contractRates.map((rate) => {
+            const product = products.find((row) => row.productId === rate.productId);
+            return `<tr><td>${escapeHtml(product?.productName || rate.productId)}</td><td>${escapeHtml(rate.priceBasis)}</td><td>${escapeHtml(rate.currency || contract.currency)} ${Number(rate.amount || 0).toLocaleString("id-ID")}</td><td>${escapeHtml(rate.validFrom || contract.validFrom)} – ${escapeHtml(rate.validTo || contract.validTo)}</td></tr>`;
+          }).join("") || `<tr><td colspan="4">No active rates.</td></tr>`}
+        </tbody></table>
+      </article>
+    `;
+  }).join("");
+  $("#supplier-product-contract-list").innerHTML = `
+    <div class="section-heading"><div><p class="eyebrow">Catalogue</p><h3>Products (${products.length})</h3></div></div>
+    ${productCards || `<div class="empty-notifications">No products yet.</div>`}
+    <div class="section-heading"><div><p class="eyebrow">Effective dated</p><h3>Contracts (${contracts.length})</h3></div></div>
+    ${contractCards || `<div class="empty-notifications">No contracts yet. Products without a valid contract become PENDING_RATE.</div>`}
+  `;
+}
+
+function openSupplierProductDialog(productId = "") {
+  const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+  if (!supplier) return toast("Select a supplier first.", true);
+  const product = state.supplierMaster.products.find((row) => row.productId === productId) || {};
+  const form = $("#supplier-product-form");
+  form.reset();
+  form.elements.supplierId.value = supplier.supplierId;
+  ["productId","productCode","productName","category","subcategory","description","inclusion","exclusion",
+    "termsAndConditions","cancellationTerms","bookingInstructions","minimumOrder","maximumCapacity",
+    "taxTreatment","notes"].forEach((field) => {
+    if (form.elements[field]) form.elements[field].value = product[field] || (field === "category" ? supplier.typeCode : "");
+  });
+  form.elements.destinations.value = (product.destinations || []).join(", ");
+  $("#supplier-product-dialog-title").textContent = product.productId ? `Edit ${product.productName}` : "Add Product";
+  $("#archive-supplier-product").hidden = !product.productId;
+  $("#supplier-product-dialog").showModal();
+}
+
+async function saveSupplierProductForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.destinations = String(payload.destinations || "").split(",").map((x) => x.trim()).filter(Boolean);
+  try {
+    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveProduct(payload));
+    $("#supplier-product-dialog").close();
+    renderSupplierMaster();
+    toast(`${payload.productName} saved and activated.`);
+  } catch (error) { toast(error.message, true); }
+}
+
+function contractRateMarkup(rate = {}) {
+  const products = state.supplierMaster.products.filter((row) =>
+    row.supplierId === state.selectedSupplierId && row.active !== false
+  );
+  const bases = ["PER_ADULT","PER_CHILD","PER_INFANT","PER_PAX","PER_SERVICE","PER_ITEM","PER_UNIT","PER_TRIP","PER_VEHICLE","PER_VAN","PER_GROUP","PER_HOUR","PER_DAY","CUSTOM"];
+  return `
+    <div class="supplier-contract-rate-row" data-contract-rate-id="${escapeHtml(rate.contractRateId || "")}">
+      <label>Product<select data-contract-rate="productId">${products.map((row) => `<option value="${escapeHtml(row.productId)}"${row.productId === rate.productId ? " selected" : ""}>${escapeHtml(row.productName)}</option>`).join("")}</select></label>
+      <label>Price basis<select data-contract-rate="priceBasis">${bases.map((value) => `<option${value === rate.priceBasis ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label>Amount<input data-contract-rate="amount" type="number" min="0" step="0.01" value="${escapeHtml(rate.amount ?? "")}" /></label>
+      <label>Min qty<input data-contract-rate="minQuantity" type="number" min="0" step="0.01" value="${escapeHtml(rate.minQuantity ?? "")}" /></label>
+      <label>Max qty<input data-contract-rate="maxQuantity" type="number" min="0" step="0.01" value="${escapeHtml(rate.maxQuantity ?? "")}" /></label>
+      <button class="supplier-repeatable-remove" data-remove-contract-rate type="button">×</button>
+    </div>
+  `;
+}
+
+function openSupplierContractDialog(contractId = "") {
+  const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+  const products = state.supplierMaster.products.filter((row) => row.supplierId === state.selectedSupplierId && row.active !== false);
+  if (!supplier) return toast("Select a supplier first.", true);
+  if (!products.length) return toast("Add at least one Product before creating a Contract.", true);
+  const contract = state.supplierMaster.contracts.find((row) => row.contractId === contractId) || {};
+  const form = $("#supplier-contract-form");
+  form.reset();
+  form.elements.supplierId.value = supplier.supplierId;
+  ["contractId","contractNumber","contractName","validFrom","validTo","currency","taxTreatment",
+    "termsAndConditions","driveFileId","driveFileName","driveFileUrl","overlapReason"].forEach((field) => {
+    if (form.elements[field]) form.elements[field].value = contract[field] || (field === "currency" ? "IDR" : "");
+  });
+  form.elements.allowOverlap.checked = Boolean(contract.allowOverlap);
+  const link = $("#supplier-contract-file-link");
+  link.hidden = !contract.driveFileUrl;
+  link.href = contract.driveFileUrl || "#";
+  const rates = state.supplierMaster.rates.filter((row) => row.contractId === contractId && row.active !== false);
+  $("#supplier-contract-rate-list").innerHTML = (rates.length ? rates : [{}]).map(contractRateMarkup).join("");
+  $("#supplier-contract-dialog-title").textContent = contract.contractId ? `Edit ${contract.contractNumber}` : "New Contract";
+  $("#archive-supplier-contract").hidden = !contract.contractId;
+  $("#supplier-contract-dialog").showModal();
+}
+
+function collectContractRates() {
+  return [...document.querySelectorAll("#supplier-contract-rate-list .supplier-contract-rate-row")].map((row) => {
+    const result = { contractRateId: row.dataset.contractRateId || "" };
+    row.querySelectorAll("[data-contract-rate]").forEach((input) => {
+      result[input.dataset.contractRate] = input.value;
+    });
+    return result;
+  }).filter((row) => row.productId && row.priceBasis && row.amount !== "");
+}
+
+async function saveSupplierContractForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.allowOverlap = form.elements.allowOverlap.checked;
+  payload.rates = collectContractRates();
+  try {
+    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveContract(payload));
+    $("#supplier-contract-dialog").close();
+    renderSupplierMaster();
+    state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
+    renderVendorSuggestions(state.vendorSuggestions);
+    toast(`${payload.contractNumber} saved; contract rates are immediately available by service date.`);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function uploadSupplierContract() {
+  const form = $("#supplier-contract-form");
+  const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+  try {
+    const result = await window.erim.supplierMaster.uploadContract({
+      supplierId: supplier?.supplierId,
+      supplierName: supplier?.supplierName,
+      contractNumber: form.elements.contractNumber.value.trim() || "Contract",
+    });
+    if (result.canceled) return;
+    form.elements.driveFileId.value = result.driveFileId;
+    form.elements.driveFileName.value = result.driveFileName;
+    form.elements.driveFileUrl.value = result.driveFileUrl;
+    const link = $("#supplier-contract-file-link");
+    link.hidden = false;
+    link.href = result.driveFileUrl;
+    toast("Contract uploaded to the centralized Google Drive folder.");
+  } catch (error) { toast(error.message, true); }
+}
+
+async function archiveSelectedSupplierEntity(entityKind, entityId, label) {
+  const reason = window.prompt(`Reason for archiving ${label}:`);
+  if (reason === null) return;
+  if (!reason.trim()) return toast("Archive reason is required.", true);
+  try {
+    state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.archive({
+      entityKind, entityId, reason: reason.trim(),
+    }));
+    if (entityKind === "SUPPLIER") state.selectedSupplierId = "";
+    $("#supplier-product-dialog").close();
+    $("#supplier-contract-dialog").close();
+    renderSupplierMaster();
+    toast(`${label} archived. Historical booking snapshots remain available.`);
+  } catch (error) { toast(error.message, true); }
+}
+
 function draftActions(draft) {
   const buttons = [`<button data-action="edit" data-id="${draft.draft_id}">Open</button>`];
   if (draft.local_status === "LOCAL_DRAFT") buttons.push(`<button data-action="ready" data-id="${draft.draft_id}">Mark ready</button>`);
@@ -376,6 +842,9 @@ function showView(view, module = null) {
     };
     node.classList.toggle("active", map[node.dataset.vendorAction] === view);
   });
+  $$("[data-manager-action]").forEach((node) => {
+    node.classList.toggle("active", view === "supplier-master");
+  });
   const titles = {
     dashboard: ["Local workspace", "Operations dashboard"],
     workspace: ["Department workspace", module?.replaceAll("_", " ") || "Workspace"],
@@ -391,6 +860,7 @@ function showView(view, module = null) {
     "vendor-revise-itinerary": ["Vendor Booking", "Revise Itinerary"],
     "vendor-cancel": ["Vendor Booking", "Cancel All Service"],
     "vendor-kpi": ["Vendor Booking", "Cek KPI"],
+    "supplier-master": ["Manager / Admin", "Supplier Master & Contract Rates"],
   };
   $("#view-eyebrow").textContent = titles[view][0];
   $("#view-title").textContent = titles[view][1];
@@ -848,44 +1318,51 @@ function updateVendorDayHotels() {
 
 function vendorSplitCatalog(serviceType) {
   const type = normalizeVendorSplitType(serviceType);
-  if (type === "TOC") return state.vendorSuggestions.tocRates || [];
-  if (type === "TRANSPORT") return state.vendorSuggestions.transportRates || [];
-  if (type === "LUGGAGE_VAN") return state.vendorSuggestions.luggageVanRates || [];
-  if (type === "VENDOR") return state.vendorSuggestions.vendorRates || [];
-  return [];
+  return (state.vendorSuggestions.rates || [
+    ...(state.vendorSuggestions.vendorRates || []),
+    ...(state.vendorSuggestions.tocRates || []),
+    ...(state.vendorSuggestions.transportRates || []),
+    ...(state.vendorSuggestions.luggageVanRates || []),
+  ]).filter((rate) => !rate.typeCode || rate.typeCode === type);
 }
 
 function vendorSplitProviderConfig(serviceType) {
-  return ({
-    VENDOR: { label: "Vendor Name", list: "vendor-name-options", placeholder: "Choose vendor" },
-    TOC: { label: "Rate Source", list: "", placeholder: "TOC Master" },
-    TRANSPORT: { label: "Transporter", list: "transport-name-options", placeholder: "Choose transporter" },
-    LUGGAGE_VAN: { label: "Provider", list: "luggage-van-name-options", placeholder: "Choose luggage provider" },
-    ADDITIONAL_SERVICE: { label: "Provider (optional)", list: "", placeholder: "Optional" },
-  })[normalizeVendorSplitType(serviceType)] || { label: "Provider", list: "", placeholder: "Provider" };
+  const type = (state.vendorSuggestions.supplierTypes || []).find((row) =>
+    row.typeCode === normalizeVendorSplitType(serviceType)
+  );
+  return {
+    label: type?.typeName ? `${type.typeName} Supplier` : "Supplier",
+    placeholder: "Choose supplier",
+  };
 }
 
 function vendorSplitServiceList(serviceType) {
-  return ({
-    VENDOR: "vendor-service-options",
-    TOC: "toc-service-options",
-    TRANSPORT: "transport-service-options",
-    LUGGAGE_VAN: "luggage-van-service-options",
-    ADDITIONAL_SERVICE: "",
-  })[normalizeVendorSplitType(serviceType)] || "";
+  return normalizeVendorSplitType(serviceType);
 }
 
-function vendorSplitRate(serviceType, vendorName, serviceName) {
-  const normalizedVendor = String(vendorName || "").trim().toLowerCase();
-  const normalizedService = String(serviceName || "").trim().toLowerCase();
-  if (!normalizedService) return null;
-  return vendorSplitCatalog(serviceType).find((rate) =>
-    String(rate.serviceName || "").trim().toLowerCase() === normalizedService
-    && (
-      normalizeVendorSplitType(serviceType) === "TOC"
-      || String(rate.vendorName || "").trim().toLowerCase() === normalizedVendor
-    )
-  ) || null;
+function vendorSplitRate(serviceType, supplierId, productId, serviceDate = "") {
+  if (!productId) return null;
+  const date = serviceDate || $("#vendor-split-dialog")?.dataset.serviceDate || new Date().toISOString().slice(0, 10);
+  const candidates = vendorSplitCatalog(serviceType).filter((rate) =>
+    (!supplierId || rate.supplierId === supplierId)
+    && (rate.productId || rate.serviceMasterId) === productId
+    && (!rate.validFrom || date >= rate.validFrom)
+    && (!rate.validTo || date <= rate.validTo)
+  );
+  if (!candidates.length) return null;
+  const first = candidates[0];
+  return candidates.reduce((combined, rate) => ({
+    ...combined,
+    adultRateIdr: hasKnownRate(rate.adultRateIdr) ? rate.adultRateIdr : combined.adultRateIdr,
+    childRateIdr: hasKnownRate(rate.childRateIdr) ? rate.childRateIdr : combined.childRateIdr,
+    unitRateIdr: hasKnownRate(rate.unitRateIdr) ? rate.unitRateIdr : combined.unitRateIdr,
+    contractRateId: combined.contractRateId || rate.contractRateId || "",
+  }), {
+    ...first,
+    adultRateIdr: null,
+    childRateIdr: null,
+    unitRateIdr: null,
+  });
 }
 
 function hasKnownRate(value) {
@@ -904,21 +1381,22 @@ function idr(value) {
 
 function vendorSplitRateMarkup(split = {}) {
   const type = normalizeVendorSplitType(split.serviceType || "VENDOR");
-  if (type === "ADDITIONAL_SERVICE") {
-    const unitRate = split.unitRateIdr ?? "";
+  const rate = vendorSplitRate(type, split.supplierId, split.productId || split.serviceMasterId, split.serviceDate);
+  if (!rate) {
+    const unitRate = split.priceSource === "MANUAL" ? (split.unitRateIdr ?? "") : "";
     const ready = hasKnownRate(unitRate);
     const basis = split.priceBasis || "PER_SERVICE";
     const quantity = Number(split.quantity ?? 1) || 1;
     return `
       <div class="vendor-split-rate-heading">
         <span class="vendor-rate-status ${ready ? "ready" : "pending"}" data-vendor-rate-status>
-          ${ready ? "Rate ready" : "Pending rate"}
+          ${ready ? "Manual rate ready" : "Pending rate"}
         </span>
-        <small>Booking email, WhatsApp, or portal action may continue while rate is pending.</small>
+        <small>No valid contract rate for this service date. Booking may continue; manual rate is booking-only.</small>
       </div>
       <div class="vendor-split-manual-rate">
         <label class="vendor-split-field">
-          <span>Manual rate (IDR)</span>
+          <span>Manual rate</span>
           <input data-vendor-split-field="unitRateIdr" type="number" min="0" step="1"
             value="${escapeHtml(unitRate)}" placeholder="Can be filled later" />
         </label>
@@ -935,10 +1413,27 @@ function vendorSplitRateMarkup(split = {}) {
           <input data-vendor-split-field="quantity" type="number" min="0.01" step="0.01"
             value="${escapeHtml(quantity)}" />
         </label>
+        <label class="vendor-split-field">
+          <span>Reason *</span>
+          <input data-vendor-split-field="manualPriceReason" value="${escapeHtml(split.manualPriceReason || "")}"
+            placeholder="Required when manual rate is filled" />
+        </label>
+        <label class="vendor-split-field">
+          <span>Source</span>
+          <select data-vendor-split-field="manualRateSource">
+            ${["EMAIL","WHATSAPP","QUOTATION","PHONE","PORTAL","OTHERS"].map((value) =>
+              `<option${value === split.manualRateSource ? " selected" : ""}>${value}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label class="vendor-split-field">
+          <span>Evidence reference</span>
+          <input data-vendor-split-field="manualEvidenceRef" value="${escapeHtml(split.manualEvidenceRef || "")}"
+            placeholder="Email/thread/file/note reference" />
+        </label>
       </div>
     `;
   }
-  const rate = vendorSplitRate(type, split.vendorName, split.activityText);
   const adult = rate?.adultRateIdr ?? split.adultRateIdr;
   const child = rate?.childRateIdr ?? split.childRateIdr;
   const unit = rate?.unitRateIdr ?? split.unitRateIdr;
@@ -948,6 +1443,8 @@ function vendorSplitRateMarkup(split = {}) {
     hasKnownRate(child) ? `Child ${idr(child)}` : "",
     hasKnownRate(unit) ? `Unit ${idr(unit)}` : "",
     rate?.priceBasis ? rate.priceBasis.replaceAll("_", " ") : "",
+    rate?.contractNumber ? `Contract ${rate.contractNumber}` : "",
+    rate?.validTo ? `valid to ${rate.validTo}` : "",
   ].filter(Boolean);
   return `
     <div class="vendor-split-rate-heading">
@@ -960,20 +1457,39 @@ function vendorSplitRateMarkup(split = {}) {
 }
 
 function vendorSplitRow(split = {}, index = 0) {
-  const type = vendorSplitTypeLabel(split.serviceType || "VENDOR");
-  const normalizedType = normalizeVendorSplitType(type);
-  const typeOptions = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"]
-    .map((value) => `
-      <option value="${value}" ${value === normalizedType ? "selected" : ""}>
-        ${vendorSplitTypeLabel(value)}
+  const normalizedType = normalizeVendorSplitType(split.serviceType || "VENDOR");
+  const supplierTypes = (state.vendorSuggestions.supplierTypes || [
+    { typeCode: "VENDOR", typeName: "Vendor" },
+    { typeCode: "TOC", typeName: "TOC" },
+    { typeCode: "TRANSPORT", typeName: "Transport" },
+    { typeCode: "LUGGAGE_VAN", typeName: "Luggage Van" },
+    { typeCode: "ADDITIONAL_SERVICE", typeName: "Additional Service" },
+  ]).filter((row) => row.active !== false);
+  const typeOptions = supplierTypes
+    .map((row) => `
+      <option value="${escapeHtml(row.typeCode)}" ${row.typeCode === normalizedType ? "selected" : ""}>
+        ${escapeHtml(row.typeName)}
       </option>
     `).join("");
-  const serviceList = vendorSplitServiceList(normalizedType);
   const provider = vendorSplitProviderConfig(normalizedType);
-  const vendorName = normalizedType === "TOC" ? "TOC Master" : String(split.vendorName || "");
-  const service = String(split.activityText || "");
-  const providerList = provider.list ? `list="${provider.list}"` : "";
-  const serviceListAttribute = serviceList ? `list="${serviceList}"` : "";
+  const suppliers = (state.vendorSuggestions.suppliers || []).filter((row) =>
+    row.active !== false && row.typeCode === normalizedType
+  );
+  const selectedSupplierId = split.supplierId || split.vendorId
+    || suppliers.find((row) => row.supplierName === split.vendorName)?.supplierId || "";
+  const products = (state.vendorSuggestions.products || []).filter((row) =>
+    row.active !== false && row.supplierId === selectedSupplierId
+  );
+  const selectedProductId = split.productId || split.serviceMasterId
+    || products.find((row) => row.productName === split.activityText)?.productId || "";
+  const supplierOptions = [
+    `<option value="">Choose supplier</option>`,
+    ...suppliers.map((row) => `<option value="${escapeHtml(row.supplierId)}"${row.supplierId === selectedSupplierId ? " selected" : ""}>${escapeHtml(row.supplierName)}</option>`),
+  ].join("");
+  const productOptions = [
+    `<option value="">Choose service/product</option>`,
+    ...products.map((row) => `<option value="${escapeHtml(row.productId)}"${row.productId === selectedProductId ? " selected" : ""}>${escapeHtml(row.productName)}</option>`),
+  ].join("");
   return `
     <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}"
       data-service-type="${normalizedType}"
@@ -986,19 +1502,20 @@ function vendorSplitRow(split = {}, index = 0) {
       </label>
       <label class="vendor-split-field">
         <span data-vendor-provider-label>${provider.label}</span>
-        <input data-vendor-split-field="vendorName" data-flexible-input data-min-size="22" data-max-size="52"
-          ${providerList} size="${flexibleInputSize(vendorName, 22, 52)}"
-          value="${escapeHtml(vendorName)}" placeholder="${provider.placeholder}" autocomplete="off"
-          ${normalizedType === "TOC" ? "readonly" : ""} />
+        <select data-vendor-split-field="supplierId">${supplierOptions}</select>
       </label>
       <label class="vendor-split-field">
-        <span>Vendor Service</span>
-        <input data-vendor-split-field="activityText" data-flexible-input data-min-size="32" data-max-size="90"
-          ${serviceListAttribute} size="${flexibleInputSize(service, 32, 90)}"
-          value="${escapeHtml(service)}" placeholder="Service detail" autocomplete="off" />
+        <span>Supplier Service / Product</span>
+        <select data-vendor-split-field="productId">${productOptions}</select>
       </label>
       <div class="vendor-split-rate-panel" data-vendor-split-rate-panel>
-        ${vendorSplitRateMarkup({ ...split, serviceType: normalizedType, vendorName, activityText: service })}
+        ${vendorSplitRateMarkup({
+          ...split,
+          serviceType: normalizedType,
+          supplierId: selectedSupplierId,
+          productId: selectedProductId,
+          serviceDate: $("#vendor-split-dialog")?.dataset.serviceDate || "",
+        })}
       </div>
       <button class="vendor-split-remove" type="button" data-remove-vendor-split="${index}" aria-label="Remove service" title="Remove service">×</button>
     </div>
@@ -1010,13 +1527,17 @@ function collectVendorSplitRows(container) {
     const serviceType = normalizeVendorSplitType(
       row.querySelector('[data-vendor-split-field="serviceType"]').value,
     );
-    const activityText = row.querySelector('[data-vendor-split-field="activityText"]').value.trim();
-    const vendorName = row.querySelector('[data-vendor-split-field="vendorName"]').value.trim();
-    const matchedRate = vendorSplitRate(serviceType, vendorName, activityText);
+    const supplierInput = row.querySelector('[data-vendor-split-field="supplierId"]');
+    const productInput = row.querySelector('[data-vendor-split-field="productId"]');
+    const supplierId = supplierInput.value;
+    const productId = productInput.value;
+    const vendorName = supplierInput.selectedOptions[0]?.textContent.trim() || "";
+    const activityText = productInput.selectedOptions[0]?.textContent.trim() || "";
+    const matchedRate = vendorSplitRate(serviceType, supplierId, productId);
     const manualRateInput = row.querySelector('[data-vendor-split-field="unitRateIdr"]');
-    const unitRateIdr = serviceType === "ADDITIONAL_SERVICE"
-      ? (manualRateInput?.value === "" ? null : Number(manualRateInput?.value))
-      : (matchedRate?.unitRateIdr ?? null);
+    const manualRate = manualRateInput?.value === "" || manualRateInput === null
+      ? null : Number(manualRateInput.value);
+    const unitRateIdr = matchedRate?.unitRateIdr ?? manualRate;
     const adultRateIdr = matchedRate?.adultRateIdr ?? null;
     const childRateIdr = matchedRate?.childRateIdr ?? null;
     const rateReady = hasKnownRate(adultRateIdr)
@@ -1029,18 +1550,23 @@ function collectVendorSplitRows(container) {
       activityText,
       vendorId: "",
       vendorName,
-      serviceMasterId: matchedRate?.serviceMasterId || "",
-      priceSource: serviceType === "ADDITIONAL_SERVICE" ? "MANUAL" : (matchedRate?.priceSource || "NONE"),
+      supplierId,
+      productId,
+      serviceMasterId: productId,
+      contractId: matchedRate?.contractId || "",
+      contractRateId: matchedRate?.contractRateId || "",
+      priceSource: matchedRate ? "CONTRACT" : (hasKnownRate(manualRate) ? "MANUAL" : "NONE"),
       adultRateIdr,
       childRateIdr,
       unitRateIdr,
-      priceBasis: serviceType === "ADDITIONAL_SERVICE"
-        ? (row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE")
-        : (matchedRate?.priceBasis || "PER_SERVICE"),
+      priceBasis: matchedRate?.priceBasis
+        || row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE",
       quantity: Number(row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1),
-      currency: "IDR",
+      currency: matchedRate?.currency || "IDR",
       rateStatus: rateReady ? "RATE_READY" : "PENDING_RATE",
-      manualPriceReason: "",
+      manualPriceReason: row.querySelector('[data-vendor-split-field="manualPriceReason"]')?.value.trim() || "",
+      manualRateSource: row.querySelector('[data-vendor-split-field="manualRateSource"]')?.value || "",
+      manualEvidenceRef: row.querySelector('[data-vendor-split-field="manualEvidenceRef"]')?.value.trim() || "",
       rateValidTo: matchedRate?.validTo || "",
       rateSnapshotAt: row.dataset.rateSnapshotAt || new Date().toISOString(),
       status: "DRAFT",
@@ -1114,6 +1640,7 @@ function openVendorSplitDialog(card) {
   }];
   const dialog = $("#vendor-split-dialog");
   dialog.dataset.dayNumber = String(dayNumber);
+  dialog.dataset.serviceDate = serviceDate || "";
   $("#vendor-split-dialog-title").textContent = `Day ${dayNumber} micro split`;
   const timeRange = finishTime ? `${startTime}–${finishTime}` : `Start ${startTime}`;
   $("#vendor-split-dialog-meta").textContent = [serviceDate, timeRange, dayTitle].filter(Boolean).join(" · ") || "Date and tour header not filled";
@@ -1258,37 +1785,47 @@ function refreshVendorServiceOptions(vendorName = "") {
 function refreshVendorSplitRow(row, { resetSelection = false } = {}) {
   if (!row) return;
   const typeInput = row.querySelector('[data-vendor-split-field="serviceType"]');
-  const vendorInput = row.querySelector('[data-vendor-split-field="vendorName"]');
-  const serviceInput = row.querySelector('[data-vendor-split-field="activityText"]');
+  const supplierInput = row.querySelector('[data-vendor-split-field="supplierId"]');
+  const productInput = row.querySelector('[data-vendor-split-field="productId"]');
   const type = normalizeVendorSplitType(typeInput?.value);
-  if (!["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"].includes(type)) return;
+  if (!type) return;
   const provider = vendorSplitProviderConfig(type);
   row.dataset.serviceType = type;
   row.querySelector("[data-vendor-provider-label]").textContent = provider.label;
-  vendorInput.placeholder = provider.placeholder;
-  vendorInput.readOnly = type === "TOC";
-  if (provider.list) vendorInput.setAttribute("list", provider.list);
-  else vendorInput.removeAttribute("list");
-  const serviceList = vendorSplitServiceList(type);
-  if (serviceList) serviceInput.setAttribute("list", serviceList);
-  else serviceInput.removeAttribute("list");
-  if (resetSelection) {
-    vendorInput.value = type === "TOC" ? "TOC Master" : "";
-    serviceInput.value = "";
-  } else if (type === "TOC") {
-    vendorInput.value = "TOC Master";
-  }
-  if (type === "VENDOR") refreshVendorServiceOptions(vendorInput.value);
+  const suppliers = (state.vendorSuggestions.suppliers || [])
+    .filter((item) => item.active !== false && item.typeCode === type);
+  const currentSupplierId = resetSelection ? "" : supplierInput.value;
+  supplierInput.innerHTML = [
+    `<option value="">Choose supplier</option>`,
+    ...suppliers.map((item) => `<option value="${escapeHtml(item.supplierId)}">${escapeHtml(item.supplierName)}</option>`),
+  ].join("");
+  supplierInput.value = suppliers.some((item) => item.supplierId === currentSupplierId)
+    ? currentSupplierId : "";
+  const products = (state.vendorSuggestions.products || [])
+    .filter((item) => item.active !== false && item.supplierId === supplierInput.value);
+  const currentProductId = resetSelection ? "" : productInput.value;
+  productInput.innerHTML = [
+    `<option value="">Choose service/product</option>`,
+    ...products.map((item) => `<option value="${escapeHtml(item.productId)}">${escapeHtml(item.productName)}</option>`),
+  ].join("");
+  productInput.value = products.some((item) => item.productId === currentProductId)
+    ? currentProductId : "";
   const existingUnit = row.querySelector('[data-vendor-split-field="unitRateIdr"]')?.value ?? "";
   const existingBasis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";
   const existingQuantity = row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1;
+  const existingReason = row.querySelector('[data-vendor-split-field="manualPriceReason"]')?.value || "";
+  const existingSource = row.querySelector('[data-vendor-split-field="manualRateSource"]')?.value || "";
+  const existingEvidence = row.querySelector('[data-vendor-split-field="manualEvidenceRef"]')?.value || "";
   row.querySelector("[data-vendor-split-rate-panel]").innerHTML = vendorSplitRateMarkup({
     serviceType: type,
-    vendorName: vendorInput.value,
-    activityText: serviceInput.value,
+    supplierId: supplierInput.value,
+    productId: productInput.value,
     unitRateIdr: existingUnit,
     priceBasis: existingBasis,
     quantity: existingQuantity,
+    manualPriceReason: existingReason,
+    manualRateSource: existingSource,
+    manualEvidenceRef: existingEvidence,
   });
 }
 
@@ -1299,13 +1836,11 @@ function normalizeVendorSplitType(value) {
 }
 
 function vendorSplitTypeLabel(value) {
-  return ({
-    VENDOR: "Vendor",
-    TOC: "TOC",
-    TRANSPORT: "Transport",
-    LUGGAGE_VAN: "Luggage Van",
-    ADDITIONAL_SERVICE: "Additional Service",
-  })[normalizeVendorSplitType(value)] || String(value || "Vendor");
+  const normalized = normalizeVendorSplitType(value);
+  return (state.vendorSuggestions.supplierTypes || [])
+    .find((row) => row.typeCode === normalized)?.typeName
+    || normalized.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    || "Vendor";
 }
 
 async function loadVendorItinerary(customerCode = "") {
@@ -1380,6 +1915,12 @@ function openVendorNotification(actionUrl) {
 
 function bindEvents() {
   $("#main-nav").addEventListener("click", (event) => {
+    const managerAction = event.target.closest("[data-manager-action]");
+    if (managerAction?.dataset.managerAction === "supplier-master") {
+      showView("supplier-master", "MANAGER_ADMIN");
+      if (!state.supplierMasterLoaded) loadSupplierMaster({ refresh: true });
+      return;
+    }
     const vendorAction = event.target.closest("[data-vendor-action]");
     if (vendorAction) {
       const views = {
@@ -1435,6 +1976,89 @@ function bindEvents() {
     const list = $("#vendor-split-dialog-list");
     const index = list.querySelectorAll(".vendor-split-row").length;
     list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
+  });
+  $("#refresh-supplier-master").addEventListener("click", () => loadSupplierMaster({ refresh: true }));
+  $("#initialize-supplier-master").addEventListener("click", () => loadSupplierMaster({ initialize: true }));
+  $("#add-supplier-type").addEventListener("click", () => {
+    $("#supplier-type-form").reset();
+    $("#supplier-type-dialog").showModal();
+  });
+  $("#close-supplier-type-dialog").addEventListener("click", () => $("#supplier-type-dialog").close());
+  $("#cancel-supplier-type-dialog").addEventListener("click", () => $("#supplier-type-dialog").close());
+  $("#supplier-type-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+    payload.allowedPriceBases = String(payload.allowedPriceBases || "").split(",").map((x) => x.trim()).filter(Boolean);
+    payload.defaultBookingChannels = String(payload.defaultBookingChannels || "").split(",").map((x) => x.trim()).filter(Boolean);
+    try {
+      state.supplierMaster = supplierCatalogFrom(await window.erim.supplierMaster.saveType(payload));
+      state.selectedSupplierTypeCode = String(payload.typeCode).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+      state.selectedSupplierId = "";
+      $("#supplier-type-dialog").close();
+      renderSupplierMaster();
+      toast(`${payload.typeName} Type saved and available without a backend syntax change.`);
+    } catch (error) { toast(error.message, true); }
+  });
+  $("#supplier-master-search").addEventListener("input", renderSupplierList);
+  $("#add-supplier").addEventListener("click", () => {
+    state.selectedSupplierId = "";
+    renderSupplierMaster();
+    $("#supplier-master-form").elements.supplierName.focus();
+  });
+  $("#add-supplier-contact").addEventListener("click", () =>
+    $("#supplier-contact-list").insertAdjacentHTML("beforeend", supplierContactMarkup({})));
+  $("#add-supplier-recipient").addEventListener("click", () =>
+    $("#supplier-recipient-list").insertAdjacentHTML("beforeend", supplierRecipientMarkup({})));
+  $("#supplier-master-form").addEventListener("submit", saveSupplierMasterForm);
+  $("#archive-supplier").addEventListener("click", () => {
+    const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === state.selectedSupplierId);
+    if (supplier) archiveSelectedSupplierEntity("SUPPLIER", supplier.supplierId, supplier.supplierName);
+  });
+  $("#add-supplier-product").addEventListener("click", () => openSupplierProductDialog());
+  $("#supplier-product-form").addEventListener("submit", saveSupplierProductForm);
+  $("#close-supplier-product-dialog").addEventListener("click", () => $("#supplier-product-dialog").close());
+  $("#cancel-supplier-product-dialog").addEventListener("click", () => $("#supplier-product-dialog").close());
+  $("#archive-supplier-product").addEventListener("click", () => {
+    const id = $("#supplier-product-form").elements.productId.value;
+    const product = state.supplierMaster.products.find((row) => row.productId === id);
+    if (product) archiveSelectedSupplierEntity("PRODUCT", id, product.productName);
+  });
+  $("#add-supplier-contract").addEventListener("click", () => openSupplierContractDialog());
+  $("#supplier-contract-form").addEventListener("submit", saveSupplierContractForm);
+  $("#close-supplier-contract-dialog").addEventListener("click", () => $("#supplier-contract-dialog").close());
+  $("#cancel-supplier-contract-dialog").addEventListener("click", () => $("#supplier-contract-dialog").close());
+  $("#add-contract-rate").addEventListener("click", () =>
+    $("#supplier-contract-rate-list").insertAdjacentHTML("beforeend", contractRateMarkup({})));
+  $("#upload-supplier-contract").addEventListener("click", uploadSupplierContract);
+  $("#archive-supplier-contract").addEventListener("click", () => {
+    const id = $("#supplier-contract-form").elements.contractId.value;
+    const contract = state.supplierMaster.contracts.find((row) => row.contractId === id);
+    if (contract) archiveSelectedSupplierEntity("CONTRACT", id, contract.contractNumber);
+  });
+  $("#supplier-master-view").addEventListener("click", (event) => {
+    const type = event.target.closest("[data-supplier-type-code]");
+    if (type) {
+      state.selectedSupplierTypeCode = type.dataset.supplierTypeCode;
+      state.selectedSupplierId = "";
+      return renderSupplierMaster();
+    }
+    const supplier = event.target.closest("[data-supplier-id]");
+    if (supplier) {
+      state.selectedSupplierId = supplier.dataset.supplierId;
+      return renderSupplierMaster();
+    }
+    const removeContact = event.target.closest("[data-remove-supplier-contact]");
+    if (removeContact) return removeContact.closest(".supplier-repeatable-row").remove();
+    const removeRecipient = event.target.closest("[data-remove-supplier-recipient]");
+    if (removeRecipient) return removeRecipient.closest(".supplier-repeatable-row").remove();
+    const editProduct = event.target.closest("[data-edit-supplier-product]");
+    if (editProduct) return openSupplierProductDialog(editProduct.dataset.editSupplierProduct);
+    const editContract = event.target.closest("[data-edit-supplier-contract]");
+    if (editContract) return openSupplierContractDialog(editContract.dataset.editSupplierContract);
+  });
+  $("#supplier-contract-rate-list").addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-contract-rate]");
+    if (remove) remove.closest(".supplier-contract-rate-row").remove();
   });
   $("#load-revision-record").addEventListener("click", loadRevisionRecord);
   $("#revision-form").elements.customerCode.addEventListener("change", loadRevisionRecord);
@@ -1553,12 +2177,14 @@ function bindEvents() {
     if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
       const row = event.target.closest(".vendor-split-row");
       const type = normalizeVendorSplitType(event.target.value);
-      const recognized = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"].includes(type);
-      if (recognized) refreshVendorSplitRow(row, { resetSelection: row.dataset.serviceType !== type });
+      if (type) refreshVendorSplitRow(row, { resetSelection: row.dataset.serviceType !== type });
     } else if (event.target.matches(
-      '[data-vendor-split-field="vendorName"], [data-vendor-split-field="activityText"]',
+      '[data-vendor-split-field="supplierId"], [data-vendor-split-field="productId"]',
     )) {
-      refreshVendorSplitRow(event.target.closest(".vendor-split-row"));
+      const row = event.target.closest(".vendor-split-row");
+      refreshVendorSplitRow(row, {
+        resetSelection: event.target.matches('[data-vendor-split-field="supplierId"]'),
+      });
     } else if (event.target.matches('[data-vendor-split-field="unitRateIdr"]')) {
       const badge = event.target.closest(".vendor-split-row")?.querySelector("[data-vendor-rate-status]");
       const ready = hasKnownRate(event.target.value);
@@ -1574,19 +2200,6 @@ function bindEvents() {
       updateVendorDayHotels();
     }
   });
-  document.body.addEventListener("focusin", (event) => {
-    if (!event.target.matches('[data-vendor-split-field="activityText"]')) return;
-    const row = event.target.closest(".vendor-split-row");
-    const type = normalizeVendorSplitType(
-      row?.querySelector('[data-vendor-split-field="serviceType"]')?.value,
-    );
-    if (type === "VENDOR") {
-      refreshVendorServiceOptions(
-        row.querySelector('[data-vendor-split-field="vendorName"]').value,
-      );
-    }
-  });
-
   $("#draft-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);

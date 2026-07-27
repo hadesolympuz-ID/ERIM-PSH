@@ -8,8 +8,8 @@ dibatalkan.
 **Repository:** `hadesolympuz-ID/ERIM-PSH`  
 **Local project:** `C:\PROJECT\ERIM-PSH`  
 **Target application:** `https://status.peakseasonholidays.com`  
-**Last updated:** 2026-07-27
-**Current phase:** Vendor Booking implementation preparation — VB-01
+**Last updated:** 2026-07-28
+**Current phase:** Supplier Master and contract-rate foundation — v1.1.0
 
 ---
 
@@ -371,6 +371,8 @@ official data.
 | Universal Lookup foundation | `PENDING` | Reusable keyboard-friendly typeahead searches active vendors, aliases, programs, hotels, agents, staff, and Customer Codes on every keystroke; results are ranked contextually while manual organic detail remains available. |
 | Daywise input workspace | `IN PROGRESS` | v1.0.8 loads the latest Drive DOCX, extracts editable arrival/departure/hotels, generates Day 1..N, and stores pasted staff text locally before controlled Post. Live dummy-case UAT remains. |
 | Service split | `IN PROGRESS` | v1.0.8 records per-day Vendor/TOC/Vehicle/Additional Services micro splits into `SERVICES`; supplier grouping and booking generation remain later phases. |
+| Central Supplier Master | `IN PROGRESS` | v1.1.0 adds one Manager/Admin submenu for data-driven types, suppliers, repeatable contacts/recipients/SOPs, products, contracts, dated rates, archive, audit, and user-wide change notifications. Live central initialization and release verification remain. |
+| Contract-aware micro split | `IN PROGRESS` | Type, Supplier, and Product use the same central catalog; valid service-date contracts load automatically, missing/expired contracts become `PENDING_RATE`, and booking-only manual rates require reason/source. Live UAT remains. |
 | Vendor search/assignment | `PENDING` | Vendor is selected through Universal Lookup using a stable `vendor_id`; active approved matches appear first, aliases resolve to the canonical vendor, and staff can intentionally expand to all authorized vendors. |
 | Booking generation | `PENDING` | Uses approved SOP/template. |
 | Email/WhatsApp helper | `PENDING` | Snapshot and communication evidence recorded. |
@@ -417,6 +419,7 @@ official data.
 | KPI engine | `PENDING` | Metrics use approved visible definitions. |
 | Access review | `PENDING` | Active user and role review auditable. |
 | Audit review | `PENDING` | Official events searchable and protected. |
+| Supplier/rate administration | `IN PROGRESS` | Manager/Admin changes are immediate, audited, centrally stored, and broadcast; archive preserves booking history. |
 | Backup/recovery test | `PENDING` | Recovery owner and procedure verified. |
 
 ### Milestone 8 — UAT and production readiness
@@ -473,10 +476,11 @@ must remain testable with dummy data before the next release starts.
 | v1.0.9 | Universal Lookup, daywise service input, and supplier split | `PENDING` | Vendor can create/revise stable daywise service items; find programs/vendors through live per-keystroke typeahead with keyboard navigation, contextual ranking, aliases, and canonical IDs; retain manual organic booking detail; group services into supplier bookings; and validate unassigned/duplicate items before saving. |
 | v1.0.10 | Five-type micro split and independent rate status | `DONE` | Vendor, TOC, Transport, Luggage Van, and Additional Service use type-aware provider/service lookup and price snapshots; `PENDING_RATE` does not block booking communication. |
 | v1.0.11 | Micro split Type dropdown hotfix | `DONE` | Type is a fixed five-option select, so Vendor, TOC, Transport, Luggage Van, and Additional Service remain visible regardless of the current selection. |
-| v1.0.12 | Booking template, preview, and Gmail send | `PENDING` | System generates versioned SOP-based subject/body/attachments, requires recipient and content preview, sends through the connected user, and stores Gmail thread/message IDs plus the exact sent snapshot. |
-| v1.0.13 | Revision impact and booking amendment | `PENDING` | System compares the new Reservation publication with the Vendor working version and requires a per-item decision: unchanged, add, change, rebook, or cancel; confirmed bookings are never silently overwritten. |
-| v1.0.14 | Vendor re-check and booking completion | `PENDING` | Every supplier booking is marked Sent, Pending, Confirmed, Changed, or Canceled with actor/time/note/evidence; incomplete items block Booking Complete publication and the resulting notification reaches Reservation. |
-| v1.0.15 | Reservation daywise drill-down and communication viewer | `PENDING` | Clicking a day opens all linked service, vendor booking, transport, TOC, status, PIC, and notes; clicking an email-channel booking opens its complete Gmail thread in a separate system window/panel. |
+| v1.1.0 | Supplier Master and contract-rate foundation | `IN PROGRESS` | One Manager/Admin menu maintains dynamic types, suppliers, unlimited contacts/recipients/SOPs, products, contract documents, validity and rates. Changes are immediate, audited, broadcast, and consumed by Micro Split with pending/manual-rate rules. |
+| v1.1.1 | Booking template, preview, and Gmail send | `PENDING` | System generates versioned SOP-based subject/body/attachments, requires recipient and content preview, sends through the connected user, and stores Gmail thread/message IDs plus the exact sent snapshot. |
+| v1.1.2 | Revision impact and booking amendment | `PENDING` | System compares the new Reservation publication with the Vendor working version and requires a per-item decision: unchanged, add, change, rebook, or cancel; confirmed bookings are never silently overwritten. |
+| v1.1.3 | Vendor re-check and booking completion | `PENDING` | Every supplier booking is marked Sent, Pending, Confirmed, Changed, or Canceled with actor/time/note/evidence; incomplete items block Booking Complete publication and the resulting notification reaches Reservation. |
+| v1.1.4 | Reservation daywise drill-down and communication viewer | `PENDING` | Clicking a day opens all linked service, vendor booking, transport, TOC, status, PIC, and notes; clicking an email-channel booking opens its complete Gmail thread in a separate system window/panel. |
 
 #### Vendor Daily — New Confirmation
 

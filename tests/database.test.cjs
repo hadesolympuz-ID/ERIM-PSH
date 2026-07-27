@@ -490,3 +490,83 @@ test("keeps Additional Service bookable while its manual rate is pending", () =>
   assert.equal(split.unitRateIdr, null);
   assert.equal(split.status, "DRAFT");
 }));
+
+test("uses dynamic Supplier Types and only exposes contract rates valid on the service date", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    sourceVersion: "SUPPLIER-MASTER-TEST",
+    supplierTypes: [{
+      supplierTypeId: "ST-RESTAURANT", typeCode: "RESTAURANT", typeName: "Restaurant",
+      displayOrder: 60, status: "ACTIVE", active: true,
+    }],
+    suppliers: [{
+      supplierId: "SUP-REST-1", supplierTypeId: "ST-RESTAURANT",
+      typeCode: "RESTAURANT", supplierName: "Test Restaurant", status: "ACTIVE", active: true,
+    }],
+    products: [{
+      productId: "PROD-DINNER", supplierId: "SUP-REST-1", productName: "Set Dinner",
+      inclusion: "Dinner", exclusion: "Drinks", status: "ACTIVE", active: true,
+    }],
+    contracts: [{
+      contractId: "CTR-2026", supplierId: "SUP-REST-1", contractNumber: "REST/2026",
+      validFrom: "2026-01-01", validTo: "2026-12-31", currency: "IDR",
+      status: "ACTIVE", active: true,
+    }],
+    rates: [{
+      contractRateId: "RATE-DINNER", contractId: "CTR-2026", productId: "PROD-DINNER",
+      priceBasis: "PER_PAX", amount: 250000, currency: "IDR", status: "ACTIVE", active: true,
+    }],
+  });
+
+  const active = database.getSupplierSuggestions("2026-08-01");
+  assert.equal(active.supplierTypes[0].typeCode, "RESTAURANT");
+  assert.equal(active.rates[0].unitRateIdr, 250000);
+  assert.equal(active.rates[0].inclusion, "Dinner");
+  assert.equal(database.getSupplierSuggestions("2027-01-01").rates.length, 0);
+
+  const saved = database.saveVendorIntakeDraft({
+    customerCode: "DYNAMIC/TYPE",
+    customerName: "Dynamic Type Test",
+    days: [{
+      dayNumber: 1,
+      startTime: "09:00",
+      splits: [{
+        serviceType: "RESTAURANT",
+        activityText: "Set Dinner",
+        supplierId: "SUP-REST-1",
+        productId: "PROD-DINNER",
+        contractId: "CTR-2026",
+        contractRateId: "RATE-DINNER",
+        unitRateIdr: 250000,
+        priceSource: "CONTRACT",
+        rateStatus: "RATE_READY",
+      }],
+    }],
+  });
+  assert.equal(saved.days[0].splits[0].serviceType, "RESTAURANT");
+}));
+
+test("requires reason and source for booking-only manual rates", () => withDatabase((database) => {
+  const base = {
+    customerCode: "MANUAL/RATE",
+    customerName: "Manual Rate Test",
+    days: [{
+      dayNumber: 1,
+      startTime: "09:00",
+      splits: [{
+        serviceType: "VENDOR",
+        activityText: "Manual service",
+        vendorName: "Manual Supplier",
+        unitRateIdr: 100000,
+        priceSource: "MANUAL",
+        rateStatus: "RATE_READY",
+      }],
+    }],
+  };
+  assert.throws(() => database.saveVendorIntakeDraft(base), /manual rate reason/i);
+  base.days[0].splits[0].manualPriceReason = "Contract expired";
+  assert.throws(() => database.saveVendorIntakeDraft(base), /manual rate source/i);
+  base.days[0].splits[0].manualRateSource = "EMAIL";
+  const saved = database.saveVendorIntakeDraft(base);
+  assert.equal(saved.days[0].splits[0].manualPriceReason, "Contract expired");
+  assert.equal(saved.days[0].splits[0].manualRateSource, "EMAIL");
+}));

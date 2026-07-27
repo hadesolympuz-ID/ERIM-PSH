@@ -14,6 +14,13 @@
 | Send system communication | Deny | Authorized department |
 | Change rate, TOC, or invoice | Deny | Authorized department |
 | Approve or mark paid | Deny | Authorized approver/cashier |
+| View Supplier Master | Deny | Authorized ERIM-PSH desktop users |
+| Create/edit/archive supplier data and contracts | Deny | Manager/Admin only |
+
+Supplier Master write routes require an active employee whose role is
+`ADMIN`/`MANAGER` or whose department is `MANAGER_ADMIN`. The server performs
+this check even when a desktop client exposes or manually constructs a request.
+Archive actions require a reason and retain referenced history.
 
 ## Enforcement
 
@@ -35,4 +42,3 @@ manually constructs the request.
 
 Financial totals, payment proof, guest contact details, internal notes, and
 private vendor contact information require field-level visibility rules.
-

@@ -2,7 +2,21 @@
 
 Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
-Target sequence: v1.0.8-v1.0.15
+Target sequence: v1.0.8-v1.1.x
+
+## Supplier Master foundation — v1.1.0
+
+The Manager/Admin `Supplier Master` submenu is the shared foundation for all
+Vendor Booking rate and booking-address selection. It supports data-driven
+types, repeatable contacts/recipients/SOP steps, product details, contract
+documents, dated contract rates, controlled archive, audit, and broadcast
+notifications.
+
+Micro Split reads Type, Supplier, and Product from this source. A missing or
+expired contract produces `PENDING_RATE` but does not block booking delivery.
+A booking-only manual rate requires reason and source and does not alter the
+master contract. The operating procedure is recorded in
+`docs/SUPPLIER_MASTER_SOP.md`.
 
 ## 1. Purpose
 

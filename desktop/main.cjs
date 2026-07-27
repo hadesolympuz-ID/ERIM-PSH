@@ -98,6 +98,15 @@ function registerIpc() {
   ipcMain.handle("vendor:intake-draft-save", (_event, details) => database.saveVendorIntakeDraft(details));
   ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
   ipcMain.handle("master-data:sync", () => googleWorkspace.syncMasterDataCache());
+  ipcMain.handle("supplier-master:list", (_event, options) => googleWorkspace.listSupplierMaster(options || {}));
+  ipcMain.handle("supplier-master:initialize", () => googleWorkspace.initializeSupplierMaster());
+  ipcMain.handle("supplier-master:type-save", (_event, details) => googleWorkspace.saveSupplierType(details));
+  ipcMain.handle("supplier-master:supplier-save", (_event, details) => googleWorkspace.saveSupplier(details));
+  ipcMain.handle("supplier-master:product-save", (_event, details) => googleWorkspace.saveSupplierProduct(details));
+  ipcMain.handle("supplier-master:contract-save", (_event, details) => googleWorkspace.saveSupplierContract(details));
+  ipcMain.handle("supplier-master:archive", (_event, details) => googleWorkspace.archiveSupplierEntity(details));
+  ipcMain.handle("supplier-master:contract-upload", (_event, details) =>
+    googleWorkspace.selectAndUploadSupplierContract(details));
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
@@ -142,6 +151,8 @@ app.whenReady().then(() => {
         properties: ["openFile"],
         filters: options.docxOnly ? [
           { name: "Word document", extensions: ["docx"] },
+        ] : options.contractOnly ? [
+          { name: "Supplier contracts", extensions: ["pdf", "doc", "docx", "xls", "xlsx"] },
         ] : [
           { name: "Itinerary documents", extensions: ["pdf", "doc", "docx", "xls", "xlsx"] },
           { name: "All files", extensions: ["*"] },

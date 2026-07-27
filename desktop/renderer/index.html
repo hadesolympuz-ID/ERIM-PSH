@@ -38,7 +38,10 @@
           <button class="nav-item" data-view="workspace" data-module="TRANSPORT">Transport</button>
           <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
           <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
-          <button class="nav-item" data-view="workspace" data-module="MANAGER_ADMIN">Manager / Admin</button>
+          <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN">Manager / Admin</button>
+          <div class="nav-submenu" aria-label="Manager and Admin actions">
+            <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
+          </div>
           <button class="nav-item" data-view="sync">Sync Center <span id="sync-nav-count" class="nav-count">0</span></button>
           <button class="nav-item" data-view="admin">Admin DEV Console</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -229,6 +232,99 @@
           <section id="vendor-kpi-view" class="view vendor-placeholder-view">
             <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cek KPI</h2><p>Submenu personal KPI siap; rumus dan indikator akan mengikuti workflow final Vendor.</p></div></div>
             <div class="panel"><div class="empty-notifications">KPI Vendor belum dihitung pada sprint ini.</div></div>
+          </section>
+
+          <section id="supplier-master-view" class="view">
+            <div class="workspace-banner supplier-master-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Supplier Master & Contract Rates</h2>
+                <p>One authoritative source for supplier identity, contacts, booking SOP, products, contracts, rates, and future supplier types.</p>
+              </div>
+              <div class="supplier-master-banner-actions">
+                <span id="supplier-master-sync-status" class="status">Not loaded</span>
+                <button id="initialize-supplier-master" class="button ghost small" type="button">Initialize / migrate</button>
+                <button id="refresh-supplier-master" class="button primary small" type="button">Refresh Google data</button>
+              </div>
+            </div>
+            <div class="panel supplier-master-panel">
+              <div class="supplier-type-tabs">
+                <div id="supplier-type-tabs" class="supplier-type-tab-list"></div>
+                <button id="add-supplier-type" class="button ghost small" type="button">+ Add Type</button>
+              </div>
+              <div class="supplier-master-columns">
+                <section class="supplier-master-left">
+                  <div class="supplier-master-toolbar">
+                    <input id="supplier-master-search" type="search" placeholder="Search supplier, code, or destination" />
+                    <button id="add-supplier" class="button primary small" type="button">+ Supplier</button>
+                  </div>
+                  <div class="supplier-left-layout">
+                    <div id="supplier-master-list" class="supplier-master-list"></div>
+                    <form id="supplier-master-form" class="supplier-master-form">
+                      <input name="supplierId" type="hidden" />
+                      <input name="typeCode" type="hidden" />
+                      <div class="supplier-form-heading">
+                        <div><strong id="supplier-form-title">New supplier</strong><small>Changes become active immediately and notify all users.</small></div>
+                        <span id="supplier-form-status" class="status">NEW</span>
+                      </div>
+                      <div class="supplier-form-grid">
+                        <label>Supplier code<input name="supplierCode" placeholder="Auto when blank" /></label>
+                        <label>Supplier name<input name="supplierName" required /></label>
+                        <label>Legal name<input name="legalName" /></label>
+                        <label>Destinations<input name="destinations" placeholder="Bali, Lombok, Java" /></label>
+                        <label class="wide">Address<textarea name="address" rows="2"></textarea></label>
+                        <label>Website<input name="website" type="url" placeholder="https://" /></label>
+                        <label>Tax/NPWP ID<input name="taxId" /></label>
+                        <label>Internal PIC employee ID<input name="internalPicEmployeeId" /></label>
+                        <label class="wide">Operational notes<textarea name="operationalNotes" rows="3"></textarea></label>
+                      </div>
+                      <div class="supplier-form-section">
+                        <div class="section-heading"><div><p class="eyebrow">Repeatable</p><h3>Contact persons</h3></div><button id="add-supplier-contact" class="button ghost small" type="button">+ Contact</button></div>
+                        <div id="supplier-contact-list" class="supplier-repeatable-list"></div>
+                      </div>
+                      <div class="supplier-form-section">
+                        <div class="section-heading"><div><p class="eyebrow">To / CC / BCC / WhatsApp</p><h3>Booking recipients</h3></div><button id="add-supplier-recipient" class="button ghost small" type="button">+ Recipient</button></div>
+                        <div id="supplier-recipient-list" class="supplier-repeatable-list"></div>
+                      </div>
+                      <div class="supplier-form-section supplier-sop-section">
+                        <div class="section-heading"><div><p class="eyebrow">Default communication</p><h3>Booking SOP</h3></div></div>
+                        <div class="supplier-channel-options">
+                          <label><input name="bookingChannels" type="checkbox" value="EMAIL" /> Email</label>
+                          <label><input name="bookingChannels" type="checkbox" value="WHATSAPP" /> WhatsApp</label>
+                          <label><input name="bookingChannels" type="checkbox" value="EMAIL_WHATSAPP" /> Email + WhatsApp</label>
+                          <label><input name="bookingChannels" type="checkbox" value="PORTAL" /> Portal</label>
+                          <label><input name="bookingChannels" type="checkbox" value="OTHERS" /> Others</label>
+                        </div>
+                        <div class="supplier-form-grid">
+                          <label>Booking lead time<input name="leadTime" placeholder="Example: 48 hours" /></label>
+                          <label>Cut-off time<input name="cutoffTime" placeholder="Example: 16:00 Bali time" /></label>
+                          <label class="wide">Required booking information<textarea name="requiredInformation" rows="3"></textarea></label>
+                          <label class="wide">Confirmation procedure<textarea name="confirmationProcedure" rows="3"></textarea></label>
+                          <label class="wide">Amendment procedure<textarea name="amendmentProcedure" rows="3"></textarea></label>
+                          <label class="wide">Cancellation procedure<textarea name="cancellationProcedure" rows="3"></textarea></label>
+                          <label class="wide">Emergency/escalation procedure<textarea name="emergencyProcedure" rows="3"></textarea></label>
+                          <label>Portal URL<input name="portalUrl" type="url" placeholder="https://" /></label>
+                          <label>Account reference<input name="accountReference" placeholder="No passwords" /></label>
+                          <label class="wide">Default email subject template<input name="subjectTemplate" /></label>
+                          <label class="wide">Default booking body template<textarea name="bodyTemplate" rows="4"></textarea></label>
+                        </div>
+                      </div>
+                      <div class="supplier-master-form-actions">
+                        <button id="archive-supplier" class="button danger" type="button" hidden>Archive supplier</button>
+                        <button class="button primary" type="submit">Save & activate supplier</button>
+                      </div>
+                    </form>
+                  </div>
+                </section>
+                <section class="supplier-master-right">
+                  <div class="supplier-product-toolbar">
+                    <div><p class="eyebrow">Selected supplier</p><h3 id="supplier-product-heading">Select a supplier</h3><small id="supplier-product-subheading">Products, contracts, and rates will appear here.</small></div>
+                    <div><button id="add-supplier-product" class="button ghost small" type="button" disabled>+ Product</button><button id="add-supplier-contract" class="button primary small" type="button" disabled>+ New Contract</button></div>
+                  </div>
+                  <div id="supplier-product-contract-list" class="supplier-product-contract-list"><div class="empty-notifications">Choose a supplier from the left.</div></div>
+                </section>
+              </div>
+            </div>
           </section>
 
           <section id="workspace-view" class="view">
@@ -587,6 +683,68 @@
           <button type="button" id="cancel-vendor-split-dialog" class="button ghost">Cancel</button>
           <button type="button" id="apply-vendor-split" class="button primary">Save split locally</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-type-dialog" class="compact-dialog">
+      <form id="supplier-type-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Dynamic classification</p><h2>Supplier Type</h2></div><button id="close-supplier-type-dialog" class="icon-button" type="button">×</button></div>
+        <div class="form-grid single-field">
+          <input name="supplierTypeId" type="hidden" />
+          <label>Type name<input name="typeName" required placeholder="Example: Restaurant" /></label>
+          <label>Type code<input name="typeCode" required pattern="[A-Za-z0-9_ -]+" placeholder="RESTAURANT" /></label>
+          <label>Description<textarea name="description" rows="3"></textarea></label>
+          <label>Display order<input name="displayOrder" type="number" min="1" value="100" /></label>
+          <label>Allowed price bases<input name="allowedPriceBases" value="PER_PAX,PER_SERVICE,PER_ITEM,CUSTOM" /></label>
+          <label>Default booking channels<input name="defaultBookingChannels" value="EMAIL,WHATSAPP,OTHERS" /></label>
+        </div>
+        <div class="dialog-actions"><button id="cancel-supplier-type-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Type</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-product-dialog">
+      <form id="supplier-product-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Supplier product</p><h2 id="supplier-product-dialog-title">Add Product</h2></div><button id="close-supplier-product-dialog" class="icon-button" type="button">×</button></div>
+        <div class="form-grid">
+          <input name="productId" type="hidden" /><input name="supplierId" type="hidden" />
+          <label>Product code<input name="productCode" placeholder="Auto when blank" /></label>
+          <label>Product/service name<input name="productName" required /></label>
+          <label>Category<input name="category" /></label><label>Subcategory<input name="subcategory" /></label>
+          <label class="wide">Destinations<input name="destinations" /></label>
+          <label class="wide">Description<textarea name="description" rows="3"></textarea></label>
+          <label class="wide">Inclusion<textarea name="inclusion" rows="4"></textarea></label>
+          <label class="wide">Exclusion<textarea name="exclusion" rows="4"></textarea></label>
+          <label class="wide">Terms and Conditions<textarea name="termsAndConditions" rows="4"></textarea></label>
+          <label class="wide">Cancellation terms<textarea name="cancellationTerms" rows="3"></textarea></label>
+          <label class="wide">Booking instructions<textarea name="bookingInstructions" rows="3"></textarea></label>
+          <label>Minimum order<input name="minimumOrder" /></label><label>Maximum capacity<input name="maximumCapacity" /></label>
+          <label>Tax treatment<select name="taxTreatment"><option>AS_CONTRACT</option><option>INCLUDED</option><option>EXCLUDED</option></select></label>
+          <label class="wide">Internal notes<textarea name="notes" rows="3"></textarea></label>
+        </div>
+        <div class="dialog-actions"><button id="archive-supplier-product" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-product-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Product</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-contract-dialog" class="supplier-contract-dialog">
+      <form id="supplier-contract-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Effective-dated source</p><h2 id="supplier-contract-dialog-title">New Contract</h2></div><button id="close-supplier-contract-dialog" class="icon-button" type="button">×</button></div>
+        <div class="supplier-contract-body">
+          <input name="contractId" type="hidden" /><input name="supplierId" type="hidden" />
+          <input name="driveFileId" type="hidden" /><input name="driveFileName" type="hidden" /><input name="driveFileUrl" type="hidden" />
+          <div class="form-grid">
+            <label>Contract number<input name="contractNumber" required /></label><label>Contract name<input name="contractName" /></label>
+            <label>Valid from<input name="validFrom" type="date" required /></label><label>Valid until<input name="validTo" type="date" required /></label>
+            <label>Currency<input name="currency" value="IDR" /></label>
+            <label>Tax treatment<select name="taxTreatment"><option>AS_CONTRACT</option><option>INCLUDED</option><option>EXCLUDED</option></select></label>
+            <label class="wide">Contract Terms and Conditions<textarea name="termsAndConditions" rows="4"></textarea></label>
+            <div class="wide supplier-contract-file"><button id="upload-supplier-contract" class="button ghost" type="button">Upload contract to Google Drive</button><a id="supplier-contract-file-link" href="#" hidden>Open uploaded contract</a></div>
+            <label class="wide supplier-overlap-option"><input name="allowOverlap" type="checkbox" /> Allow overlapping contract dates as an exception</label>
+            <label class="wide">Overlap reason<textarea name="overlapReason" rows="2" placeholder="Required only when overlap is allowed"></textarea></label>
+          </div>
+          <div class="supplier-contract-rates-heading"><div><p class="eyebrow">Repeatable components</p><h3>Contract rates</h3></div><button id="add-contract-rate" class="button ghost small" type="button">+ Rate</button></div>
+          <div id="supplier-contract-rate-list" class="supplier-contract-rate-list"></div>
+        </div>
+        <div class="dialog-actions"><button id="archive-supplier-contract" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-contract-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save & activate Contract</button></div>
       </form>
     </dialog>
 

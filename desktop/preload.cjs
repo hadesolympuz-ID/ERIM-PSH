@@ -57,6 +57,16 @@ contextBridge.exposeInMainWorld("erim", {
       return () => ipcRenderer.removeListener("master-data:status", listener);
     },
   },
+  supplierMaster: {
+    list: (options) => ipcRenderer.invoke("supplier-master:list", options),
+    initialize: () => ipcRenderer.invoke("supplier-master:initialize"),
+    saveType: (details) => ipcRenderer.invoke("supplier-master:type-save", details),
+    saveSupplier: (details) => ipcRenderer.invoke("supplier-master:supplier-save", details),
+    saveProduct: (details) => ipcRenderer.invoke("supplier-master:product-save", details),
+    saveContract: (details) => ipcRenderer.invoke("supplier-master:contract-save", details),
+    archive: (details) => ipcRenderer.invoke("supplier-master:archive", details),
+    uploadContract: (details) => ipcRenderer.invoke("supplier-master:contract-upload", details),
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

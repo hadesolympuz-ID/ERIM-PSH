@@ -32,6 +32,48 @@ function doPost(event) {
       return json_({ ok: true, data: saveVendorIntake_(request, actor) });
     }
 
+    if (route === "supplier.master.list") {
+      requireDesktop_(request, actor);
+      ensureSupplierMasterSchema_();
+      return json_({ ok: true, data: supplierMasterCatalog_() });
+    }
+
+    if (route === "supplier.master.initialize") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: initializeSupplierMaster_(request, actor) });
+    }
+
+    if (route === "supplier.type.save") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: saveSupplierType_(request, actor) });
+    }
+
+    if (route === "supplier.save") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: saveSupplier_(request, actor) });
+    }
+
+    if (route === "supplier.product.save") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: saveSupplierProduct_(request, actor) });
+    }
+
+    if (route === "supplier.contract.save") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: saveSupplierContract_(request, actor) });
+    }
+
+    if (route === "supplier.entity.archive") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: archiveSupplierEntity_(request, actor) });
+    }
+
     if (route === "tour.detail") {
       return json_({ ok: true, data: getTourDetail_(request.customerCode, actor) });
     }
@@ -111,6 +153,560 @@ function requireDesktop_(request, actor) {
   if (request.draft && request.draft.department !== actor.department && actor.role !== "ADMIN") {
     throw apiError_("DEPARTMENT_DENIED", "You cannot publish another department's work.");
   }
+}
+
+function requireSupplierManager_(actor) {
+  const role = String(actor.role || "").toUpperCase().replace(/[ -]+/g, "_");
+  const department = String(actor.department || "").toUpperCase().replace(/[ -]+/g, "_");
+  if (!["ADMIN", "MANAGER"].includes(role) && department !== "MANAGER_ADMIN") {
+    throw apiError_("ACCESS_DENIED", "Only Manager or Admin may change Supplier Master data.");
+  }
+}
+
+const SUPPLIER_MASTER_SCHEMA = {
+  SUPPLIER_TYPES: [
+    "supplier_type_id", "type_code", "type_name", "description", "requires_supplier",
+    "allowed_price_bases", "default_booking_channels", "display_order", "status",
+    "record_version", "created_at", "created_by", "updated_at", "updated_by",
+  ],
+  SUPPLIERS: [
+    "supplier_id", "supplier_type_id", "type_code", "supplier_code", "supplier_name",
+    "legal_name", "status", "destinations", "address", "website", "tax_id",
+    "internal_pic_employee_id", "operational_notes", "record_version", "created_at",
+    "created_by", "updated_at", "updated_by",
+  ],
+  SUPPLIER_CONTACTS: [
+    "contact_id", "supplier_id", "contact_name", "position", "department", "phone",
+    "whatsapp", "email", "preferred_channel", "operational_hours", "is_emergency",
+    "responsibility", "status", "record_version", "created_at", "created_by",
+    "updated_at", "updated_by",
+  ],
+  SUPPLIER_RECIPIENTS: [
+    "recipient_id", "supplier_id", "recipient_type", "address", "channel", "purpose",
+    "sequence", "status", "record_version", "created_at", "created_by", "updated_at",
+    "updated_by",
+  ],
+  SUPPLIER_SOPS: [
+    "sop_id", "supplier_id", "booking_channels", "lead_time", "cutoff_time",
+    "required_information", "confirmation_procedure", "amendment_procedure",
+    "cancellation_procedure", "emergency_procedure", "portal_url", "account_reference",
+    "subject_template", "body_template", "status", "record_version", "created_at",
+    "created_by", "updated_at", "updated_by",
+  ],
+  SUPPLIER_PRODUCTS: [
+    "product_id", "supplier_id", "product_code", "product_name", "category",
+    "subcategory", "destinations", "description", "inclusion", "exclusion",
+    "terms_and_conditions", "cancellation_terms", "booking_instructions",
+    "minimum_order", "maximum_capacity", "tax_treatment", "notes", "status",
+    "record_version", "created_at", "created_by", "updated_at", "updated_by",
+  ],
+  SUPPLIER_CONTRACTS: [
+    "contract_id", "supplier_id", "contract_number", "contract_name", "valid_from",
+    "valid_to", "currency", "tax_treatment", "terms_and_conditions", "drive_file_id",
+    "drive_file_name", "drive_file_url", "status", "allow_overlap", "overlap_reason",
+    "record_version", "created_at", "created_by", "updated_at", "updated_by",
+  ],
+  CONTRACT_RATES: [
+    "contract_rate_id", "contract_id", "product_id", "price_basis", "amount",
+    "currency", "min_quantity", "max_quantity", "market", "season", "surcharge_rule",
+    "valid_from", "valid_to", "notes", "status", "record_version", "created_at",
+    "created_by", "updated_at", "updated_by",
+  ],
+  SUPPLIER_MASTER_EVENTS: [
+    "event_id", "event_key", "event_type", "entity_type", "entity_id", "supplier_id",
+    "type_code", "summary", "event_at", "actor_employee_id",
+  ],
+};
+
+function ensureSupplierMasterSchema_() {
+  Object.keys(SUPPLIER_MASTER_SCHEMA).forEach((sheetName) => {
+    const sheet = ensureSheetWithHeaders_(sheetName, SUPPLIER_MASTER_SCHEMA[sheetName]);
+    const headerRange = sheet.getRange(1, 1, 1, SUPPLIER_MASTER_SCHEMA[sheetName].length);
+    headerRange.setFontWeight("bold").setBackground("#e8eef2");
+    if (sheet.getLastColumn() > 0) sheet.autoResizeColumns(1, sheet.getLastColumn());
+  });
+}
+
+function initializeSupplierMaster_(request, actor) {
+  ensureSupplierMasterSchema_();
+  seedSupplierTypes_(actor);
+  seedSupplierMasterFromLegacy_(actor);
+  ensureSupplierExpiryTrigger_();
+  const now = new Date().toISOString();
+  recordSupplierMasterEvent_({
+    eventType: "SUPPLIER_MASTER_INITIALIZED",
+    entityType: "SUPPLIER_MASTER",
+    entityId: "SUPPLIER_MASTER",
+    supplierId: "",
+    typeCode: "",
+    summary: "Supplier Master schema, legacy migration, and contract expiry monitor initialized.",
+  }, actor, now);
+  broadcastSupplierMasterNotification_({
+    type: "SUPPLIER_MASTER_INITIALIZED",
+    title: "Supplier Master initialized",
+    message: `${actor.fullName || actor.employeeId} initialized the centralized supplier, product, contract, and rate source.`,
+    actionUrl: "supplier-master",
+  }, actor, now);
+  return supplierMasterCatalog_();
+}
+
+function seedSupplierTypes_(actor) {
+  const existing = allRecords_("SUPPLIER_TYPES");
+  if (existing.length) return;
+  const now = new Date().toISOString();
+  const defaults = [
+    ["VENDOR", "Vendor", 10, "EMAIL,WHATSAPP,EMAIL_WHATSAPP,PORTAL,OTHERS"],
+    ["TOC", "TOC", 20, "EMAIL,WHATSAPP,EMAIL_WHATSAPP,PORTAL,OTHERS"],
+    ["TRANSPORT", "Transport", 30, "EMAIL,WHATSAPP,EMAIL_WHATSAPP,PORTAL,OTHERS"],
+    ["LUGGAGE_VAN", "Luggage Van", 40, "EMAIL,WHATSAPP,EMAIL_WHATSAPP,PORTAL,OTHERS"],
+    ["ADDITIONAL_SERVICE", "Additional Service", 50, "EMAIL,WHATSAPP,EMAIL_WHATSAPP,PORTAL,OTHERS"],
+  ].map(([code, name, order, channels]) => ({
+    supplier_type_id: `STYPE-${code}`,
+    type_code: code,
+    type_name: name,
+    description: `${name} supplier/service classification.`,
+    requires_supplier: true,
+    allowed_price_bases: "PER_ADULT,PER_CHILD,PER_INFANT,PER_PAX,PER_SERVICE,PER_ITEM,PER_UNIT,PER_TRIP,PER_VEHICLE,PER_VAN,PER_GROUP,PER_HOUR,PER_DAY,CUSTOM",
+    default_booking_channels: channels,
+    display_order: order,
+    status: "ACTIVE",
+    record_version: 1,
+    created_at: now,
+    created_by: actor.employeeId,
+    updated_at: now,
+    updated_by: actor.employeeId,
+  }));
+  appendRecords_("SUPPLIER_TYPES", defaults);
+}
+
+function seedSupplierMasterFromLegacy_(actor) {
+  if (allRecords_("SUPPLIERS").length) return;
+  const now = new Date().toISOString();
+  const supplierRows = [];
+  const productRows = [];
+  const contractRows = [];
+  const rateRows = [];
+  const supplierByKey = {};
+  const contractBySupplier = {};
+  const safeCode = (value) => String(value || "").toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "MASTER";
+  const ensureSupplier = (typeCode, name) => {
+    const key = `${typeCode}|${String(name || "").trim().toUpperCase()}`;
+    if (supplierByKey[key]) return supplierByKey[key];
+    const supplierId = `SUP-${typeCode}-${digest_(key).slice(0, 12)}`;
+    supplierByKey[key] = supplierId;
+    supplierRows.push({
+      supplier_id: supplierId,
+      supplier_type_id: `STYPE-${typeCode}`,
+      type_code: typeCode,
+      supplier_code: `${typeCode.slice(0, 4)}-${safeCode(name)}`,
+      supplier_name: name,
+      legal_name: name,
+      status: "ACTIVE",
+      destinations: "",
+      address: "",
+      website: "",
+      tax_id: "",
+      internal_pic_employee_id: "",
+      operational_notes: "Migrated into centralized Supplier Master.",
+      record_version: 1,
+      created_at: now,
+      created_by: actor.employeeId,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    });
+    return supplierId;
+  };
+  const ensureContract = (supplierId, number, validTo) => {
+    if (contractBySupplier[supplierId]) {
+      const existing = contractRows.find((row) => row.contract_id === contractBySupplier[supplierId]);
+      if (existing && validTo > existing.valid_to) existing.valid_to = validTo;
+      return contractBySupplier[supplierId];
+    }
+    const contractId = `CTR-${digest_(supplierId).slice(0, 14)}`;
+    contractBySupplier[supplierId] = contractId;
+    contractRows.push({
+      contract_id: contractId,
+      supplier_id: supplierId,
+      contract_number: number,
+      contract_name: "Migrated master rate",
+      valid_from: "2026-01-01",
+      valid_to: validTo || "2099-12-31",
+      currency: "IDR",
+      tax_treatment: "AS_CONTRACT",
+      terms_and_conditions: "",
+      drive_file_id: "",
+      drive_file_name: "",
+      drive_file_url: "",
+      status: contractStatusForDate_("2026-01-01", validTo || "2099-12-31", "ACTIVE"),
+      allow_overlap: false,
+      overlap_reason: "",
+      record_version: 1,
+      created_at: now,
+      created_by: actor.employeeId,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    });
+    return contractId;
+  };
+  const addProductRate = (typeCode, supplierName, productName, sourceId, adult, child, unit, basis, validTo, notes) => {
+    const supplierId = ensureSupplier(typeCode, supplierName);
+    const contractId = ensureContract(supplierId, `MIGRATED-${safeCode(supplierName)}`, validTo);
+    const productId = `PROD-${digest_(`${supplierId}|${sourceId}|${productName}`).slice(0, 16)}`;
+    productRows.push({
+      product_id: productId,
+      supplier_id: supplierId,
+      product_code: `${typeCode.slice(0, 4)}-${safeCode(productName)}`.slice(0, 48),
+      product_name: productName,
+      category: typeCode,
+      subcategory: "",
+      destinations: "",
+      description: notes || "",
+      inclusion: "",
+      exclusion: "",
+      terms_and_conditions: "",
+      cancellation_terms: "",
+      booking_instructions: "",
+      minimum_order: "",
+      maximum_capacity: "",
+      tax_treatment: "AS_CONTRACT",
+      notes: notes || "",
+      status: "ACTIVE",
+      record_version: 1,
+      created_at: now,
+      created_by: actor.employeeId,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    });
+    const components = [
+      ["PER_ADULT", adult],
+      ["PER_CHILD", child],
+      [basis || "PER_SERVICE", unit],
+    ].filter((entry) => entry[1] !== "" && entry[1] !== null && entry[1] !== undefined);
+    components.forEach(([priceBasis, amount], index) => rateRows.push({
+      contract_rate_id: `RATE-${digest_(`${productId}|${priceBasis}|${index}`).slice(0, 16)}`,
+      contract_id: contractId,
+      product_id: productId,
+      price_basis: priceBasis,
+      amount: Number(amount),
+      currency: "IDR",
+      min_quantity: "",
+      max_quantity: "",
+      market: "",
+      season: "",
+      surcharge_rule: "",
+      valid_from: "2026-01-01",
+      valid_to: validTo || "2099-12-31",
+      notes: notes || "",
+      status: "ACTIVE",
+      record_version: 1,
+      created_at: now,
+      created_by: actor.employeeId,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    }));
+  };
+
+  const legacyVendors = spreadsheet_().getSheetByName("VENDOR_RATE_MASTER")
+    ? allRecords_("VENDOR_RATE_MASTER") : [];
+  legacyVendors.forEach((row) => addProductRate(
+    "VENDOR",
+    String(row.vendor_name || "Legacy Vendor").trim() || "Legacy Vendor",
+    String(row.service_name || "Service").trim(),
+    row.vendor_rate_id || uuid_("LEGACY"),
+    row.adult_rate_idr,
+    row.child_rate_idr,
+    null,
+    "",
+    String(row.valid_to || "2099-12-31"),
+    row.notes || row.description || "",
+  ));
+  const legacyToc = spreadsheet_().getSheetByName("TOC_MASTER")
+    ? allRecords_("TOC_MASTER") : [];
+  legacyToc.forEach((row) => addProductRate(
+    "TOC", "TOC Master", String(row.toc_name || "TOC Service").trim(),
+    row.toc_id || uuid_("LEGACY"), row.adult_rate_idr, row.child_rate_idr, null, "",
+    String(row.valid_to || "2099-12-31"), row.notes || "",
+  ));
+  [
+    ["TRANSPORT", "DEV Transport Partner", "Airport Transfer", 350000, "PER_VEHICLE"],
+    ["TRANSPORT", "DEV Transport Partner", "Full Day Transport", 700000, "PER_VEHICLE"],
+    ["LUGGAGE_VAN", "DEV Luggage Van Partner", "Airport - Hotel Luggage Van", 450000, "PER_VAN"],
+    ["LUGGAGE_VAN", "DEV Luggage Van Partner", "Full Day Luggage Van", 800000, "PER_VAN"],
+    ["ADDITIONAL_SERVICE", "Additional", "Garland", 50000, "PER_ITEM"],
+    ["ADDITIONAL_SERVICE", "Additional", "Water", 10000, "PER_ITEM"],
+  ].forEach(([type, supplier, product, amount, basis], index) => addProductRate(
+    type, supplier, product, `DEV-${index}`, null, null, amount, basis, "2099-12-31",
+    "DEV fixture pending approved production contract.",
+  ));
+  appendRecords_("SUPPLIERS", supplierRows);
+  appendRecords_("SUPPLIER_PRODUCTS", productRows);
+  appendRecords_("SUPPLIER_CONTRACTS", contractRows);
+  appendRecords_("CONTRACT_RATES", rateRows);
+}
+
+function saveSupplierType_(request, actor) {
+  ensureSupplierMasterSchema_();
+  const input = request.supplierType || {};
+  const code = String(input.typeCode || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  const name = String(input.typeName || "").trim();
+  if (!code || !name) throw apiError_("VALIDATION_ERROR", "Type code and Type name are required.");
+  const now = new Date().toISOString();
+  const id = input.supplierTypeId || `STYPE-${code}`;
+  const before = findRecord_("SUPPLIER_TYPES", "supplier_type_id", id);
+  upsertVersionedRecord_("SUPPLIER_TYPES", "supplier_type_id", id, {
+    supplier_type_id: id,
+    type_code: code,
+    type_name: name,
+    description: input.description || "",
+    requires_supplier: input.requiresSupplier !== false,
+    allowed_price_bases: arrayText_(input.allowedPriceBases),
+    default_booking_channels: arrayText_(input.defaultBookingChannels),
+    display_order: Number(input.displayOrder || 999),
+    status: "ACTIVE",
+  }, actor, now);
+  recordAndBroadcastMasterChange_("SUPPLIER_TYPE_CHANGED", "SUPPLIER_TYPE", id, "", code,
+    `${before ? "Updated" : "Added"} Supplier Type ${name}.`, before, input, actor, now);
+  return supplierMasterCatalog_();
+}
+
+function saveSupplier_(request, actor) {
+  ensureSupplierMasterSchema_();
+  const input = request.supplier || {};
+  const name = String(input.supplierName || "").trim();
+  const typeCode = String(input.typeCode || "").trim().toUpperCase();
+  const type = findRecord_("SUPPLIER_TYPES", "type_code", typeCode);
+  if (!name || !type || String(type.status).toUpperCase() !== "ACTIVE") {
+    throw apiError_("VALIDATION_ERROR", "Supplier name and an active Supplier Type are required.");
+  }
+  const now = new Date().toISOString();
+  const id = input.supplierId || uuid_("SUP");
+  const before = findRecord_("SUPPLIERS", "supplier_id", id);
+  upsertVersionedRecord_("SUPPLIERS", "supplier_id", id, {
+    supplier_id: id,
+    supplier_type_id: type.supplier_type_id,
+    type_code: typeCode,
+    supplier_code: input.supplierCode || `${typeCode.slice(0, 4)}-${id.slice(-8).toUpperCase()}`,
+    supplier_name: name,
+    legal_name: input.legalName || name,
+    status: "ACTIVE",
+    destinations: arrayText_(input.destinations),
+    address: input.address || "",
+    website: input.website || "",
+    tax_id: input.taxId || "",
+    internal_pic_employee_id: input.internalPicEmployeeId || "",
+    operational_notes: input.operationalNotes || "",
+  }, actor, now);
+  replaceSupplierChildren_("SUPPLIER_CONTACTS", "contact_id", "supplier_id", id,
+    input.contacts || [], (row) => ({
+      contact_id: row.contactId || uuid_("SCON"),
+      supplier_id: id,
+      contact_name: row.contactName || "",
+      position: row.position || "",
+      department: row.department || "",
+      phone: row.phone || "",
+      whatsapp: row.whatsapp || "",
+      email: row.email || "",
+      preferred_channel: row.preferredChannel || "",
+      operational_hours: row.operationalHours || "",
+      is_emergency: Boolean(row.isEmergency),
+      responsibility: row.responsibility || "",
+      status: "ACTIVE",
+    }), actor, now);
+  replaceSupplierChildren_("SUPPLIER_RECIPIENTS", "recipient_id", "supplier_id", id,
+    input.recipients || [], (row, index) => ({
+      recipient_id: row.recipientId || uuid_("SREC"),
+      supplier_id: id,
+      recipient_type: row.recipientType || "TO",
+      address: row.address || "",
+      channel: row.channel || "EMAIL",
+      purpose: row.purpose || "",
+      sequence: Number(row.sequence || index + 1),
+      status: "ACTIVE",
+    }), actor, now);
+  const sopInput = input.sop || {};
+  const existingSop = allRecords_("SUPPLIER_SOPS").find((row) => String(row.supplier_id) === id);
+  const sopId = sopInput.sopId || existingSop && existingSop.sop_id || uuid_("SSOP");
+  upsertVersionedRecord_("SUPPLIER_SOPS", "sop_id", sopId, {
+    sop_id: sopId,
+    supplier_id: id,
+    booking_channels: arrayText_(sopInput.bookingChannels),
+    lead_time: sopInput.leadTime || "",
+    cutoff_time: sopInput.cutoffTime || "",
+    required_information: sopInput.requiredInformation || "",
+    confirmation_procedure: sopInput.confirmationProcedure || "",
+    amendment_procedure: sopInput.amendmentProcedure || "",
+    cancellation_procedure: sopInput.cancellationProcedure || "",
+    emergency_procedure: sopInput.emergencyProcedure || "",
+    portal_url: sopInput.portalUrl || "",
+    account_reference: sopInput.accountReference || "",
+    subject_template: sopInput.subjectTemplate || "",
+    body_template: sopInput.bodyTemplate || "",
+    status: "ACTIVE",
+  }, actor, now);
+  const changeCount = (input.contacts || []).length + (input.recipients || []).length + 1;
+  recordAndBroadcastMasterChange_("SUPPLIER_CHANGED", "SUPPLIER", id, id, typeCode,
+    `${before ? "Updated" : "Added"} supplier ${name}; ${changeCount} contact/SOP records synchronized.`,
+    before, input, actor, now);
+  return supplierMasterCatalog_();
+}
+
+function saveSupplierProduct_(request, actor) {
+  ensureSupplierMasterSchema_();
+  const input = request.product || {};
+  const supplier = findRecord_("SUPPLIERS", "supplier_id", input.supplierId);
+  if (!supplier || !String(input.productName || "").trim()) {
+    throw apiError_("VALIDATION_ERROR", "Supplier and Product name are required.");
+  }
+  const now = new Date().toISOString();
+  const id = input.productId || uuid_("PROD");
+  const before = findRecord_("SUPPLIER_PRODUCTS", "product_id", id);
+  upsertVersionedRecord_("SUPPLIER_PRODUCTS", "product_id", id, {
+    product_id: id,
+    supplier_id: supplier.supplier_id,
+    product_code: input.productCode || `${supplier.type_code.slice(0, 4)}-${id.slice(-8).toUpperCase()}`,
+    product_name: String(input.productName).trim(),
+    category: input.category || supplier.type_code,
+    subcategory: input.subcategory || "",
+    destinations: arrayText_(input.destinations),
+    description: input.description || "",
+    inclusion: input.inclusion || "",
+    exclusion: input.exclusion || "",
+    terms_and_conditions: input.termsAndConditions || "",
+    cancellation_terms: input.cancellationTerms || "",
+    booking_instructions: input.bookingInstructions || "",
+    minimum_order: input.minimumOrder || "",
+    maximum_capacity: input.maximumCapacity || "",
+    tax_treatment: input.taxTreatment || "AS_CONTRACT",
+    notes: input.notes || "",
+    status: "ACTIVE",
+  }, actor, now);
+  recordAndBroadcastMasterChange_("SUPPLIER_PRODUCT_CHANGED", "SUPPLIER_PRODUCT", id,
+    supplier.supplier_id, supplier.type_code,
+    `${before ? "Updated" : "Added"} ${supplier.supplier_name} product ${input.productName}.`,
+    before, input, actor, now);
+  return supplierMasterCatalog_();
+}
+
+function saveSupplierContract_(request, actor) {
+  ensureSupplierMasterSchema_();
+  const input = request.contract || {};
+  const supplier = findRecord_("SUPPLIERS", "supplier_id", input.supplierId);
+  const validFrom = normalizeDateText_(input.validFrom);
+  const validTo = normalizeDateText_(input.validTo);
+  if (!supplier || !String(input.contractNumber || "").trim() || !validFrom || !validTo || validTo < validFrom) {
+    throw apiError_("VALIDATION_ERROR", "Supplier, Contract number, and a valid date range are required.");
+  }
+  const rates = input.rates || [];
+  if (!rates.length) throw apiError_("VALIDATION_ERROR", "At least one Contract Rate is required.");
+  rates.forEach((rate) => {
+    if (!findRecord_("SUPPLIER_PRODUCTS", "product_id", rate.productId)) {
+      throw apiError_("VALIDATION_ERROR", "Every Contract Rate must reference an existing product.");
+    }
+    if (!String(rate.priceBasis || "").trim() || !Number.isFinite(Number(rate.amount))) {
+      throw apiError_("VALIDATION_ERROR", "Every Contract Rate requires Price basis and numeric amount.");
+    }
+  });
+  const now = new Date().toISOString();
+  const id = input.contractId || uuid_("CTR");
+  const before = findRecord_("SUPPLIER_CONTRACTS", "contract_id", id);
+  const requestedProductIds = new Set(rates.map((rate) => String(rate.productId)));
+  const existingRates = allRecords_("CONTRACT_RATES");
+  const overlaps = allRecords_("SUPPLIER_CONTRACTS").filter((row) =>
+    String(row.supplier_id) === String(supplier.supplier_id)
+    && String(row.contract_id) !== String(id)
+    && !["ARCHIVED", "CANCELLED", "SUPERSEDED"].includes(String(row.status).toUpperCase())
+    && existingRates.some((rate) =>
+      String(rate.contract_id) === String(row.contract_id)
+      && requestedProductIds.has(String(rate.product_id))
+      && String(rate.status).toUpperCase() !== "ARCHIVED"
+    )
+    && dateRangesOverlap_(validFrom, validTo, normalizeDateText_(row.valid_from), normalizeDateText_(row.valid_to))
+  );
+  if (overlaps.length && !input.allowOverlap) {
+    throw apiError_("CONTRACT_OVERLAP", "Contract validity overlaps another active/scheduled contract.", {
+      overlappingContracts: overlaps.map((row) => row.contract_number),
+    });
+  }
+  if (overlaps.length && !String(input.overlapReason || "").trim()) {
+    throw apiError_("VALIDATION_ERROR", "Overlap reason is required when overlapping contracts are allowed.");
+  }
+  upsertVersionedRecord_("SUPPLIER_CONTRACTS", "contract_id", id, {
+    contract_id: id,
+    supplier_id: supplier.supplier_id,
+    contract_number: String(input.contractNumber).trim(),
+    contract_name: input.contractName || input.contractNumber,
+    valid_from: validFrom,
+    valid_to: validTo,
+    currency: input.currency || "IDR",
+    tax_treatment: input.taxTreatment || "AS_CONTRACT",
+    terms_and_conditions: input.termsAndConditions || "",
+    drive_file_id: input.driveFileId || "",
+    drive_file_name: input.driveFileName || "",
+    drive_file_url: input.driveFileUrl || "",
+    status: contractStatusForDate_(validFrom, validTo, input.status || "ACTIVE"),
+    allow_overlap: Boolean(input.allowOverlap),
+    overlap_reason: input.overlapReason || "",
+  }, actor, now);
+  replaceSupplierChildren_("CONTRACT_RATES", "contract_rate_id", "contract_id", id,
+    rates, (rate) => ({
+      contract_rate_id: rate.contractRateId || uuid_("RATE"),
+      contract_id: id,
+      product_id: rate.productId,
+      price_basis: String(rate.priceBasis).toUpperCase(),
+      amount: Number(rate.amount),
+      currency: rate.currency || input.currency || "IDR",
+      min_quantity: rate.minQuantity || "",
+      max_quantity: rate.maxQuantity || "",
+      market: rate.market || "",
+      season: rate.season || "",
+      surcharge_rule: rate.surchargeRule || "",
+      valid_from: normalizeDateText_(rate.validFrom) || validFrom,
+      valid_to: normalizeDateText_(rate.validTo) || validTo,
+      notes: rate.notes || "",
+      status: "ACTIVE",
+    }), actor, now);
+  recordAndBroadcastMasterChange_("SUPPLIER_CONTRACT_CHANGED", "SUPPLIER_CONTRACT", id,
+    supplier.supplier_id, supplier.type_code,
+    `${before ? "Updated" : "Added"} contract ${input.contractNumber} for ${supplier.supplier_name}; ${rates.length} rate components active.`,
+    before, input, actor, now);
+  return supplierMasterCatalog_();
+}
+
+function archiveSupplierEntity_(request, actor) {
+  ensureSupplierMasterSchema_();
+  const kind = String(request.entityKind || "").toUpperCase();
+  const config = {
+    SUPPLIER_TYPE: ["SUPPLIER_TYPES", "supplier_type_id"],
+    SUPPLIER: ["SUPPLIERS", "supplier_id"],
+    PRODUCT: ["SUPPLIER_PRODUCTS", "product_id"],
+    CONTRACT: ["SUPPLIER_CONTRACTS", "contract_id"],
+  }[kind];
+  if (!config || !request.entityId) throw apiError_("VALIDATION_ERROR", "Supported entity kind and ID are required.");
+  const [sheetName, key] = config;
+  const before = findRecord_(sheetName, key, request.entityId);
+  if (!before) throw apiError_("RECORD_NOT_FOUND", "Supplier Master record was not found.");
+  if (kind === "SUPPLIER_TYPE") {
+    const activeSuppliers = allRecords_("SUPPLIERS").filter((row) =>
+      String(row.supplier_type_id) === String(request.entityId)
+      && String(row.status).toUpperCase() === "ACTIVE"
+    );
+    if (activeSuppliers.length) {
+      throw apiError_("TYPE_IN_USE", "Archive suppliers under this Type before archiving the Supplier Type.");
+    }
+  }
+  const now = new Date().toISOString();
+  updateRecord_(sheetName, key, request.entityId, {
+    status: "ARCHIVED",
+    record_version: Number(before.record_version || 0) + 1,
+    updated_at: now,
+    updated_by: actor.employeeId,
+  });
+  const supplierId = kind === "SUPPLIER" ? request.entityId : before.supplier_id || "";
+  recordAndBroadcastMasterChange_("SUPPLIER_MASTER_ARCHIVED", kind, request.entityId,
+    supplierId, before.type_code || "", `Archived ${kind.replaceAll("_", " ")}. Reason: ${request.reason || "Not provided"}.`,
+    before, { status: "ARCHIVED", reason: request.reason || "" }, actor, now);
+  return supplierMasterCatalog_();
 }
 
 function saveVendorIntake_(request, actor) {
@@ -231,12 +827,19 @@ function saveVendorIntake_(request, actor) {
           suggested_vendor_id: split.vendorId || "",
           suggested_vendor_name: split.vendorName || "",
           service_master_id: split.serviceMasterId || "",
+          supplier_id: split.supplierId || split.vendorId || "",
+          product_id: split.productId || split.serviceMasterId || "",
+          contract_id: split.contractId || "",
+          contract_rate_id: split.contractRateId || "",
           price_source: split.priceSource || "NONE",
           adult_rate_idr: split.adultRateIdr ?? "",
           child_rate_idr: split.childRateIdr ?? "",
           unit_rate_idr: split.unitRateIdr ?? "",
           currency: split.currency || "IDR",
           rate_status: split.rateStatus || "PENDING_RATE",
+          manual_price_reason: split.manualPriceReason || "",
+          manual_rate_source: split.manualRateSource || "",
+          manual_evidence_ref: split.manualEvidenceRef || "",
           rate_valid_to: split.rateValidTo || "",
           rate_snapshot_at: split.rateSnapshotAt || now,
           record_version: 1,
@@ -309,7 +912,10 @@ function validateVendorIntakePayload_(intake) {
       throw apiError_("VALIDATION_ERROR", "Adult, Child, and Infant must be whole numbers starting from 0.");
     }
   });
-  const allowedTypes = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"];
+  ensureSupplierMasterSchema_();
+  const allowedTypes = allRecords_("SUPPLIER_TYPES")
+    .filter((row) => String(row.status || "").toUpperCase() === "ACTIVE")
+    .map((row) => String(row.type_code || "").toUpperCase());
   const dayNumbers = {};
   (intake.days || []).forEach((day) => {
     const number = Number(day.dayNumber);
@@ -333,6 +939,14 @@ function validateVendorIntakePayload_(intake) {
       }
       if (!["RATE_READY", "PENDING_RATE"].includes(String(split.rateStatus || "PENDING_RATE"))) {
         throw apiError_("VALIDATION_ERROR", `Day ${number} rate status is invalid.`);
+      }
+      const manualRateFilled = split.priceSource === "MANUAL"
+        || split.manualPriceReason || split.manualRateSource || split.manualEvidenceRef;
+      if (manualRateFilled && !String(split.manualPriceReason || "").trim()) {
+        throw apiError_("VALIDATION_ERROR", `Day ${number} manual rate reason is required.`);
+      }
+      if (manualRateFilled && !String(split.manualRateSource || "").trim()) {
+        throw apiError_("VALIDATION_ERROR", `Day ${number} manual rate source is required.`);
       }
     });
   });
@@ -373,8 +987,10 @@ function ensureVendorSchema_() {
   ensureHeaders_("TOUR_DAYS", ["start_time", "finish_time"]);
   ensureHeaders_("SERVICES", [
     "suggested_vendor_id", "suggested_vendor_name", "service_master_id",
+    "supplier_id", "product_id", "contract_id", "contract_rate_id",
     "price_source", "adult_rate_idr", "child_rate_idr", "unit_rate_idr",
-    "currency", "rate_status", "rate_valid_to", "rate_snapshot_at",
+    "currency", "rate_status", "manual_price_reason", "manual_rate_source",
+    "manual_evidence_ref", "rate_valid_to", "rate_snapshot_at",
   ]);
 }
 
@@ -719,6 +1335,264 @@ function latestDepartmentPublication_(tourId, customerCode, department) {
       && row.department === department
     )
     .sort((a, b) => Number(b.published_record_version) - Number(a.published_record_version))[0] || null;
+}
+
+function supplierMasterCatalog_() {
+  const supplierTypes = allRecords_("SUPPLIER_TYPES").map(camelizeSupplierRecord_);
+  const suppliers = allRecords_("SUPPLIERS").map(camelizeSupplierRecord_);
+  const contacts = allRecords_("SUPPLIER_CONTACTS").map(camelizeSupplierRecord_);
+  const recipients = allRecords_("SUPPLIER_RECIPIENTS").map(camelizeSupplierRecord_);
+  const sops = allRecords_("SUPPLIER_SOPS").map(camelizeSupplierRecord_);
+  const products = allRecords_("SUPPLIER_PRODUCTS").map(camelizeSupplierRecord_);
+  const contracts = allRecords_("SUPPLIER_CONTRACTS").map((row) => {
+    const mapped = camelizeSupplierRecord_(row);
+    mapped.status = contractStatusForDate_(
+      normalizeDateText_(row.valid_from),
+      normalizeDateText_(row.valid_to),
+      row.status,
+    );
+    return mapped;
+  });
+  const rates = allRecords_("CONTRACT_RATES").map(camelizeSupplierRecord_);
+  const payload = { supplierTypes, suppliers, contacts, recipients, sops, products, contracts, rates };
+  return Object.assign(payload, {
+    checksum: digest_(JSON.stringify(payload)),
+    sourceVersion: new Date().toISOString(),
+  });
+}
+
+function camelizeSupplierRecord_(record) {
+  const result = {};
+  Object.keys(record || {}).forEach((key) => {
+    const camel = key.replace(/_([a-z])/g, (_match, letter) => letter.toUpperCase());
+    let value = record[key];
+    if (value instanceof Date) value = normalizeDateText_(value);
+    if (["requiresSupplier", "isEmergency", "allowOverlap"].includes(camel)) value = truthy_(value);
+    if (["displayOrder", "sequence", "recordVersion", "amount", "minQuantity", "maxQuantity"].includes(camel)
+        && value !== "") {
+      value = Number(value);
+    }
+    result[camel] = value;
+  });
+  result.active = !["ARCHIVED", "CANCELLED", "SUPERSEDED"].includes(
+    String(result.status || "").toUpperCase(),
+  );
+  if (result.allowedPriceBases) result.allowedPriceBases = splitText_(result.allowedPriceBases);
+  if (result.defaultBookingChannels) result.defaultBookingChannels = splitText_(result.defaultBookingChannels);
+  if (result.bookingChannels) result.bookingChannels = splitText_(result.bookingChannels);
+  if (result.destinations) result.destinations = splitText_(result.destinations);
+  return result;
+}
+
+function appendRecords_(sheetName, records) {
+  if (!records || !records.length) return;
+  const sheet = sheet_(sheetName);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const rows = records.map((record) => headers.map((header) =>
+    record[header] === undefined ? "" : record[header]
+  ));
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+}
+
+function replaceSupplierChildren_(sheetName, key, parentKey, parentId, rows, mapper, actor, now) {
+  const existing = allRecords_(sheetName).filter((row) => String(row[parentKey]) === String(parentId));
+  const retained = [];
+  (rows || []).forEach((row, index) => {
+    const mapped = mapper(row, index);
+    retained.push(String(mapped[key]));
+    upsertVersionedRecord_(sheetName, key, mapped[key], mapped, actor, now);
+  });
+  existing
+    .filter((row) => !retained.includes(String(row[key])) && String(row.status).toUpperCase() !== "ARCHIVED")
+    .forEach((row) => updateRecord_(sheetName, key, row[key], {
+      status: "ARCHIVED",
+      record_version: Number(row.record_version || 0) + 1,
+      updated_at: now,
+      updated_by: actor.employeeId,
+    }));
+}
+
+function recordAndBroadcastMasterChange_(
+  action, entityType, entityId, supplierId, typeCode, summary,
+  before, after, actor, now
+) {
+  const eventId = uuid_("SMEV");
+  appendRecord_("AUDIT_LOG", {
+    audit_id: uuid_("AUD"),
+    event_timestamp: now,
+    actor_employee_id: actor.employeeId,
+    actor_email: actor.email,
+    client_mode: "DESKTOP",
+    action,
+    entity_type: entityType,
+    entity_id: entityId,
+    tour_id: "",
+    request_id: eventId,
+    before_json: before ? JSON.stringify(before) : "",
+    after_json: after ? JSON.stringify(after) : "",
+    reason: summary,
+    result: "SUCCESS",
+    error_code: "",
+  });
+  recordSupplierMasterEvent_({
+    eventId,
+    eventType: action,
+    entityType,
+    entityId,
+    supplierId,
+    typeCode,
+    summary,
+  }, actor, now);
+  broadcastSupplierMasterNotification_({
+    type: action,
+    title: entityType.replaceAll("_", " "),
+    message: `${actor.fullName || actor.employeeId}: ${summary}`,
+    actionUrl: `supplier-master:${typeCode || ""}:${supplierId || ""}`,
+  }, actor, now);
+}
+
+function recordSupplierMasterEvent_(details, actor, now) {
+  appendRecord_("SUPPLIER_MASTER_EVENTS", {
+    event_id: details.eventId || uuid_("SMEV"),
+    event_key: details.eventKey || "",
+    event_type: details.eventType,
+    entity_type: details.entityType,
+    entity_id: details.entityId,
+    supplier_id: details.supplierId || "",
+    type_code: details.typeCode || "",
+    summary: details.summary || "",
+    event_at: now,
+    actor_employee_id: actor.employeeId,
+  });
+}
+
+function broadcastSupplierMasterNotification_(details, actor, now) {
+  const notificationId = uuid_("NOTIF");
+  appendRecord_("NOTIFICATIONS", {
+    notification_id: notificationId,
+    tour_id: "",
+    revision_id: "",
+    notification_type: details.type,
+    title: details.title,
+    message: details.message,
+    source_module: "MANAGER_ADMIN",
+    action_url: details.actionUrl || "supplier-master",
+    created_at: now,
+    created_by: actor.employeeId,
+    expires_at: "",
+  });
+  const recipients = allRecords_("EMPLOYEES").filter((employee) =>
+    truthy_(employee.active) && (truthy_(employee.desktop_access) || truthy_(employee.mobile_access))
+  );
+  const rows = recipients.map((employee) => ({
+    notification_recipient_id: uuid_("NREC"),
+    notification_id: notificationId,
+    employee_id: employee.employee_id,
+    delivery_status: "DELIVERED",
+    read_at: "",
+    acknowledged_at: "",
+    action_status: "PENDING",
+    action_note: "",
+  }));
+  appendRecords_("NOTIF_RECIPIENTS", rows);
+  return rows.length;
+}
+
+function ensureSupplierExpiryTrigger_() {
+  const handler = "runSupplierContractExpiryNotifications";
+  const exists = ScriptApp.getProjectTriggers().some((trigger) =>
+    trigger.getHandlerFunction() === handler
+  );
+  if (!exists) ScriptApp.newTrigger(handler).timeBased().everyDays(1).atHour(8).create();
+}
+
+function runSupplierContractExpiryNotifications() {
+  ensureSupplierMasterSchema_();
+  const today = normalizeDateText_(new Date());
+  const thresholds = [90, 60, 30, 14, 7, 1, 0];
+  const systemActor = {
+    employeeId: "SYSTEM",
+    fullName: "ERIM-PSH",
+    email: "",
+  };
+  const now = new Date().toISOString();
+  const events = allRecords_("SUPPLIER_MASTER_EVENTS");
+  const eventKeys = new Set(events.map((row) => String(row.event_key || "")));
+  const suppliers = Object.fromEntries(
+    allRecords_("SUPPLIERS").map((row) => [String(row.supplier_id), row]),
+  );
+  allRecords_("SUPPLIER_CONTRACTS").forEach((contract) => {
+    if (["ARCHIVED", "CANCELLED", "SUPERSEDED"].includes(String(contract.status).toUpperCase())) return;
+    const validTo = normalizeDateText_(contract.valid_to);
+    if (!validTo) return;
+    const days = daysBetween_(today, validTo);
+    const threshold = thresholds.find((value) => value === days);
+    if (days >= 0 && threshold === undefined) return;
+    const eventType = days < 0 ? "CONTRACT_EXPIRED" : days === 0 ? "CONTRACT_EXPIRES_TODAY" : "CONTRACT_EXPIRING";
+    const eventKey = days < 0
+      ? `${eventType}|${contract.contract_id}|${validTo}`
+      : `${eventType}|${contract.contract_id}|${validTo}|${days}`;
+    if (eventKeys.has(eventKey)) return;
+    const supplier = suppliers[String(contract.supplier_id)] || {};
+    const summary = days < 0
+      ? `Contract ${contract.contract_number} for ${supplier.supplier_name || "supplier"} expired on ${validTo}.`
+      : `Contract ${contract.contract_number} for ${supplier.supplier_name || "supplier"} expires in ${days} day(s) on ${validTo}.`;
+    recordSupplierMasterEvent_({
+      eventKey,
+      eventType,
+      entityType: "SUPPLIER_CONTRACT",
+      entityId: contract.contract_id,
+      supplierId: contract.supplier_id,
+      typeCode: supplier.type_code || "",
+      summary,
+    }, systemActor, now);
+    broadcastSupplierMasterNotification_({
+      type: eventType,
+      title: eventType.replaceAll("_", " "),
+      message: summary,
+      actionUrl: `supplier-master:${supplier.type_code || ""}:${contract.supplier_id}`,
+    }, systemActor, now);
+  });
+}
+
+function contractStatusForDate_(validFrom, validTo, storedStatus) {
+  const explicit = String(storedStatus || "").toUpperCase();
+  if (["ARCHIVED", "CANCELLED", "SUPERSEDED"].includes(explicit)) return explicit;
+  const today = normalizeDateText_(new Date());
+  if (validFrom && today < validFrom) return "SCHEDULED";
+  if (validTo && today > validTo) return "EXPIRED";
+  if (validTo && daysBetween_(today, validTo) <= 30) return "EXPIRING";
+  return "ACTIVE";
+}
+
+function dateRangesOverlap_(leftFrom, leftTo, rightFrom, rightTo) {
+  if (!leftFrom || !leftTo || !rightFrom || !rightTo) return false;
+  return leftFrom <= rightTo && rightFrom <= leftTo;
+}
+
+function normalizeDateText_(value) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  const text = String(value).trim();
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : "";
+}
+
+function daysBetween_(from, to) {
+  const start = new Date(`${from}T00:00:00Z`).getTime();
+  const end = new Date(`${to}T00:00:00Z`).getTime();
+  return Math.round((end - start) / 86400000);
+}
+
+function arrayText_(value) {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean).join(",");
+  return String(value || "").trim();
+}
+
+function splitText_(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function spreadsheet_() {

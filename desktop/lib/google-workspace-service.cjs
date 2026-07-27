@@ -58,6 +58,19 @@ class GoogleWorkspaceService {
   }
 
   async syncMasterDataCache() {
+    let supplierMaster = null;
+    if (typeof this.database.getSupplierMasterCatalog === "function"
+      && typeof this.database.replaceSupplierMasterCache === "function") {
+      try {
+        supplierMaster = await this.listSupplierMaster({ refresh: true });
+      } catch (error) {
+        supplierMaster = {
+          status: "OFFLINE_CACHE",
+          message: error.message,
+          catalog: this.database.getSupplierMasterCatalog(),
+        };
+      }
+    }
     const [tocRecords, vendorRecords, stateRecords] = await Promise.all([
       this.sheetRecords("TOC_MASTER"),
       this.sheetRecords("VENDOR_RATE_MASTER"),
@@ -119,6 +132,7 @@ class GoogleWorkspaceService {
         vendorRateRows: vendorRates.length,
         transportRateRows: Number(state.transport_rate_rows || 0),
         metadataChecksumMatches: !state.checksum || state.checksum === checksum,
+        supplierMaster,
       };
     }
     const summary = this.database.replaceMasterData({
@@ -139,7 +153,145 @@ class GoogleWorkspaceService {
       transportRateRows: Number(state.transport_rate_rows || 0),
       metadataChecksumMatches: !state.checksum || state.checksum === checksum,
       summary,
+      supplierMaster,
     };
+  }
+
+  async listSupplierMaster({ refresh = true } = {}) {
+    if (!refresh || !this.authService?.status().connected) {
+      return {
+        status: "OFFLINE_CACHE",
+        catalog: this.database.getSupplierMasterCatalog(),
+      };
+    }
+    const catalog = await this.callAppsScript("supplier.master.list", {});
+    const cached = this.database.replaceSupplierMasterCache(catalog);
+    return { status: "SYNCED", catalog: cached, checksum: catalog.checksum || "" };
+  }
+
+  async initializeSupplierMaster() {
+    const catalog = await this.callAppsScript("supplier.master.initialize", {
+      requestId: `SUPINIT-${crypto.randomUUID()}`,
+    });
+    const cached = this.database.replaceSupplierMasterCache(catalog);
+    return { status: "SYNCED", catalog: cached, checksum: catalog.checksum || "" };
+  }
+
+  async saveSupplierType(details) {
+    const catalog = await this.callAppsScript("supplier.type.save", {
+      requestId: details.requestId || `STYPE-${crypto.randomUUID()}`,
+      supplierType: details,
+    });
+    return this.database.replaceSupplierMasterCache(catalog);
+  }
+
+  async saveSupplier(details) {
+    const catalog = await this.callAppsScript("supplier.save", {
+      requestId: details.requestId || `SUP-${crypto.randomUUID()}`,
+      supplier: details,
+    });
+    return this.database.replaceSupplierMasterCache(catalog);
+  }
+
+  async saveSupplierProduct(details) {
+    const catalog = await this.callAppsScript("supplier.product.save", {
+      requestId: details.requestId || `PROD-${crypto.randomUUID()}`,
+      product: details,
+    });
+    return this.database.replaceSupplierMasterCache(catalog);
+  }
+
+  async saveSupplierContract(details) {
+    const catalog = await this.callAppsScript("supplier.contract.save", {
+      requestId: details.requestId || `CTR-${crypto.randomUUID()}`,
+      contract: details,
+    });
+    return this.database.replaceSupplierMasterCache(catalog);
+  }
+
+  async archiveSupplierEntity(details) {
+    const catalog = await this.callAppsScript("supplier.entity.archive", {
+      requestId: details.requestId || `ARCH-${crypto.randomUUID()}`,
+      entityKind: details.entityKind,
+      entityId: details.entityId,
+      reason: details.reason || "",
+    });
+    return this.database.replaceSupplierMasterCache(catalog);
+  }
+
+  async selectAndUploadSupplierContract(details = {}) {
+    const filePath = await this.chooseFile({
+      title: "Choose Supplier Contract",
+      contractOnly: true,
+    });
+    if (!filePath) return { canceled: true };
+    const settings = this.database.getPublicSettings();
+    if (!settings.driveFolderId) {
+      throw new Error("Configure the official Google Drive Folder ID before uploading a supplier contract.");
+    }
+    const supplierName = String(details.supplierName || "Supplier").trim();
+    const supplierId = String(details.supplierId || "UNASSIGNED").trim();
+    const contractNumber = String(details.contractNumber || "Contract").trim();
+    const folderId = await this.ensureDriveSubfolder(
+      settings.driveFolderId,
+      "Supplier Contracts",
+    );
+    const supplierFolderId = await this.ensureDriveSubfolder(
+      folderId,
+      sanitizeFilePart(`${supplierId} - ${supplierName}`),
+    );
+    const metadata = {
+      name: `${sanitizeFilePart(contractNumber)} - ${path.basename(filePath)}`,
+      parents: [supplierFolderId],
+    };
+    const boundary = `erim_supplier_contract_${crypto.randomBytes(12).toString("hex")}`;
+    const content = fs.readFileSync(filePath);
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Type: ${mimeTypeFor(path.extname(filePath).toLowerCase())}\r\n\r\n`),
+      content,
+      Buffer.from(`\r\n--${boundary}--`),
+    ]);
+    const uploaded = await this.authorizedFetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+      {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body,
+      },
+    );
+    return {
+      canceled: false,
+      driveFileId: uploaded.id,
+      driveFileName: uploaded.name,
+      driveFileUrl: uploaded.webViewLink || `https://drive.google.com/open?id=${uploaded.id}`,
+    };
+  }
+
+  async ensureDriveSubfolder(parentId, name) {
+    const query = [
+      `'${String(parentId).replaceAll("'", "\\'")}' in parents`,
+      "mimeType='application/vnd.google-apps.folder'",
+      `name='${String(name).replaceAll("'", "\\'")}'`,
+      "trashed=false",
+    ].join(" and ");
+    const found = await this.authorizedFetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1`,
+    );
+    if (found.files?.[0]?.id) return found.files[0].id;
+    const created = await this.authorizedFetch(
+      "https://www.googleapis.com/drive/v3/files?fields=id,name",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [parentId],
+        }),
+      },
+    );
+    return created.id;
   }
 
   async searchAgents(query) {

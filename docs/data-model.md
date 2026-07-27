@@ -20,6 +20,7 @@ Recommended local tables:
 - `VENDOR_HOTEL_DRAFTS`
 - `VENDOR_DAY_DRAFTS`
 - `VENDOR_SERVICE_SPLITS`
+- `LOCAL_SUPPLIER_MASTER_CACHE`
 
 Required local control fields include:
 
@@ -79,6 +80,31 @@ Published/official tables:
 - `PAYMENTS`
 - `FOLLOW_UPS`
 - `AUDIT_LOG`
+- `SUPPLIER_TYPES`
+- `SUPPLIERS`
+- `SUPPLIER_CONTACTS`
+- `SUPPLIER_RECIPIENTS`
+- `SUPPLIER_SOPS`
+- `SUPPLIER_PRODUCTS`
+- `SUPPLIER_CONTRACTS`
+- `CONTRACT_RATES`
+- `SUPPLIER_MASTER_EVENTS`
+
+## Supplier Master and contract authority
+
+Supplier categories are data, not backend constants. `SUPPLIER_TYPES` therefore
+drives both Manager/Admin tabs and Micro Split type choices. A supplier owns
+repeatable contacts, recipients, SOP steps, and products. A contract owns
+versioned rates linked to products and a validity window.
+
+Existing contracts are never destroyed when renewed. A new contract is created
+and the previous record remains available to historical booking snapshots.
+Operational service rows store supplier, product, contract, and contract-rate
+IDs together with the applied rate snapshot.
+
+When no contract rate is valid on the service date, the service remains
+bookable with `PENDING_RATE`. A booking-only manual rate stores reason, source,
+and evidence reference and never updates the central contract rate.
 
 ## Publication chain
 

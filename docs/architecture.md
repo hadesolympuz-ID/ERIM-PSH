@@ -105,6 +105,14 @@ system link because another PC or mobile device cannot reliably access it.
 - Google Drive: authoritative documents and evidence.
 - Gmail: authoritative email threads.
 - Mobile PWA: read-only projection of published data.
+- Supplier Master Google Sheet tables: authoritative supplier, product,
+  booking SOP, contract, and contract-rate source.
+
+Supplier Master changes are written only through authenticated Apps Script
+routes. Manager/Admin mutations update the central Sheet, append audit events,
+and broadcast a notification to active users. Desktop clients atomically
+replace their local supplier cache and use it for responsive lookup. Google
+Drive holds contract documents; Sheets retain their stable Drive references.
 
 Local data becomes eligible for publication only after validation and explicit
 Complete/Post. After successful publication, the local record stores the
@@ -221,4 +229,3 @@ permission, requested fields, source version, and action.
 
 All Google IDs, resource URLs, and local database paths are environment
 configuration and must not be hard-coded into shared business logic.
-
