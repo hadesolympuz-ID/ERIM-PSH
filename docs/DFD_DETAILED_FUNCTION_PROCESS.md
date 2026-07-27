@@ -827,9 +827,12 @@ Vendor Booking
     Left: staff-pasted Day Wise text
     Right: independently scrollable posted DOCX
     Split each day in a wide resizable two-pane dialog:
-      Left = Type | Suggested vendor name | Activity/detail | Add/remove
+      Left = Type | Provider/vendor name | Vendor service | Add/remove
       Right = current Day Wise reference; reserved email/evidence viewer
-      Type = VENDOR | TOC | VEHICLE | ADDITIONAL_SERVICES
+      Type = VENDOR | TOC | TRANSPORT | LUGGAGE_VAN | ADDITIONAL_SERVICE
+      Type selects the applicable provider/service/rate catalogue
+      ADDITIONAL_SERVICE permits a blank manual rate and becomes PENDING_RATE
+      Booking action remains independent and may continue while rate is pending
       Save split locally = atomic SQLite draft save; no online mutation
     Save local draft
     Post structured data online = separate controlled action
@@ -846,7 +849,7 @@ Vendor Booking
 | `vendor_intake_drafts` | `vendor_draft_id`; unique `customer_code` | Source/version/file references plus editable tour header, Adult/Child/Infant pax, and extraction state. | `TOURS` through Apps Script. |
 | `vendor_hotel_drafts` | `hotel_stay_id` | Unlimited ordered hotel stays; no hotel check-in time. | `TOUR_HOTEL_STAYS`. |
 | `vendor_day_drafts` | `tour_day_id` | Inclusive Day 1..N, service date, editable Tour Day Header, required-at-processing Start Time, optional Finish Time, and pasted Day Wise text. | `TOUR_DAYS`, including `start_time` and `finish_time`. |
-| `vendor_service_splits` | `service_id` | Pre-generation micro items and suggested vendor snapshot. | `SERVICES`. |
+| `vendor_service_splits` | `service_id` | Pre-generation micro items, provider/service master reference, price snapshot, independent `rate_status`, and booking status. | `SERVICES`. |
 | `local_toc_master` | `toc_id` | Local read cache of `TOC_MASTER`, including rates and source-row trace. Active through each row's `valid_to`; expired rows are excluded from suggestions. | `TOC_MASTER` in the central Google Sheet. |
 | `local_vendor_rate_master` | `vendor_rate_id` | Local read cache of `VENDOR_RATE_MASTER`, including original contract-validity note and source-row trace. Active through each row's `valid_to`; expired rows are excluded from suggestions. | `VENDOR_RATE_MASTER` in the central Google Sheet. |
 | `master_data_sync_state` | `master_key` | Last successful Google Sheet version, computed content checksum, source timestamp, row counts, and SQLite sync timestamp. | `MASTER_DATA_STATE` plus computed content from both master tabs. |
@@ -867,10 +870,17 @@ checksum, and compares it with `master_data_sync_state`. Changed data replaces
 both local master tables inside one SQLite transaction; identical data returns
 `CURRENT` without rewriting. If Google is unavailable or validation fails, the
 last successful SQLite cache is retained. Type `TOC` uses the TOC cache; other
-service types currently use the Vendor service cache. Online `VENDORS` and
-`SERVICES` suggestions are merged and deduplicated when available. Transport
-rate data is intentionally empty pending the approved source workbook. No
-business rate rows are stored in GitHub or bundled into the installer.
+service types use their matching catalogue. Online `VENDORS` and `SERVICES`
+suggestions are merged and deduplicated when available. Until approved
+Transport and Luggage Van source data exists, clearly identified DEV-only
+fixtures provide two priced choices for each type. Vendor `Additional` also
+provides DEV-only `Garland` and `Water` services so they remain visible during
+dummy modeling. These fixtures are not production contract rates.
+
+Rate readiness and booking progress are independent. A micro item can be
+`PENDING_RATE` while its email, WhatsApp, or portal booking action advances
+through the normal operational lifecycle. Missing rate blocks later
+costing/financial completion, not booking communication.
 
 #### `vendor.intake.save` online contract
 
@@ -882,7 +892,7 @@ business rate rows are stored in GitHub or bundled into the installer.
 | Source safety | When a Reservation publication ID is present, it must still be `PUBLISHED` and its record version must match. |
 | Idempotency | Unique `requestId`; a successful matching `AUDIT_LOG` row is replayed. |
 | Concurrency | Apps Script script lock covers the official mutation. |
-| Schema safety | TOURS pax/flight fields, SERVICES suggested-vendor fields, and `TOUR_HOTEL_STAYS` are ensured before writing. |
+| Schema safety | TOURS pax/flight fields, SERVICES provider/rate snapshot fields, and `TOUR_HOTEL_STAYS` are ensured before writing. |
 | Audit | `VENDOR_INTAKE_SAVED` records actor, source publication/version, Adult/Child/Infant pax, and hotel/day/split counts. |
 
 No supplier booking, communication, generated file, Gmail send, WhatsApp

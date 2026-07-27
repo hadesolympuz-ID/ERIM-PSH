@@ -14,7 +14,15 @@ const state = {
   followups: [],
   vendorDashboard: { urgent: [], pending: [], replied: [], done: [], offline: true },
   vendorIntake: null,
-  vendorSuggestions: { vendorNames: [], vendorServices: [], tocNames: [] },
+  vendorSuggestions: {
+    vendorNames: [],
+    vendorServices: [],
+    tocNames: [],
+    vendorRates: [],
+    tocRates: [],
+    transportRates: [],
+    luggageVanRates: [],
+  },
 };
 
 const moduleDescriptions = {
@@ -838,15 +846,132 @@ function updateVendorDayHotels() {
   });
 }
 
+function vendorSplitCatalog(serviceType) {
+  const type = normalizeVendorSplitType(serviceType);
+  if (type === "TOC") return state.vendorSuggestions.tocRates || [];
+  if (type === "TRANSPORT") return state.vendorSuggestions.transportRates || [];
+  if (type === "LUGGAGE_VAN") return state.vendorSuggestions.luggageVanRates || [];
+  if (type === "VENDOR") return state.vendorSuggestions.vendorRates || [];
+  return [];
+}
+
+function vendorSplitProviderConfig(serviceType) {
+  return ({
+    VENDOR: { label: "Vendor Name", list: "vendor-name-options", placeholder: "Choose vendor" },
+    TOC: { label: "Rate Source", list: "", placeholder: "TOC Master" },
+    TRANSPORT: { label: "Transporter", list: "transport-name-options", placeholder: "Choose transporter" },
+    LUGGAGE_VAN: { label: "Provider", list: "luggage-van-name-options", placeholder: "Choose luggage provider" },
+    ADDITIONAL_SERVICE: { label: "Provider (optional)", list: "", placeholder: "Optional" },
+  })[normalizeVendorSplitType(serviceType)] || { label: "Provider", list: "", placeholder: "Provider" };
+}
+
+function vendorSplitServiceList(serviceType) {
+  return ({
+    VENDOR: "vendor-service-options",
+    TOC: "toc-service-options",
+    TRANSPORT: "transport-service-options",
+    LUGGAGE_VAN: "luggage-van-service-options",
+    ADDITIONAL_SERVICE: "",
+  })[normalizeVendorSplitType(serviceType)] || "";
+}
+
+function vendorSplitRate(serviceType, vendorName, serviceName) {
+  const normalizedVendor = String(vendorName || "").trim().toLowerCase();
+  const normalizedService = String(serviceName || "").trim().toLowerCase();
+  if (!normalizedService) return null;
+  return vendorSplitCatalog(serviceType).find((rate) =>
+    String(rate.serviceName || "").trim().toLowerCase() === normalizedService
+    && (
+      normalizeVendorSplitType(serviceType) === "TOC"
+      || String(rate.vendorName || "").trim().toLowerCase() === normalizedVendor
+    )
+  ) || null;
+}
+
+function hasKnownRate(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
+function idr(value) {
+  return hasKnownRate(value)
+    ? new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(Number(value))
+    : "";
+}
+
+function vendorSplitRateMarkup(split = {}) {
+  const type = normalizeVendorSplitType(split.serviceType || "VENDOR");
+  if (type === "ADDITIONAL_SERVICE") {
+    const unitRate = split.unitRateIdr ?? "";
+    const ready = hasKnownRate(unitRate);
+    const basis = split.priceBasis || "PER_SERVICE";
+    const quantity = Number(split.quantity ?? 1) || 1;
+    return `
+      <div class="vendor-split-rate-heading">
+        <span class="vendor-rate-status ${ready ? "ready" : "pending"}" data-vendor-rate-status>
+          ${ready ? "Rate ready" : "Pending rate"}
+        </span>
+        <small>Booking email, WhatsApp, or portal action may continue while rate is pending.</small>
+      </div>
+      <div class="vendor-split-manual-rate">
+        <label class="vendor-split-field">
+          <span>Manual rate (IDR)</span>
+          <input data-vendor-split-field="unitRateIdr" type="number" min="0" step="1"
+            value="${escapeHtml(unitRate)}" placeholder="Can be filled later" />
+        </label>
+        <label class="vendor-split-field">
+          <span>Price basis</span>
+          <select data-vendor-split-field="priceBasis">
+            ${["PER_SERVICE", "PER_PAX", "PER_ITEM", "PER_UNIT", "PER_TRIP", "PER_VEHICLE"].map((value) =>
+              `<option value="${value}"${value === basis ? " selected" : ""}>${value.replaceAll("_", " ")}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label class="vendor-split-field">
+          <span>Quantity</span>
+          <input data-vendor-split-field="quantity" type="number" min="0.01" step="0.01"
+            value="${escapeHtml(quantity)}" />
+        </label>
+      </div>
+    `;
+  }
+  const rate = vendorSplitRate(type, split.vendorName, split.activityText);
+  const adult = rate?.adultRateIdr ?? split.adultRateIdr;
+  const child = rate?.childRateIdr ?? split.childRateIdr;
+  const unit = rate?.unitRateIdr ?? split.unitRateIdr;
+  const ready = hasKnownRate(adult) || hasKnownRate(child) || hasKnownRate(unit);
+  const parts = [
+    hasKnownRate(adult) ? `Adult ${idr(adult)}` : "",
+    hasKnownRate(child) ? `Child ${idr(child)}` : "",
+    hasKnownRate(unit) ? `Unit ${idr(unit)}` : "",
+    rate?.priceBasis ? rate.priceBasis.replaceAll("_", " ") : "",
+  ].filter(Boolean);
+  return `
+    <div class="vendor-split-rate-heading">
+      <span class="vendor-rate-status ${ready ? "ready" : "pending"}">
+        ${ready ? "Rate ready" : "Pending rate"}
+      </span>
+      <small>${escapeHtml(parts.join(" · ") || "Select a matching master service to load its rate.")}</small>
+    </div>
+  `;
+}
+
 function vendorSplitRow(split = {}, index = 0) {
   const type = vendorSplitTypeLabel(split.serviceType || "VENDOR");
-  const serviceList = normalizeVendorSplitType(type) === "TOC"
-    ? "toc-service-options"
-    : "vendor-service-options";
-  const vendorName = String(split.vendorName || "");
+  const normalizedType = normalizeVendorSplitType(type);
+  const serviceList = vendorSplitServiceList(normalizedType);
+  const provider = vendorSplitProviderConfig(normalizedType);
+  const vendorName = normalizedType === "TOC" ? "TOC Master" : String(split.vendorName || "");
   const service = String(split.activityText || "");
+  const providerList = provider.list ? `list="${provider.list}"` : "";
+  const serviceListAttribute = serviceList ? `list="${serviceList}"` : "";
   return `
-    <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}">
+    <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}"
+      data-service-type="${normalizedType}"
+      data-rate-snapshot-at="${escapeHtml(split.rateSnapshotAt || "")}">
       <label class="vendor-split-field">
         <span>Type</span>
         <input data-vendor-split-field="serviceType" data-flexible-input data-min-size="16" data-max-size="26"
@@ -854,32 +979,67 @@ function vendorSplitRow(split = {}, index = 0) {
           value="${escapeHtml(type)}" placeholder="Type" autocomplete="off" />
       </label>
       <label class="vendor-split-field">
-        <span>Vendor Name</span>
+        <span data-vendor-provider-label>${provider.label}</span>
         <input data-vendor-split-field="vendorName" data-flexible-input data-min-size="22" data-max-size="52"
-          list="vendor-name-options" size="${flexibleInputSize(vendorName, 22, 52)}"
-          value="${escapeHtml(vendorName)}" placeholder="Can be empty" autocomplete="off" />
+          ${providerList} size="${flexibleInputSize(vendorName, 22, 52)}"
+          value="${escapeHtml(vendorName)}" placeholder="${provider.placeholder}" autocomplete="off"
+          ${normalizedType === "TOC" ? "readonly" : ""} />
       </label>
       <label class="vendor-split-field">
         <span>Vendor Service</span>
         <input data-vendor-split-field="activityText" data-flexible-input data-min-size="32" data-max-size="90"
-          list="${serviceList}" size="${flexibleInputSize(service, 32, 90)}"
+          ${serviceListAttribute} size="${flexibleInputSize(service, 32, 90)}"
           value="${escapeHtml(service)}" placeholder="Service detail" autocomplete="off" />
       </label>
+      <div class="vendor-split-rate-panel" data-vendor-split-rate-panel>
+        ${vendorSplitRateMarkup({ ...split, serviceType: normalizedType, vendorName, activityText: service })}
+      </div>
       <button class="vendor-split-remove" type="button" data-remove-vendor-split="${index}" aria-label="Remove service" title="Remove service">×</button>
     </div>
   `;
 }
 
 function collectVendorSplitRows(container) {
-  return [...container.querySelectorAll(".vendor-split-row")].map((row, index) => ({
-    serviceId: row.dataset.serviceId || "",
-    splitSequence: index + 1,
-    serviceType: normalizeVendorSplitType(row.querySelector('[data-vendor-split-field="serviceType"]').value),
-    activityText: row.querySelector('[data-vendor-split-field="activityText"]').value,
-    vendorId: "",
-    vendorName: row.querySelector('[data-vendor-split-field="vendorName"]').value,
-    status: "DRAFT",
-  }));
+  return [...container.querySelectorAll(".vendor-split-row")].map((row, index) => {
+    const serviceType = normalizeVendorSplitType(
+      row.querySelector('[data-vendor-split-field="serviceType"]').value,
+    );
+    const activityText = row.querySelector('[data-vendor-split-field="activityText"]').value.trim();
+    const vendorName = row.querySelector('[data-vendor-split-field="vendorName"]').value.trim();
+    const matchedRate = vendorSplitRate(serviceType, vendorName, activityText);
+    const manualRateInput = row.querySelector('[data-vendor-split-field="unitRateIdr"]');
+    const unitRateIdr = serviceType === "ADDITIONAL_SERVICE"
+      ? (manualRateInput?.value === "" ? null : Number(manualRateInput?.value))
+      : (matchedRate?.unitRateIdr ?? null);
+    const adultRateIdr = matchedRate?.adultRateIdr ?? null;
+    const childRateIdr = matchedRate?.childRateIdr ?? null;
+    const rateReady = hasKnownRate(adultRateIdr)
+      || hasKnownRate(childRateIdr)
+      || hasKnownRate(unitRateIdr);
+    return {
+      serviceId: row.dataset.serviceId || "",
+      splitSequence: index + 1,
+      serviceType,
+      activityText,
+      vendorId: "",
+      vendorName,
+      serviceMasterId: matchedRate?.serviceMasterId || "",
+      priceSource: serviceType === "ADDITIONAL_SERVICE" ? "MANUAL" : (matchedRate?.priceSource || "NONE"),
+      adultRateIdr,
+      childRateIdr,
+      unitRateIdr,
+      priceBasis: serviceType === "ADDITIONAL_SERVICE"
+        ? (row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE")
+        : (matchedRate?.priceBasis || "PER_SERVICE"),
+      quantity: Number(row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1),
+      currency: "IDR",
+      rateStatus: rateReady ? "RATE_READY" : "PENDING_RATE",
+      manualPriceReason: "",
+      rateValidTo: matchedRate?.validTo || "",
+      rateSnapshotAt: row.dataset.rateSnapshotAt || new Date().toISOString(),
+      status: "DRAFT",
+    };
+  });
 }
 
 function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
@@ -1051,26 +1211,94 @@ function populateVendorIntake(context) {
 }
 
 function renderVendorSuggestions(suggestions = {}) {
+  const unique = (values) => [...new Set(
+    values.map((value) => String(value || "").trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right));
+  const options = (values) => unique(values)
+    .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
   $("#vendor-name-options").innerHTML = (suggestions.vendorNames || [])
     .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
   $("#vendor-service-options").innerHTML = (suggestions.vendorServices || [])
     .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
   $("#toc-service-options").innerHTML = (suggestions.tocNames || [])
     .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  $("#transport-name-options").innerHTML = options(
+    (suggestions.transportRates || []).map((rate) => rate.vendorName),
+  );
+  $("#transport-service-options").innerHTML = options(
+    (suggestions.transportRates || []).map((rate) => rate.serviceName),
+  );
+  $("#luggage-van-name-options").innerHTML = options(
+    (suggestions.luggageVanRates || []).map((rate) => rate.vendorName),
+  );
+  $("#luggage-van-service-options").innerHTML = options(
+    (suggestions.luggageVanRates || []).map((rate) => rate.serviceName),
+  );
+}
+
+function refreshVendorServiceOptions(vendorName = "") {
+  const normalizedVendor = String(vendorName || "").trim().toLowerCase();
+  const rates = state.vendorSuggestions.vendorRates || [];
+  const services = rates
+    .filter((rate) =>
+      !normalizedVendor || String(rate.vendorName || "").trim().toLowerCase() === normalizedVendor
+    )
+    .map((rate) => rate.serviceName);
+  $("#vendor-service-options").innerHTML = [...new Set(services)]
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+}
+
+function refreshVendorSplitRow(row, { resetSelection = false } = {}) {
+  if (!row) return;
+  const typeInput = row.querySelector('[data-vendor-split-field="serviceType"]');
+  const vendorInput = row.querySelector('[data-vendor-split-field="vendorName"]');
+  const serviceInput = row.querySelector('[data-vendor-split-field="activityText"]');
+  const type = normalizeVendorSplitType(typeInput?.value);
+  if (!["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"].includes(type)) return;
+  const provider = vendorSplitProviderConfig(type);
+  row.dataset.serviceType = type;
+  row.querySelector("[data-vendor-provider-label]").textContent = provider.label;
+  vendorInput.placeholder = provider.placeholder;
+  vendorInput.readOnly = type === "TOC";
+  if (provider.list) vendorInput.setAttribute("list", provider.list);
+  else vendorInput.removeAttribute("list");
+  const serviceList = vendorSplitServiceList(type);
+  if (serviceList) serviceInput.setAttribute("list", serviceList);
+  else serviceInput.removeAttribute("list");
+  if (resetSelection) {
+    vendorInput.value = type === "TOC" ? "TOC Master" : "";
+    serviceInput.value = "";
+  } else if (type === "TOC") {
+    vendorInput.value = "TOC Master";
+  }
+  if (type === "VENDOR") refreshVendorServiceOptions(vendorInput.value);
+  const existingUnit = row.querySelector('[data-vendor-split-field="unitRateIdr"]')?.value ?? "";
+  const existingBasis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";
+  const existingQuantity = row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1;
+  row.querySelector("[data-vendor-split-rate-panel]").innerHTML = vendorSplitRateMarkup({
+    serviceType: type,
+    vendorName: vendorInput.value,
+    activityText: serviceInput.value,
+    unitRateIdr: existingUnit,
+    priceBasis: existingBasis,
+    quantity: existingQuantity,
+  });
 }
 
 function normalizeVendorSplitType(value) {
   const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  if (normalized === "TRANSPORT") return "VEHICLE";
-  return normalized === "ADDITIONAL_SERVICE" ? "ADDITIONAL_SERVICES" : normalized;
+  if (normalized === "VEHICLE") return "TRANSPORT";
+  return normalized === "ADDITIONAL_SERVICES" ? "ADDITIONAL_SERVICE" : normalized;
 }
 
 function vendorSplitTypeLabel(value) {
   return ({
     VENDOR: "Vendor",
     TOC: "TOC",
-    VEHICLE: "Transport",
-    ADDITIONAL_SERVICES: "Additional Services",
+    TRANSPORT: "Transport",
+    LUGGAGE_VAN: "Luggage Van",
+    ADDITIONAL_SERVICE: "Additional Service",
   })[normalizeVendorSplitType(value)] || String(value || "Vendor");
 }
 
@@ -1317,21 +1545,39 @@ function bindEvents() {
       );
     }
     if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
-      const activity = event.target.closest(".vendor-split-row")
-        ?.querySelector('[data-vendor-split-field="activityText"]');
-      if (activity) {
-        activity.setAttribute(
-          "list",
-          normalizeVendorSplitType(event.target.value) === "TOC"
-            ? "toc-service-options"
-            : "vendor-service-options",
-        );
+      const row = event.target.closest(".vendor-split-row");
+      const type = normalizeVendorSplitType(event.target.value);
+      const recognized = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"].includes(type);
+      if (recognized) refreshVendorSplitRow(row, { resetSelection: row.dataset.serviceType !== type });
+    } else if (event.target.matches(
+      '[data-vendor-split-field="vendorName"], [data-vendor-split-field="activityText"]',
+    )) {
+      refreshVendorSplitRow(event.target.closest(".vendor-split-row"));
+    } else if (event.target.matches('[data-vendor-split-field="unitRateIdr"]')) {
+      const badge = event.target.closest(".vendor-split-row")?.querySelector("[data-vendor-rate-status]");
+      const ready = hasKnownRate(event.target.value);
+      if (badge) {
+        badge.textContent = ready ? "Rate ready" : "Pending rate";
+        badge.className = `vendor-rate-status ${ready ? "ready" : "pending"}`;
+        badge.dataset.vendorRateStatus = "";
       }
     }
   });
   document.body.addEventListener("change", (event) => {
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
       updateVendorDayHotels();
+    }
+  });
+  document.body.addEventListener("focusin", (event) => {
+    if (!event.target.matches('[data-vendor-split-field="activityText"]')) return;
+    const row = event.target.closest(".vendor-split-row");
+    const type = normalizeVendorSplitType(
+      row?.querySelector('[data-vendor-split-field="serviceType"]')?.value,
+    );
+    if (type === "VENDOR") {
+      refreshVendorServiceOptions(
+        row.querySelector('[data-vendor-split-field="vendorName"]').value,
+      );
     }
   });
 

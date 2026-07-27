@@ -2,7 +2,7 @@
 
 Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
-Target sequence: v1.0.8-v1.0.13
+Target sequence: v1.0.8-v1.0.14
 
 ## 1. Purpose
 
@@ -325,12 +325,12 @@ event and recipient records remain available for the future lifecycle.
 | VB-00 | planning baseline | Data/status/API/UI contract | `DONE` | This baseline is approved and linked from project progress. |
 | VB-01 | v1.0.8 | Vendor role dashboard + generic Notification Inbox + claim/read-only concurrency | `PENDING` | Four independently scrolling dashboard sections follow the approved filters; two-user claim test passes; shared Inbox displays only job-description-permitted totals/information. |
 | VB-02 | v1.0.9a | Vendor/program/contact master cache + Universal Lookup | `IN PROGRESS` | Google Sheet source of truth now supplies 82 TOC entries and 232 Vendor rate rows through 2026-12-16; every desktop startup cross-checks content checksum and atomically refreshes SQLite only when changed. Full keyboard navigation, aliases, contacts, stable official vendor IDs, and fallback UAT remain. |
-| VB-03 | v1.0.9b | Daywise + micro-item + supplier split workspace | `IN PROGRESS` | New itinerary can be fully split without raw Sheet editing; each Day derives active/changeover hotels, requires Start Time before Split, permits optional Finish Time, uses a wide resizable two-pane editor, and Save Split persists only to local SQLite until a separate controlled Generate/online stage. |
-| VB-04 | v1.0.10 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
-| VB-05 | v1.0.10/12 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
-| VB-06 | v1.0.11 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
-| VB-07 | v1.0.12 | Completion gate + Vendor publication | `PENDING` | Incomplete item blocks completion; resolved case notifies Reservation. |
-| VB-08 | v1.0.13 | Reservation drill-down + communication viewer | `PENDING` | Daywise, item, status, PIC, and permitted email trail load on demand. |
+| VB-03 | v1.0.9-v1.0.10 | Daywise + micro-item + supplier split workspace | `IN PROGRESS` | New itinerary can be fully split without raw Sheet editing; each Day derives active/changeover hotels, requires Start Time before Split, permits optional Finish Time, uses a wide resizable two-pane editor, and Save Split persists only to local SQLite until a separate controlled Generate/online stage. Five type-aware catalogues and independent booking/rate status are implemented in v1.0.10. |
+| VB-04 | v1.0.11 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
+| VB-05 | v1.0.11/13 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
+| VB-06 | v1.0.12 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
+| VB-07 | v1.0.13 | Completion gate + Vendor publication | `PENDING` | Incomplete item blocks completion; resolved case notifies Reservation. |
+| VB-08 | v1.0.14 | Reservation drill-down + communication viewer | `PENDING` | Daywise, item, status, PIC, and permitted email trail load on demand. |
 
 ## 14. First implementation sprint — VB-01
 
@@ -428,8 +428,14 @@ Implemented:
   Day Wise paste field, and side-by-side source itinerary;
 - aligned Arrival/Departure summary groups and an editable Tour Day Header
   beside each Day Wise service date, persisted to `TOUR_DAYS.day_title`;
-- per-day pre-generation split for Vendor, TOC, Vehicle, and Additional
-  Services;
+- per-day pre-generation split for Vendor, TOC, Transport, Luggage Van, and
+  Additional Service;
+- type-aware provider/service lookup and rate snapshot; current Google master
+  data supplies Vendor and TOC while clearly labeled DEV fixtures temporarily
+  supply Transport, Luggage Van, and Vendor `Additional` services `Garland`
+  and `Water`;
+- independent booking and rate states: Additional Service may save as
+  `PENDING_RATE`, while email, WhatsApp, or portal booking remains available;
 - transactional local SQLite tables and stable IDs;
 - controlled `vendor.intake.save` Apps Script endpoint, source-version check,
   role gate, lock, idempotency, online schema alignment, and audit;

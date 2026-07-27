@@ -209,26 +209,36 @@ function saveVendorIntake_(request, actor) {
       }, actor, now);
       (day.splits || []).forEach((split, index) => {
         const serviceId = split.serviceId || uuid_("SVC");
+        const serviceType = normalizeVendorSplitType_(split.serviceType);
         upsertVersionedRecord_("SERVICES", "service_id", serviceId, {
           service_id: serviceId,
           tour_day_id: dayId,
           tour_id: tour.tour_id,
           revision_id: intake.sourceRevisionId || "",
           service_sequence: index + 1,
-          service_type: String(split.serviceType || "VENDOR").toUpperCase(),
+          service_type: serviceType,
           service_name: split.activityText || "",
           service_description: split.activityText || "",
           start_time: "",
           end_time: "",
           pickup_location: "",
           dropoff_location: "",
-          quantity: 1,
-          unit: "SERVICE",
-          booking_required: String(split.serviceType || "").toUpperCase() === "VENDOR",
+          quantity: Number(split.quantity || 1),
+          unit: split.priceBasis || "PER_SERVICE",
+          booking_required: serviceType !== "TOC",
           status: "SPLIT_READY",
           notes: "",
           suggested_vendor_id: split.vendorId || "",
           suggested_vendor_name: split.vendorName || "",
+          service_master_id: split.serviceMasterId || "",
+          price_source: split.priceSource || "NONE",
+          adult_rate_idr: split.adultRateIdr ?? "",
+          child_rate_idr: split.childRateIdr ?? "",
+          unit_rate_idr: split.unitRateIdr ?? "",
+          currency: split.currency || "IDR",
+          rate_status: split.rateStatus || "PENDING_RATE",
+          rate_valid_to: split.rateValidTo || "",
+          rate_snapshot_at: split.rateSnapshotAt || now,
           record_version: 1,
           created_at: now,
           created_by: actor.employeeId,
@@ -299,7 +309,7 @@ function validateVendorIntakePayload_(intake) {
       throw apiError_("VALIDATION_ERROR", "Adult, Child, and Infant must be whole numbers starting from 0.");
     }
   });
-  const allowedTypes = ["VENDOR", "TOC", "VEHICLE", "ADDITIONAL_SERVICES"];
+  const allowedTypes = ["VENDOR", "TOC", "TRANSPORT", "LUGGAGE_VAN", "ADDITIONAL_SERVICE"];
   const dayNumbers = {};
   (intake.days || []).forEach((day) => {
     const number = Number(day.dayNumber);
@@ -315,11 +325,24 @@ function validateVendorIntakePayload_(intake) {
       throw apiError_("VALIDATION_ERROR", `Day ${number} Finish Time must use HH:MM.`);
     }
     (day.splits || []).forEach((split) => {
-      if (!allowedTypes.includes(String(split.serviceType || "").toUpperCase())) {
+      if (!allowedTypes.includes(normalizeVendorSplitType_(split.serviceType))) {
         throw apiError_("VALIDATION_ERROR", "Unsupported Vendor micro split type.");
+      }
+      if (!String(split.activityText || "").trim()) {
+        throw apiError_("VALIDATION_ERROR", `Day ${number} Vendor Service is required.`);
+      }
+      if (!["RATE_READY", "PENDING_RATE"].includes(String(split.rateStatus || "PENDING_RATE"))) {
+        throw apiError_("VALIDATION_ERROR", `Day ${number} rate status is invalid.`);
       }
     });
   });
+}
+
+function normalizeVendorSplitType_(value) {
+  const normalized = String(value || "VENDOR").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (normalized === "VEHICLE") return "TRANSPORT";
+  if (normalized === "ADDITIONAL_SERVICES") return "ADDITIONAL_SERVICE";
+  return normalized;
 }
 
 function validateVendorSource_(request) {
@@ -348,7 +371,11 @@ function ensureVendorSchema_() {
     "created_at", "created_by", "updated_at", "updated_by",
   ]);
   ensureHeaders_("TOUR_DAYS", ["start_time", "finish_time"]);
-  ensureHeaders_("SERVICES", ["suggested_vendor_id", "suggested_vendor_name"]);
+  ensureHeaders_("SERVICES", [
+    "suggested_vendor_id", "suggested_vendor_name", "service_master_id",
+    "price_source", "adult_rate_idr", "child_rate_idr", "unit_rate_idr",
+    "currency", "rate_status", "rate_valid_to", "rate_snapshot_at",
+  ]);
 }
 
 function publishDepartmentResult_(request, actor) {

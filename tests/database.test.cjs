@@ -3,6 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const SQLite = require("better-sqlite3");
 const { LocalDatabase } = require("../desktop/lib/database.cjs");
 const { SyncService } = require("../desktop/lib/sync-service.cjs");
 const { BackendHealthService } = require("../desktop/lib/backend-health-service.cjs");
@@ -18,6 +19,42 @@ function withDatabase(run) {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
+
+test("migrates legacy Vehicle and Additional Services split types without losing drafts", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-legacy-split-"));
+  const filePath = path.join(directory, "test.sqlite");
+  const legacy = new SQLite(filePath);
+  legacy.exec(`
+    CREATE TABLE vendor_service_splits (
+      service_id TEXT PRIMARY KEY,
+      tour_day_id TEXT NOT NULL,
+      split_sequence INTEGER NOT NULL,
+      service_type TEXT NOT NULL CHECK(service_type IN ('VENDOR','TOC','VEHICLE','ADDITIONAL_SERVICES')),
+      activity_text TEXT NOT NULL DEFAULT '',
+      vendor_id TEXT,
+      vendor_name TEXT,
+      status TEXT NOT NULL DEFAULT 'DRAFT'
+    );
+    INSERT INTO vendor_service_splits VALUES
+      ('SVC-VEHICLE', 'DAY-1', 1, 'VEHICLE', 'Transfer', '', 'Legacy Transport', 'DRAFT'),
+      ('SVC-ADDITIONAL', 'DAY-1', 2, 'ADDITIONAL_SERVICES', 'Handling', '', '', 'DRAFT');
+  `);
+  legacy.close();
+  const database = new LocalDatabase(filePath);
+  try {
+    const rows = database.db.prepare(`
+      SELECT service_id, service_type, rate_status
+      FROM vendor_service_splits ORDER BY split_sequence
+    `).all();
+    assert.deepEqual(rows, [
+      { service_id: "SVC-VEHICLE", service_type: "TRANSPORT", rate_status: "PENDING_RATE" },
+      { service_id: "SVC-ADDITIONAL", service_type: "ADDITIONAL_SERVICE", rate_status: "PENDING_RATE" },
+    ]);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("creates, updates, and marks a valid draft ready", () => withDatabase((database) => {
   const created = database.saveDraft({
@@ -311,6 +348,7 @@ test("persists Vendor intake with unlimited hotel rows, daywise text, and micro 
   assert.match(saved.hotels[0].hotelStayId, /^HST-/);
   assert.match(saved.days[0].tourDayId, /^TDAY-/);
   assert.match(saved.days[0].splits[0].serviceId, /^SVC-/);
+  assert.equal(saved.days[0].splits[0].serviceType, "TRANSPORT");
 
   const updated = database.saveVendorIntakeDraft({
     ...saved,
@@ -376,14 +414,22 @@ test("replaces the local TOC and Vendor cache from online master data", () => {
 
     const active = database.getLocalVendorSuggestions("2026-12-16");
     assert.deepEqual(active.tocNames, ["Test Temple Entrance"]);
-    assert.deepEqual(active.vendorNames, ["Test Vendor"]);
-    assert.deepEqual(active.vendorServices, ["Test Dinner"]);
+    assert.deepEqual(active.vendorNames, ["Additional", "Test Vendor"]);
+    assert.deepEqual(active.vendorServices, ["Garland", "Test Dinner", "Water"]);
+    assert.equal(active.transportRates.length, 2);
+    assert.equal(active.luggageVanRates.length, 2);
+    assert.ok(active.vendorRates.some((rate) =>
+      rate.vendorName === "Additional" && rate.serviceName === "Garland"
+    ));
+    assert.ok(active.vendorRates.some((rate) =>
+      rate.vendorName === "Additional" && rate.serviceName === "Water"
+    ));
     assert.equal(active.validTo, "2026-12-16");
 
     const expired = database.getLocalVendorSuggestions("2026-12-17");
     assert.deepEqual(expired.tocNames, []);
-    assert.deepEqual(expired.vendorNames, []);
-    assert.deepEqual(expired.vendorServices, []);
+    assert.deepEqual(expired.vendorNames, ["Additional"]);
+    assert.deepEqual(expired.vendorServices, ["Garland", "Water"]);
   } finally {
     database.close();
     fs.rmSync(directory, { recursive: true, force: true });
@@ -417,4 +463,30 @@ test("rejects invalid pax, duplicate day numbers, and unsupported Vendor split t
     ...base,
     days: [{ dayNumber: 1, startTime: "25:00", splits: [] }],
   }), /Start Time.*HH:MM/i);
+}));
+
+test("keeps Additional Service bookable while its manual rate is pending", () => withDatabase((database) => {
+  const saved = database.saveVendorIntakeDraft({
+    customerCode: "DEV/PENDING-RATE",
+    customerName: "Pending Rate Test",
+    days: [{
+      dayNumber: 1,
+      startTime: "09:00",
+      splits: [{
+        serviceType: "ADDITIONAL_SERVICE",
+        activityText: "Special handling",
+        vendorName: "",
+        unitRateIdr: null,
+        priceBasis: "PER_SERVICE",
+        quantity: 1,
+        rateStatus: "PENDING_RATE",
+        status: "DRAFT",
+      }],
+    }],
+  });
+  const split = saved.days[0].splits[0];
+  assert.equal(split.serviceType, "ADDITIONAL_SERVICE");
+  assert.equal(split.rateStatus, "PENDING_RATE");
+  assert.equal(split.unitRateIdr, null);
+  assert.equal(split.status, "DRAFT");
 }));

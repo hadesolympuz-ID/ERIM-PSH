@@ -369,6 +369,10 @@ class GoogleWorkspaceService {
         ),
       ]),
       tocNames: localSuggestions.tocNames,
+      vendorRates: localSuggestions.vendorRates,
+      tocRates: localSuggestions.tocRates,
+      transportRates: localSuggestions.transportRates,
+      luggageVanRates: localSuggestions.luggageVanRates,
       localMasterValidTo: localSuggestions.validTo,
     };
     const source = publications

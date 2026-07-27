@@ -10,6 +10,84 @@ const MODULES = [
   "MANAGER_ADMIN",
 ];
 
+const VENDOR_SPLIT_TYPES = new Set([
+  "VENDOR",
+  "TOC",
+  "TRANSPORT",
+  "LUGGAGE_VAN",
+  "ADDITIONAL_SERVICE",
+]);
+
+const DEV_VENDOR_RATE_FIXTURES = [
+  {
+    serviceMasterId: "DEV-VR-ADDITIONAL-GARLAND",
+    vendorName: "Additional",
+    serviceName: "Garland",
+    unitRateIdr: 50000,
+    priceBasis: "PER_ITEM",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+  {
+    serviceMasterId: "DEV-VR-ADDITIONAL-WATER",
+    vendorName: "Additional",
+    serviceName: "Water",
+    unitRateIdr: 10000,
+    priceBasis: "PER_BOTTLE",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+];
+
+const DEV_TRANSPORT_RATE_FIXTURES = [
+  {
+    serviceMasterId: "DEV-TR-AIRPORT-TRANSFER",
+    vendorName: "DEV Transport Partner",
+    serviceName: "Airport Transfer",
+    unitRateIdr: 350000,
+    priceBasis: "PER_VEHICLE",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+  {
+    serviceMasterId: "DEV-TR-FULL-DAY",
+    vendorName: "DEV Transport Partner",
+    serviceName: "Full Day Transport",
+    unitRateIdr: 700000,
+    priceBasis: "PER_VEHICLE",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+];
+
+const DEV_LUGGAGE_VAN_RATE_FIXTURES = [
+  {
+    serviceMasterId: "DEV-LV-AIRPORT-HOTEL",
+    vendorName: "DEV Luggage Van Partner",
+    serviceName: "Airport - Hotel Luggage Van",
+    unitRateIdr: 450000,
+    priceBasis: "PER_VEHICLE",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+  {
+    serviceMasterId: "DEV-LV-FULL-DAY",
+    vendorName: "DEV Luggage Van Partner",
+    serviceName: "Full Day Luggage Van",
+    unitRateIdr: 800000,
+    priceBasis: "PER_VEHICLE",
+    validTo: "2099-12-31",
+    priceSource: "DEV_DUMMY",
+  },
+];
+
+function normalizeVendorSplitType(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (normalized === "VEHICLE") return "TRANSPORT";
+  if (normalized === "ADDITIONAL_SERVICES") return "ADDITIONAL_SERVICE";
+  return normalized;
+}
+
 class LocalDatabase {
   constructor(filePath) {
     this.filePath = filePath;
@@ -198,10 +276,22 @@ class LocalDatabase {
         service_id TEXT PRIMARY KEY,
         tour_day_id TEXT NOT NULL,
         split_sequence INTEGER NOT NULL,
-        service_type TEXT NOT NULL CHECK(service_type IN ('VENDOR','TOC','VEHICLE','ADDITIONAL_SERVICES')),
+        service_type TEXT NOT NULL CHECK(service_type IN ('VENDOR','TOC','TRANSPORT','LUGGAGE_VAN','ADDITIONAL_SERVICE')),
         activity_text TEXT NOT NULL DEFAULT '',
         vendor_id TEXT,
         vendor_name TEXT,
+        service_master_id TEXT,
+        price_source TEXT NOT NULL DEFAULT 'NONE',
+        adult_rate_idr REAL,
+        child_rate_idr REAL,
+        unit_rate_idr REAL,
+        price_basis TEXT NOT NULL DEFAULT 'PER_SERVICE',
+        quantity REAL NOT NULL DEFAULT 1,
+        currency TEXT NOT NULL DEFAULT 'IDR',
+        rate_status TEXT NOT NULL DEFAULT 'PENDING_RATE' CHECK(rate_status IN ('RATE_READY','PENDING_RATE')),
+        manual_price_reason TEXT NOT NULL DEFAULT '',
+        rate_valid_to TEXT NOT NULL DEFAULT '',
+        rate_snapshot_at TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'DRAFT',
         FOREIGN KEY(tour_day_id) REFERENCES vendor_day_drafts(tour_day_id) ON DELETE CASCADE
       );
@@ -263,6 +353,7 @@ class LocalDatabase {
         status TEXT NOT NULL
       );
     `);
+    this.migrateVendorServiceSplits();
     this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
     this.ensureColumn("vendor_intake_drafts", "adult_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "child_pax", "INTEGER NOT NULL DEFAULT 0");
@@ -270,6 +361,89 @@ class LocalDatabase {
     this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "finish_time", "TEXT NOT NULL DEFAULT ''");
+  }
+
+  migrateVendorServiceSplits() {
+    const table = this.db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vendor_service_splits'
+    `).get();
+    const columns = this.db.prepare("PRAGMA table_info(vendor_service_splits)").all();
+    const columnNames = new Set(columns.map((column) => column.name));
+    if (
+      String(table?.sql || "").includes("'LUGGAGE_VAN'")
+      && columnNames.has("rate_status")
+      && columnNames.has("service_master_id")
+    ) return;
+
+    const expression = (name, fallback) => columnNames.has(name) ? name : fallback;
+    this.db.pragma("foreign_keys = OFF");
+    try {
+      this.db.transaction(() => {
+        this.db.exec(`
+          DROP TABLE IF EXISTS vendor_service_splits_v2;
+          CREATE TABLE vendor_service_splits_v2 (
+            service_id TEXT PRIMARY KEY,
+            tour_day_id TEXT NOT NULL,
+            split_sequence INTEGER NOT NULL,
+            service_type TEXT NOT NULL CHECK(service_type IN ('VENDOR','TOC','TRANSPORT','LUGGAGE_VAN','ADDITIONAL_SERVICE')),
+            activity_text TEXT NOT NULL DEFAULT '',
+            vendor_id TEXT,
+            vendor_name TEXT,
+            service_master_id TEXT,
+            price_source TEXT NOT NULL DEFAULT 'NONE',
+            adult_rate_idr REAL,
+            child_rate_idr REAL,
+            unit_rate_idr REAL,
+            price_basis TEXT NOT NULL DEFAULT 'PER_SERVICE',
+            quantity REAL NOT NULL DEFAULT 1,
+            currency TEXT NOT NULL DEFAULT 'IDR',
+            rate_status TEXT NOT NULL DEFAULT 'PENDING_RATE' CHECK(rate_status IN ('RATE_READY','PENDING_RATE')),
+            manual_price_reason TEXT NOT NULL DEFAULT '',
+            rate_valid_to TEXT NOT NULL DEFAULT '',
+            rate_snapshot_at TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'DRAFT',
+            FOREIGN KEY(tour_day_id) REFERENCES vendor_day_drafts(tour_day_id) ON DELETE CASCADE
+          );
+        `);
+        this.db.exec(`
+          INSERT INTO vendor_service_splits_v2 (
+            service_id, tour_day_id, split_sequence, service_type, activity_text,
+            vendor_id, vendor_name, service_master_id, price_source,
+            adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+            currency, rate_status, manual_price_reason, rate_valid_to,
+            rate_snapshot_at, status
+          )
+          SELECT
+            service_id, tour_day_id, split_sequence,
+            CASE
+              WHEN service_type = 'VEHICLE' THEN 'TRANSPORT'
+              WHEN service_type = 'ADDITIONAL_SERVICES' THEN 'ADDITIONAL_SERVICE'
+              ELSE service_type
+            END,
+            activity_text, vendor_id, vendor_name,
+            ${expression("service_master_id", "NULL")},
+            ${expression("price_source", "'NONE'")},
+            ${expression("adult_rate_idr", "NULL")},
+            ${expression("child_rate_idr", "NULL")},
+            ${expression("unit_rate_idr", "NULL")},
+            ${expression("price_basis", "'PER_SERVICE'")},
+            ${expression("quantity", "1")},
+            ${expression("currency", "'IDR'")},
+            ${expression("rate_status", "'PENDING_RATE'")},
+            ${expression("manual_price_reason", "''")},
+            ${expression("rate_valid_to", "''")},
+            ${expression("rate_snapshot_at", "''")},
+            status
+          FROM vendor_service_splits;
+          DROP TABLE vendor_service_splits;
+          ALTER TABLE vendor_service_splits_v2 RENAME TO vendor_service_splits;
+          CREATE INDEX idx_vendor_split_day
+            ON vendor_service_splits(tour_day_id, split_sequence);
+        `);
+      })();
+    } finally {
+      this.db.pragma("foreign_keys = ON");
+    }
   }
 
   ensureColumn(tableName, columnName, definition) {
@@ -445,13 +619,13 @@ class LocalDatabase {
 
   getLocalVendorSuggestions(asOfDate = new Date().toISOString().slice(0, 10)) {
     const activeVendorRates = this.db.prepare(`
-      SELECT vendor_name, service_name
+      SELECT vendor_rate_id, vendor_name, service_name, adult_rate_idr, child_rate_idr, valid_to
       FROM local_vendor_rate_master
       WHERE valid_to >= ?
       ORDER BY vendor_name COLLATE NOCASE, service_name COLLATE NOCASE
     `).all(asOfDate);
     const activeToc = this.db.prepare(`
-      SELECT toc_name
+      SELECT toc_id, toc_name, adult_rate_idr, child_rate_idr, valid_to
       FROM local_toc_master
       WHERE valid_to >= ?
       ORDER BY toc_name COLLATE NOCASE
@@ -467,10 +641,39 @@ class LocalDatabase {
     const unique = (values) => [...new Set(
       values.map((value) => String(value || "").trim()).filter(Boolean),
     )].sort((a, b) => a.localeCompare(b));
+    const vendorRates = [
+      ...activeVendorRates.map((row) => ({
+        serviceMasterId: row.vendor_rate_id,
+        vendorName: row.vendor_name,
+        serviceName: row.service_name,
+        adultRateIdr: row.adult_rate_idr,
+        childRateIdr: row.child_rate_idr,
+        unitRateIdr: null,
+        priceBasis: "AS_CONTRACT",
+        validTo: row.valid_to,
+        priceSource: "VENDOR_RATE_MASTER",
+      })),
+      ...DEV_VENDOR_RATE_FIXTURES,
+    ];
+    const tocRates = activeToc.map((row) => ({
+      serviceMasterId: row.toc_id,
+      vendorName: "TOC Master",
+      serviceName: row.toc_name,
+      adultRateIdr: row.adult_rate_idr,
+      childRateIdr: row.child_rate_idr,
+      unitRateIdr: null,
+      priceBasis: "PER_PAX",
+      validTo: row.valid_to,
+      priceSource: "TOC_MASTER",
+    }));
     return {
-      vendorNames: unique(activeVendorRates.map((row) => row.vendor_name)),
-      vendorServices: unique(activeVendorRates.map((row) => row.service_name)),
+      vendorNames: unique(vendorRates.map((row) => row.vendorName)),
+      vendorServices: unique(vendorRates.map((row) => row.serviceName)),
       tocNames: unique(activeToc.map((row) => row.toc_name)),
+      vendorRates,
+      tocRates,
+      transportRates: DEV_TRANSPORT_RATE_FIXTURES,
+      luggageVanRates: DEV_LUGGAGE_VAN_RATE_FIXTURES,
       validTo: validity.valid_to || "",
     };
   }
@@ -646,7 +849,10 @@ class LocalDatabase {
     `).all(draft.vendor_draft_id);
     const splitStatement = this.db.prepare(`
       SELECT service_id, split_sequence, service_type, activity_text,
-        vendor_id, vendor_name, status
+        vendor_id, vendor_name, service_master_id, price_source,
+        adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+        currency, rate_status, manual_price_reason, rate_valid_to,
+        rate_snapshot_at, status
       FROM vendor_service_splits WHERE tour_day_id = ? ORDER BY split_sequence
     `);
     return {
@@ -700,6 +906,18 @@ class LocalDatabase {
           activityText: split.activity_text,
           vendorId: split.vendor_id || "",
           vendorName: split.vendor_name || "",
+          serviceMasterId: split.service_master_id || "",
+          priceSource: split.price_source || "NONE",
+          adultRateIdr: split.adult_rate_idr,
+          childRateIdr: split.child_rate_idr,
+          unitRateIdr: split.unit_rate_idr,
+          priceBasis: split.price_basis || "PER_SERVICE",
+          quantity: Number(split.quantity ?? 1),
+          currency: split.currency || "IDR",
+          rateStatus: split.rate_status || "PENDING_RATE",
+          manualPriceReason: split.manual_price_reason || "",
+          rateValidTo: split.rate_valid_to || "",
+          rateSnapshotAt: split.rate_snapshot_at || "",
           status: split.status,
         })),
       })),
@@ -718,7 +936,6 @@ class LocalDatabase {
     const code = String(input.customerCode || "").trim().toUpperCase();
     if (!code) throw new Error("Customer Code is required.");
     if (!String(input.customerName || "").trim()) throw new Error("Customer Name is required.");
-    const allowedTypes = new Set(["VENDOR", "TOC", "VEHICLE", "ADDITIONAL_SERVICES"]);
     const existing = this.getVendorIntakeDraftByCode(code);
     const pax = {
       adultPax: Number(input.adultPax ?? 0),
@@ -748,8 +965,19 @@ class LocalDatabase {
         throw new Error(`Day ${dayNumber} Finish Time must use HH:MM.`);
       }
       (day.splits || []).forEach((split) => {
-        if (!allowedTypes.has(String(split.serviceType || "").toUpperCase())) {
-          throw new Error("Split type must be Vendor, TOC, Vehicle, or Additional Services.");
+        const serviceType = normalizeVendorSplitType(split.serviceType);
+        if (!VENDOR_SPLIT_TYPES.has(serviceType)) {
+          throw new Error("Split type must be Vendor, TOC, Transport, Luggage Van, or Additional Service.");
+        }
+        if (!String(split.activityText || "").trim()) {
+          throw new Error(`Day ${dayNumber} Vendor Service is required for every split item.`);
+        }
+        const quantity = Number(split.quantity ?? 1);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error(`Day ${dayNumber} split quantity must be greater than 0.`);
+        }
+        if (!["RATE_READY", "PENDING_RATE"].includes(String(split.rateStatus || "PENDING_RATE"))) {
+          throw new Error(`Day ${dayNumber} split rate status is invalid.`);
         }
       });
     });
@@ -841,8 +1069,11 @@ class LocalDatabase {
       const insertSplit = this.db.prepare(`
         INSERT INTO vendor_service_splits (
           service_id, tour_day_id, split_sequence, service_type,
-          activity_text, vendor_id, vendor_name, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          activity_text, vendor_id, vendor_name, service_master_id, price_source,
+          adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+          currency, rate_status, manual_price_reason, rate_valid_to,
+          rate_snapshot_at, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       days.forEach((day) => {
         const dayId = day.tourDayId || this.id("TDAY");
@@ -853,9 +1084,17 @@ class LocalDatabase {
         );
         (day.splits || []).forEach((split, index) => insertSplit.run(
           split.serviceId || this.id("SVC"), dayId, index + 1,
-          String(split.serviceType || "VENDOR").toUpperCase(),
+          normalizeVendorSplitType(split.serviceType || "VENDOR"),
           String(split.activityText || ""), split.vendorId || "",
-          String(split.vendorName || ""), split.status || "DRAFT",
+          String(split.vendorName || ""), split.serviceMasterId || "",
+          split.priceSource || "NONE",
+          split.adultRateIdr === "" ? null : (split.adultRateIdr ?? null),
+          split.childRateIdr === "" ? null : (split.childRateIdr ?? null),
+          split.unitRateIdr === "" ? null : (split.unitRateIdr ?? null),
+          split.priceBasis || "PER_SERVICE", Number(split.quantity ?? 1),
+          split.currency || "IDR", split.rateStatus || "PENDING_RATE",
+          String(split.manualPriceReason || ""), split.rateValidTo || "",
+          split.rateSnapshotAt || now, split.status || "DRAFT",
         ));
       });
     })();
