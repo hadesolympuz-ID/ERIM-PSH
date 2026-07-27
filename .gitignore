@@ -34,6 +34,10 @@ secrets/
 google-session.secure
 google-auth-diagnostic.log
 
+# Business-sensitive local master/rate cache (never publish to GitHub)
+master-rates.seed.json
+desktop/data/
+
 # Local tooling
 .DS_Store
 Thumbs.db

@@ -93,3 +93,75 @@ test("downloads the latest itinerary into the managed folder and records an appe
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("cross-checks Google Sheet master data and refreshes SQLite only when content changes", async () => {
+  let syncState = null;
+  let replaced = null;
+  const database = {
+    getPublicSettings: () => ({ spreadsheetId: "SHEET-TEST" }),
+    getMasterDataSyncState: () => syncState,
+    replaceMasterData: (input) => {
+      replaced = input;
+      syncState = {
+        checksum: input.checksum,
+        tocRows: input.toc.length,
+        vendorRateRows: input.vendorRates.length,
+      };
+      return { toc: { total: input.toc.length }, vendorRates: { total: input.vendorRates.length } };
+    },
+  };
+  const service = new GoogleWorkspaceService({
+    database,
+    authService: null,
+    chooseFile: async () => null,
+  });
+  const records = {
+    TOC_MASTER: [{
+      toc_id: "TOC-1",
+      toc_name: "Temple Entrance",
+      adult_rate_idr: 100000,
+      child_rate_idr: 50000,
+      child_age: "3-11",
+      notes: "",
+      valid_to: "2026-12-16",
+      source_sheet: "Entrance",
+      source_row: 2,
+      updated_at: "2026-07-27T00:00:00.000Z",
+    }],
+    VENDOR_RATE_MASTER: [{
+      vendor_rate_id: "VR-1",
+      service_name: "Dinner",
+      vendor_name: "Vendor A",
+      adult_rate_idr: 200000,
+      child_rate_idr: 100000,
+      notes: "",
+      description: "",
+      contract_validity: "",
+      valid_to: "2026-12-16",
+      source_sheet: "Plan Rates 2026",
+      source_row: 2,
+      updated_at: "2026-07-27T00:00:00.000Z",
+    }],
+    MASTER_DATA_STATE: [{
+      master_key: "TOC_VENDOR_RATES",
+      version: "TEST-V1",
+      checksum: "",
+      updated_at: "2026-07-27T00:00:00.000Z",
+      transport_rate_rows: 0,
+    }],
+  };
+  service.sheetRecords = async (sheetName) => records[sheetName];
+
+  const first = await service.syncMasterDataCache();
+  assert.equal(first.status, "SYNCED");
+  assert.equal(first.tocRows, 1);
+  assert.equal(first.vendorRateRows, 1);
+  assert.equal(replaced.sourceVersion, "TEST-V1");
+  assert.equal(replaced.toc[0].tocName, "Temple Entrance");
+  assert.equal(replaced.vendorRates[0].vendorName, "Vendor A");
+
+  replaced = null;
+  const second = await service.syncMasterDataCache();
+  assert.equal(second.status, "CURRENT");
+  assert.equal(replaced, null);
+});

@@ -150,20 +150,39 @@
                 <input type="hidden" name="driveFileId" />
                 <input type="hidden" name="driveFileName" />
                 <input type="hidden" name="driveFileUrl" />
+                <datalist id="vendor-split-type-options">
+                  <option value="Vendor"></option>
+                  <option value="TOC"></option>
+                  <option value="Transport"></option>
+                  <option value="Additional Services"></option>
+                </datalist>
+                <datalist id="vendor-name-options"></datalist>
+                <datalist id="vendor-service-options"></datalist>
+                <datalist id="toc-service-options"></datalist>
                 <section class="vendor-summary-fields">
-                  <label>Customer Code<input name="customerCode" readonly /></label>
-                  <label>Customer Name<input name="customerName" required /></label>
-                  <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
-                  <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
-                  <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
-                  <label>Arrival Date<input name="arrivalDate" type="date" required /></label>
-                  <label>Arrival Flight<input name="arrivalFlight" /></label>
-                  <label>Arrival Time<input name="arrivalTime" type="time" /></label>
-                  <label>Arrival Sector<input name="arrivalSector" /></label>
-                  <label>Departure Date<input name="departureDate" type="date" required /></label>
-                  <label>Departure Flight<input name="departureFlight" /></label>
-                  <label>Departure Time<input name="departureTime" type="time" /></label>
-                  <label>Departure Sector<input name="departureSector" /></label>
+                  <div class="vendor-identity-fields">
+                    <label>Customer Code<input name="customerCode" readonly /></label>
+                    <label>Customer Name<input name="customerName" required /></label>
+                    <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
+                    <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
+                    <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
+                  </div>
+                  <div class="vendor-travel-fields">
+                    <div class="vendor-travel-group">
+                      <strong>Arrival</strong>
+                      <label>Date<input name="arrivalDate" type="date" required /></label>
+                      <label>Flight<input name="arrivalFlight" /></label>
+                      <label>Time<input name="arrivalTime" type="time" /></label>
+                      <label>Sector<input name="arrivalSector" /></label>
+                    </div>
+                    <div class="vendor-travel-group">
+                      <strong>Departure</strong>
+                      <label>Date<input name="departureDate" type="date" required /></label>
+                      <label>Flight<input name="departureFlight" /></label>
+                      <label>Time<input name="departureTime" type="time" /></label>
+                      <label>Sector<input name="departureSector" /></label>
+                    </div>
+                  </div>
                 </section>
                 <section class="vendor-hotels">
                   <div class="section-heading">
@@ -189,9 +208,9 @@
                   </div>
                 </section>
                 <div class="vendor-intake-actions">
-                  <span id="vendor-save-note" class="muted-text">Review all extracted fields before posting online.</span>
+                  <span id="vendor-save-note" class="muted-text">Split autosaves to this PC. Online posting remains a separate controlled action.</span>
                   <button id="save-vendor-draft" class="button ghost" type="button">Save local draft</button>
-                  <button id="post-vendor-intake" class="button primary" type="button">Post structured data</button>
+                  <button id="post-vendor-intake" class="button primary" type="button">Post structured data online</button>
                 </div>
               </form>
             </div>
@@ -528,6 +547,47 @@
         <div class="dialog-actions">
           <button type="button" id="cancel-revision-dialog" class="button ghost">Cancel</button>
           <button id="post-revision" type="submit" class="button primary" disabled>Post</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="vendor-split-dialog" class="vendor-split-dialog">
+      <form id="vendor-split-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Vendor Booking · Micro split</p>
+            <h2 id="vendor-split-dialog-title">Day Wise</h2>
+            <small id="vendor-split-dialog-meta" class="muted-text">—</small>
+          </div>
+          <button type="button" id="close-vendor-split-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <div class="vendor-split-dialog-layout">
+          <section class="vendor-split-dialog-pane">
+            <div class="pane-heading">
+              <div><strong>Micro split services</strong><small>Type, vendor, and service detail for this Day only.</small></div>
+              <button id="vendor-split-dialog-add" class="button ghost small" type="button">Add service</button>
+            </div>
+            <div id="vendor-split-dialog-list" class="vendor-split-dialog-list"></div>
+          </section>
+          <section class="vendor-split-dialog-pane">
+            <div class="pane-heading">
+              <div><strong>Day Wise & evidence</strong><small>Email thread or other evidence will appear in this panel.</small></div>
+            </div>
+            <div class="vendor-split-evidence">
+              <div class="vendor-split-day-reference">
+                <span>Day Wise reference</span>
+                <strong id="vendor-split-evidence-title">—</strong>
+                <p id="vendor-split-evidence-detail">No Day Wise detail.</p>
+              </div>
+              <div class="empty-notifications">
+                Booking email, confirmation trail, or other linked evidence will be displayed here in the next booking stage.
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-vendor-split-dialog" class="button ghost">Cancel</button>
+          <button type="button" id="apply-vendor-split" class="button primary">Save split locally</button>
         </div>
       </form>
     </dialog>

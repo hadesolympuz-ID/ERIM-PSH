@@ -14,6 +14,7 @@ const state = {
   followups: [],
   vendorDashboard: { urgent: [], pending: [], replied: [], done: [], offline: true },
   vendorIntake: null,
+  vendorSuggestions: { vendorNames: [], vendorServices: [], tocNames: [] },
 };
 
 const moduleDescriptions = {
@@ -34,6 +35,19 @@ function toast(message, error = false) {
   node.className = `toast show${error ? " error" : ""}`;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { node.className = "toast"; }, 3400);
+}
+
+function autoGrowTextarea(node) {
+  node.style.height = "auto";
+  node.style.height = `${node.scrollHeight}px`;
+}
+
+function resizeVendorTextareas() {
+  $$("#vendor-day-list textarea[data-auto-grow]").forEach(autoGrowTextarea);
+}
+
+function flexibleInputSize(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, String(value || "").length + 2));
 }
 
 function formatDate(value) {
@@ -754,6 +768,9 @@ function vendorDateRange(arrivalDate, departureDate, existingDays = []) {
       tourDayId: existing.tourDayId || "",
       dayNumber,
       serviceDate,
+      dayTitle: existing.dayTitle || "",
+      startTime: existing.startTime || "",
+      finishTime: existing.finishTime || "",
       daywiseText: existing.daywiseText || "",
       status: existing.status || "DRAFT",
       splits: existing.splits || [],
@@ -774,39 +791,196 @@ function renderVendorHotels(hotels = []) {
   `).join("") : `<div class="empty-notifications">No hotel extracted. Add hotel manually if required.</div>`;
 }
 
+function collectVendorHotelRows() {
+  return $$("#vendor-hotel-list .hotel-row").map((row, index) => ({
+    hotelStayId: row.dataset.hotelStayId || "",
+    staySequence: index + 1,
+    hotelName: row.querySelector('[data-vendor-hotel-field="hotelName"]').value.trim(),
+    checkInDate: row.querySelector('[data-vendor-hotel-field="checkInDate"]').value,
+    checkOutDate: row.querySelector('[data-vendor-hotel-field="checkOutDate"]').value,
+  }));
+}
+
+function vendorHotelsForDate(hotels = [], serviceDate = "") {
+  if (!serviceDate) return [];
+  return hotels
+    .filter((hotel) => hotel.hotelName
+      && hotel.checkInDate
+      && hotel.checkOutDate
+      && hotel.checkInDate <= serviceDate
+      && serviceDate <= hotel.checkOutDate)
+    .sort((left, right) => Number(left.staySequence || 0) - Number(right.staySequence || 0));
+}
+
+function vendorDayHotelMarkup(hotels = [], serviceDate = "") {
+  const matches = vendorHotelsForDate(hotels, serviceDate);
+  const currentHotel = matches[0]?.hotelName || "Hotel not assigned";
+  const changeHotels = matches.slice(1).map((hotel) => hotel.hotelName).join(" / ");
+  return `
+    <div class="vendor-day-hotel-cell${matches.length ? "" : " warning"}${changeHotels ? "" : " full"}">
+      <span>Hotel on this day</span>
+      <strong>${escapeHtml(currentHotel)}</strong>
+    </div>
+    ${changeHotels ? `
+      <div class="vendor-day-hotel-cell change">
+        <span>Hotel change</span>
+        <strong>${escapeHtml(changeHotels)}</strong>
+      </div>
+    ` : ""}
+  `;
+}
+
+function updateVendorDayHotels() {
+  const hotels = collectVendorHotelRows();
+  $$("#vendor-day-list .vendor-day-card").forEach((card) => {
+    const serviceDate = card.querySelector('[data-vendor-day-field="serviceDate"]').value;
+    card.querySelector("[data-vendor-day-hotels]").innerHTML = vendorDayHotelMarkup(hotels, serviceDate);
+  });
+}
+
 function vendorSplitRow(split = {}, index = 0) {
-  const type = String(split.serviceType || "VENDOR").toUpperCase();
+  const type = vendorSplitTypeLabel(split.serviceType || "VENDOR");
+  const serviceList = normalizeVendorSplitType(type) === "TOC"
+    ? "toc-service-options"
+    : "vendor-service-options";
+  const vendorName = String(split.vendorName || "");
+  const service = String(split.activityText || "");
   return `
     <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}">
-      <select data-vendor-split-field="serviceType" aria-label="Split type">
-        ${[
-          ["VENDOR", "Vendor"], ["TOC", "TOC"], ["VEHICLE", "Vehicle"],
-          ["ADDITIONAL_SERVICES", "Additional Services"],
-        ].map(([value, label]) => `<option value="${value}" ${type === value ? "selected" : ""}>${label}</option>`).join("")}
-      </select>
-      <input data-vendor-split-field="activityText" value="${escapeHtml(split.activityText || "")}" placeholder="Activity / service detail" />
-      <input data-vendor-split-field="vendorName" value="${escapeHtml(split.vendorName || "")}" placeholder="Vendor name" />
-      <button class="button ghost small" type="button" data-remove-vendor-split="${index}">Remove</button>
+      <label class="vendor-split-field">
+        <span>Type</span>
+        <input data-vendor-split-field="serviceType" data-flexible-input data-min-size="16" data-max-size="26"
+          list="vendor-split-type-options" size="${flexibleInputSize(type, 16, 26)}"
+          value="${escapeHtml(type)}" placeholder="Type" autocomplete="off" />
+      </label>
+      <label class="vendor-split-field">
+        <span>Vendor Name</span>
+        <input data-vendor-split-field="vendorName" data-flexible-input data-min-size="22" data-max-size="52"
+          list="vendor-name-options" size="${flexibleInputSize(vendorName, 22, 52)}"
+          value="${escapeHtml(vendorName)}" placeholder="Can be empty" autocomplete="off" />
+      </label>
+      <label class="vendor-split-field">
+        <span>Vendor Service</span>
+        <input data-vendor-split-field="activityText" data-flexible-input data-min-size="32" data-max-size="90"
+          list="${serviceList}" size="${flexibleInputSize(service, 32, 90)}"
+          value="${escapeHtml(service)}" placeholder="Service detail" autocomplete="off" />
+      </label>
+      <button class="vendor-split-remove" type="button" data-remove-vendor-split="${index}" aria-label="Remove service" title="Remove service">×</button>
     </div>
   `;
 }
 
-function renderVendorDays(days = []) {
+function collectVendorSplitRows(container) {
+  return [...container.querySelectorAll(".vendor-split-row")].map((row, index) => ({
+    serviceId: row.dataset.serviceId || "",
+    splitSequence: index + 1,
+    serviceType: normalizeVendorSplitType(row.querySelector('[data-vendor-split-field="serviceType"]').value),
+    activityText: row.querySelector('[data-vendor-split-field="activityText"]').value,
+    vendorId: "",
+    vendorName: row.querySelector('[data-vendor-split-field="vendorName"]').value,
+    status: "DRAFT",
+  }));
+}
+
+function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
   $("#vendor-day-list").innerHTML = days.length ? days.map((day) => `
     <article class="vendor-day-card" data-tour-day-id="${escapeHtml(day.tourDayId || "")}" data-day-number="${Number(day.dayNumber)}">
       <div class="vendor-day-heading">
-        <strong>Day ${Number(day.dayNumber)}</strong>
-        <input data-vendor-day-field="serviceDate" type="date" value="${escapeHtml(day.serviceDate || "")}" />
-        <span class="muted-text">${escapeHtml((day.splits || []).length ? `${day.splits.length} split item` : "Not split")}</span>
-        <button class="button ghost small" type="button" data-toggle-vendor-split>Split</button>
+        <div class="vendor-day-primary">
+          <strong class="vendor-day-number">Day ${Number(day.dayNumber)}</strong>
+          <label class="vendor-day-date">
+            <span>Date</span>
+            <input data-vendor-day-field="serviceDate" type="date" value="${escapeHtml(day.serviceDate || "")}" />
+          </label>
+          <label class="vendor-day-title">
+            <span>Day Wise Header</span>
+            <textarea data-vendor-day-field="dayTitle" data-auto-grow rows="4" placeholder="Tour day header">${escapeHtml(day.dayTitle || "")}</textarea>
+          </label>
+          <span class="muted-text" data-vendor-split-count>${escapeHtml((day.splits || []).length ? `${day.splits.length} split item` : "Not split")}</span>
+          <button class="button ghost small" type="button" data-toggle-vendor-split>Split</button>
+        </div>
+        <div class="vendor-day-times">
+          <label class="vendor-day-time">
+            <span>Start time *</span>
+            <input data-vendor-day-field="startTime" type="time" value="${escapeHtml(day.startTime || "")}" required />
+          </label>
+          <label class="vendor-day-time">
+            <span>Finish time</span>
+            <input data-vendor-day-field="finishTime" type="time" value="${escapeHtml(day.finishTime || "")}" />
+          </label>
+        </div>
+      </div>
+      <div class="vendor-day-hotels" data-vendor-day-hotels>
+        ${vendorDayHotelMarkup(hotels, day.serviceDate)}
       </div>
       <textarea data-vendor-day-field="daywiseText" placeholder="Paste Day ${Number(day.dayNumber)} itinerary detail here">${escapeHtml(day.daywiseText || "")}</textarea>
-      <div class="vendor-split-panel" ${(day.splits || []).length ? "" : "hidden"}>
-        <div class="vendor-split-list">${(day.splits || []).map(vendorSplitRow).join("")}</div>
-        <div class="vendor-split-actions"><button class="button ghost small" type="button" data-add-vendor-split>Add split</button></div>
-      </div>
+      <div data-vendor-split-store hidden>${(day.splits || []).map(vendorSplitRow).join("")}</div>
     </article>
   `).join("") : `<div class="empty-notifications">Arrival and departure dates must form a valid range.</div>`;
+  resizeVendorTextareas();
+}
+
+function refreshVendorSplitCard(card) {
+  const rows = [...card.querySelectorAll("[data-vendor-split-store] .vendor-split-row")];
+  rows.forEach((row, index) => {
+    const remove = row.querySelector("[data-remove-vendor-split]");
+    if (remove) remove.dataset.removeVendorSplit = String(index);
+  });
+  const count = card.querySelector("[data-vendor-split-count]");
+  if (count) count.textContent = rows.length ? `${rows.length} split item` : "Not split";
+}
+
+function openVendorSplitDialog(card) {
+  const dayNumber = Number(card.dataset.dayNumber);
+  const serviceDate = card.querySelector('[data-vendor-day-field="serviceDate"]').value;
+  const dayTitle = card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim();
+  const startTime = card.querySelector('[data-vendor-day-field="startTime"]').value;
+  const finishTime = card.querySelector('[data-vendor-day-field="finishTime"]').value;
+  if (!startTime) {
+    const input = card.querySelector('[data-vendor-day-field="startTime"]');
+    input.focus();
+    return toast(`Day ${dayNumber} Start Time is required before split.`, true);
+  }
+  const daywiseText = card.querySelector('[data-vendor-day-field="daywiseText"]').value.trim();
+  const stored = collectVendorSplitRows(card.querySelector("[data-vendor-split-store]"));
+  const rows = stored.length ? stored : [{
+    serviceId: "", serviceType: "VENDOR", activityText: "", vendorId: "", vendorName: "", status: "DRAFT",
+  }];
+  const dialog = $("#vendor-split-dialog");
+  dialog.dataset.dayNumber = String(dayNumber);
+  $("#vendor-split-dialog-title").textContent = `Day ${dayNumber} micro split`;
+  const timeRange = finishTime ? `${startTime}–${finishTime}` : `Start ${startTime}`;
+  $("#vendor-split-dialog-meta").textContent = [serviceDate, timeRange, dayTitle].filter(Boolean).join(" · ") || "Date and tour header not filled";
+  $("#vendor-split-evidence-title").textContent = dayTitle || `Day ${dayNumber}`;
+  $("#vendor-split-evidence-detail").textContent = daywiseText || "No Day Wise detail has been pasted.";
+  $("#vendor-split-dialog-list").innerHTML = rows.map(vendorSplitRow).join("");
+  dialog.showModal();
+}
+
+async function applyVendorSplitDialog() {
+  const dialog = $("#vendor-split-dialog");
+  const card = $(`#vendor-day-list [data-day-number="${Number(dialog.dataset.dayNumber)}"]`);
+  if (!card) return dialog.close();
+  const button = $("#apply-vendor-split");
+  const original = button.textContent;
+  const splits = collectVendorSplitRows($("#vendor-split-dialog-list"));
+  card.querySelector("[data-vendor-split-store]").innerHTML = splits.map(vendorSplitRow).join("");
+  refreshVendorSplitCard(card);
+  button.disabled = true;
+  button.textContent = "Saving locally...";
+  try {
+    const payload = collectVendorIntake();
+    const saved = await window.erim.vendor.saveIntakeDraft(payload);
+    state.vendorIntake = { ...saved, suggestions: state.vendorSuggestions };
+    $("#vendor-intake-form").elements.vendorDraftId.value = saved.vendorDraftId || "";
+    dialog.close();
+    toast(`Day ${dialog.dataset.dayNumber} split saved safely on this PC.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
 }
 
 function collectVendorIntake() {
@@ -835,34 +1009,24 @@ function collectVendorIntake() {
     departureFlight: form.elements.departureFlight.value.trim(),
     departureSector: form.elements.departureSector.value.trim(),
     departureTime: form.elements.departureTime.value,
-    hotels: $$("#vendor-hotel-list .hotel-row").map((row, index) => ({
-      hotelStayId: row.dataset.hotelStayId || "",
-      staySequence: index + 1,
-      hotelName: row.querySelector('[data-vendor-hotel-field="hotelName"]').value.trim(),
-      checkInDate: row.querySelector('[data-vendor-hotel-field="checkInDate"]').value,
-      checkOutDate: row.querySelector('[data-vendor-hotel-field="checkOutDate"]').value,
-    })),
+    hotels: collectVendorHotelRows(),
     days: $$("#vendor-day-list .vendor-day-card").map((card) => ({
       tourDayId: card.dataset.tourDayId || "",
       dayNumber: Number(card.dataset.dayNumber),
       serviceDate: card.querySelector('[data-vendor-day-field="serviceDate"]').value,
+      dayTitle: card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim(),
+      startTime: card.querySelector('[data-vendor-day-field="startTime"]').value,
+      finishTime: card.querySelector('[data-vendor-day-field="finishTime"]').value,
       daywiseText: card.querySelector('[data-vendor-day-field="daywiseText"]').value,
       status: "DRAFT",
-      splits: [...card.querySelectorAll(".vendor-split-row")].map((row, index) => ({
-        serviceId: row.dataset.serviceId || "",
-        splitSequence: index + 1,
-        serviceType: row.querySelector('[data-vendor-split-field="serviceType"]').value,
-        activityText: row.querySelector('[data-vendor-split-field="activityText"]').value,
-        vendorId: "",
-        vendorName: row.querySelector('[data-vendor-split-field="vendorName"]').value,
-        status: "DRAFT",
-      })),
+      splits: collectVendorSplitRows(card.querySelector("[data-vendor-split-store]")),
     })),
   };
 }
 
 function populateVendorIntake(context) {
-  state.vendorIntake = context;
+  if (context.suggestions) state.vendorSuggestions = context.suggestions;
+  state.vendorIntake = { ...context, suggestions: state.vendorSuggestions };
   const form = $("#vendor-intake-form");
   const scalarFields = [
     "vendorDraftId", "customerCode", "customerName", "tourId", "sourcePublicationId",
@@ -879,10 +1043,35 @@ function populateVendorIntake(context) {
   $("#vendor-itinerary-name").textContent = context.driveFileName || "Posted itinerary";
   $("#vendor-drive-link").href = context.driveFileUrl || "#";
   $("#vendor-itinerary-preview").innerHTML = context.documentHtml || `<div class="empty-notifications">No readable DOCX content.</div>`;
+  renderVendorSuggestions(state.vendorSuggestions);
   renderVendorHotels(context.hotels || []);
   renderVendorDays((context.days || []).length
     ? context.days
-    : vendorDateRange(context.arrivalDate, context.departureDate));
+    : vendorDateRange(context.arrivalDate, context.departureDate), context.hotels || []);
+}
+
+function renderVendorSuggestions(suggestions = {}) {
+  $("#vendor-name-options").innerHTML = (suggestions.vendorNames || [])
+    .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  $("#vendor-service-options").innerHTML = (suggestions.vendorServices || [])
+    .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  $("#toc-service-options").innerHTML = (suggestions.tocNames || [])
+    .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+}
+
+function normalizeVendorSplitType(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (normalized === "TRANSPORT") return "VEHICLE";
+  return normalized === "ADDITIONAL_SERVICE" ? "ADDITIONAL_SERVICES" : normalized;
+}
+
+function vendorSplitTypeLabel(value) {
+  return ({
+    VENDOR: "Vendor",
+    TOC: "TOC",
+    VEHICLE: "Transport",
+    ADDITIONAL_SERVICES: "Additional Services",
+  })[normalizeVendorSplitType(value)] || String(value || "Vendor");
 }
 
 async function loadVendorItinerary(customerCode = "") {
@@ -912,6 +1101,12 @@ async function saveVendorIntake(publish = false) {
   if (![payload.adultPax, payload.childPax, payload.infantPax]
     .every((value) => Number.isInteger(value) && value >= 0)) {
     return toast("Adult, Child, and Infant must be whole numbers starting from 0.", true);
+  }
+  if (publish) {
+    const missingStart = payload.days.find((day) => !day.startTime);
+    if (missingStart) {
+      return toast(`Day ${missingStart.dayNumber} Start Time is required before online posting.`, true);
+    }
   }
   const button = publish ? $("#post-vendor-intake") : $("#save-vendor-draft");
   button.disabled = true;
@@ -999,6 +1194,14 @@ function bindEvents() {
   $("#cancel-itinerary-dialog").addEventListener("click", () => $("#itinerary-dialog").close());
   $("#close-revision-dialog").addEventListener("click", () => $("#revision-dialog").close());
   $("#cancel-revision-dialog").addEventListener("click", () => $("#revision-dialog").close());
+  $("#close-vendor-split-dialog").addEventListener("click", () => $("#vendor-split-dialog").close());
+  $("#cancel-vendor-split-dialog").addEventListener("click", () => $("#vendor-split-dialog").close());
+  $("#apply-vendor-split").addEventListener("click", applyVendorSplitDialog);
+  $("#vendor-split-dialog-add").addEventListener("click", () => {
+    const list = $("#vendor-split-dialog-list");
+    const index = list.querySelectorAll(".vendor-split-row").length;
+    list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
+  });
   $("#load-revision-record").addEventListener("click", loadRevisionRecord);
   $("#revision-form").elements.customerCode.addEventListener("change", loadRevisionRecord);
   $("#choose-revised-docx").addEventListener("click", chooseRevisedDocx);
@@ -1051,6 +1254,7 @@ function bindEvents() {
     payload.hotels.push({ hotelStayId: "", hotelName: "", checkInDate: "", checkOutDate: "" });
     state.vendorIntake = payload;
     renderVendorHotels(payload.hotels);
+    updateVendorDayHotels();
   });
   $("#rebuild-vendor-days").addEventListener("click", () => {
     const payload = collectVendorIntake();
@@ -1074,36 +1278,19 @@ function bindEvents() {
       const payload = collectVendorIntake();
       payload.hotels.splice(Number(removeHotel.dataset.removeVendorHotel), 1);
       state.vendorIntake = payload;
-      return renderVendorHotels(payload.hotels);
+      renderVendorHotels(payload.hotels);
+      updateVendorDayHotels();
+      return;
     }
     const splitToggle = event.target.closest("[data-toggle-vendor-split]");
     if (splitToggle) {
-      const panel = splitToggle.closest(".vendor-day-card").querySelector(".vendor-split-panel");
-      panel.hidden = !panel.hidden;
-      return;
-    }
-    const addSplit = event.target.closest("[data-add-vendor-split]");
-    if (addSplit) {
-      const card = addSplit.closest(".vendor-day-card");
-      const payload = collectVendorIntake();
-      const day = payload.days.find((item) => Number(item.dayNumber) === Number(card.dataset.dayNumber));
-      day.splits.push({
-        serviceId: "", serviceType: "VENDOR", activityText: "", vendorId: "", vendorName: "", status: "DRAFT",
-      });
-      state.vendorIntake = payload;
-      renderVendorDays(payload.days);
-      const updated = $(`#vendor-day-list [data-day-number="${day.dayNumber}"] .vendor-split-panel`);
-      if (updated) updated.hidden = false;
+      const card = splitToggle.closest(".vendor-day-card");
+      openVendorSplitDialog(card);
       return;
     }
     const removeSplit = event.target.closest("[data-remove-vendor-split]");
     if (removeSplit) {
-      const card = removeSplit.closest(".vendor-day-card");
-      const payload = collectVendorIntake();
-      const day = payload.days.find((item) => Number(item.dayNumber) === Number(card.dataset.dayNumber));
-      day.splits.splice(Number(removeSplit.dataset.removeVendorSplit), 1);
-      state.vendorIntake = payload;
-      renderVendorDays(payload.days);
+      removeSplit.closest(".vendor-split-row")?.remove();
       return;
     }
     const email = event.target.closest("[data-recheck-thread-id]");
@@ -1116,6 +1303,36 @@ function bindEvents() {
     if (action.dataset.action === "save-followup") return saveFollowup(action.dataset.id);
     if (action.dataset.action === "resolve-followup") return resolveFollowup(action.dataset.id);
     handleDraftAction(action.dataset.action, action.dataset.id);
+  });
+  document.body.addEventListener("input", (event) => {
+    if (event.target.matches("#vendor-day-list textarea[data-auto-grow]")) autoGrowTextarea(event.target);
+    if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
+      updateVendorDayHotels();
+    }
+    if (event.target.matches("input[data-flexible-input]")) {
+      event.target.size = flexibleInputSize(
+        event.target.value,
+        Number(event.target.dataset.minSize || 12),
+        Number(event.target.dataset.maxSize || 80),
+      );
+    }
+    if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
+      const activity = event.target.closest(".vendor-split-row")
+        ?.querySelector('[data-vendor-split-field="activityText"]');
+      if (activity) {
+        activity.setAttribute(
+          "list",
+          normalizeVendorSplitType(event.target.value) === "TOC"
+            ? "toc-service-options"
+            : "vendor-service-options",
+        );
+      }
+    }
+  });
+  document.body.addEventListener("change", (event) => {
+    if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
+      updateVendorDayHotels();
+    }
   });
 
   $("#draft-form").addEventListener("submit", async (event) => {

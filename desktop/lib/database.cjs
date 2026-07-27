@@ -183,6 +183,9 @@ class LocalDatabase {
         vendor_draft_id TEXT NOT NULL,
         day_number INTEGER NOT NULL,
         service_date TEXT,
+        day_title TEXT NOT NULL DEFAULT '',
+        start_time TEXT NOT NULL DEFAULT '',
+        finish_time TEXT NOT NULL DEFAULT '',
         daywise_text TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'DRAFT',
         FOREIGN KEY(vendor_draft_id) REFERENCES vendor_intake_drafts(vendor_draft_id) ON DELETE CASCADE
@@ -205,11 +208,68 @@ class LocalDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_vendor_split_day
         ON vendor_service_splits(tour_day_id, split_sequence);
+
+      CREATE TABLE IF NOT EXISTS local_toc_master (
+        toc_id TEXT PRIMARY KEY,
+        toc_name TEXT NOT NULL,
+        adult_rate_idr,
+        child_rate_idr,
+        child_age TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        valid_to TEXT NOT NULL,
+        source_sheet TEXT NOT NULL DEFAULT '',
+        source_row INTEGER,
+        seed_version TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_local_toc_master_name
+        ON local_toc_master(toc_name);
+      CREATE INDEX IF NOT EXISTS idx_local_toc_master_validity
+        ON local_toc_master(valid_to);
+
+      CREATE TABLE IF NOT EXISTS local_vendor_rate_master (
+        vendor_rate_id TEXT PRIMARY KEY,
+        service_name TEXT NOT NULL,
+        vendor_name TEXT NOT NULL DEFAULT '',
+        adult_rate_idr,
+        child_rate_idr,
+        notes TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        contract_validity TEXT NOT NULL DEFAULT '',
+        valid_to TEXT NOT NULL,
+        source_sheet TEXT NOT NULL DEFAULT '',
+        source_row INTEGER,
+        seed_version TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_rate_service
+        ON local_vendor_rate_master(service_name);
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_rate_vendor
+        ON local_vendor_rate_master(vendor_name);
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_rate_validity
+        ON local_vendor_rate_master(valid_to);
+
+      CREATE TABLE IF NOT EXISTS master_data_sync_state (
+        master_key TEXT PRIMARY KEY,
+        source_version TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        source_updated_at TEXT,
+        synced_at TEXT NOT NULL,
+        toc_rows INTEGER NOT NULL DEFAULT 0,
+        vendor_rate_rows INTEGER NOT NULL DEFAULT 0,
+        transport_rate_rows INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL
+      );
     `);
     this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
     this.ensureColumn("vendor_intake_drafts", "adult_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "child_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "infant_pax", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("vendor_day_drafts", "finish_time", "TEXT NOT NULL DEFAULT ''");
   }
 
   ensureColumn(tableName, columnName, definition) {
@@ -238,6 +298,181 @@ class LocalDatabase {
       for (const [key, value] of Object.entries(defaults)) insert.run(key, value, now);
     });
     tx();
+  }
+
+  replaceMasterData(input) {
+    const tocRows = Array.isArray(input.toc) ? input.toc : [];
+    const vendorRows = Array.isArray(input.vendorRates) ? input.vendorRates : [];
+    if (!tocRows.length || !vendorRows.length) {
+      throw new Error("Online master data is incomplete; local cache was not replaced.");
+    }
+    if (!String(input.checksum || "").trim()) {
+      throw new Error("Online master-data checksum is required.");
+    }
+    const now = this.now();
+    const insertToc = this.db.prepare(`
+      INSERT INTO local_toc_master (
+        toc_id, toc_name, adult_rate_idr, child_rate_idr, child_age, notes,
+        valid_to, source_sheet, source_row, seed_version, updated_at
+      ) VALUES (
+        @tocId, @tocName, @adultRateIdr, @childRateIdr, @childAge, @notes,
+        @validTo, @sourceSheet, @sourceRow, @seedVersion, @updatedAt
+      )
+    `);
+    const insertVendorRate = this.db.prepare(`
+      INSERT INTO local_vendor_rate_master (
+        vendor_rate_id, service_name, vendor_name, adult_rate_idr, child_rate_idr,
+        notes, description, contract_validity, valid_to, source_sheet, source_row,
+        seed_version, updated_at
+      ) VALUES (
+        @vendorRateId, @serviceName, @vendorName, @adultRateIdr, @childRateIdr,
+        @notes, @description, @contractValidity, @validTo, @sourceSheet, @sourceRow,
+        @seedVersion, @updatedAt
+      )
+    `);
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM local_toc_master").run();
+      this.db.prepare("DELETE FROM local_vendor_rate_master").run();
+      for (const row of tocRows) {
+        insertToc.run({
+          tocId: row.tocId,
+          tocName: String(row.tocName || "").trim(),
+          adultRateIdr: row.adultRateIdr ?? null,
+          childRateIdr: row.childRateIdr ?? null,
+          childAge: String(row.childAge || "").trim(),
+          notes: String(row.notes || "").trim(),
+          validTo: row.validTo,
+          sourceSheet: String(row.sourceSheet || "").trim(),
+          sourceRow: Number(row.sourceRow || 0) || null,
+          seedVersion: input.sourceVersion || "ONLINE",
+          updatedAt: row.updatedAt || now,
+        });
+      }
+      for (const row of vendorRows) {
+        insertVendorRate.run({
+          vendorRateId: row.vendorRateId,
+          serviceName: String(row.serviceName || "").trim(),
+          vendorName: String(row.vendorName || "").trim(),
+          adultRateIdr: row.adultRateIdr ?? null,
+          childRateIdr: row.childRateIdr ?? null,
+          notes: String(row.notes || "").trim(),
+          description: String(row.description || "").trim(),
+          contractValidity: String(row.contractValidity || "").trim(),
+          validTo: row.validTo,
+          sourceSheet: String(row.sourceSheet || "").trim(),
+          sourceRow: Number(row.sourceRow || 0) || null,
+          seedVersion: input.sourceVersion || "ONLINE",
+          updatedAt: row.updatedAt || now,
+        });
+      }
+      this.db.prepare(`
+        INSERT INTO master_data_sync_state (
+          master_key, source_version, checksum, source_updated_at, synced_at,
+          toc_rows, vendor_rate_rows, transport_rate_rows, status
+        ) VALUES (
+          'TOC_VENDOR_RATES', @sourceVersion, @checksum, @sourceUpdatedAt, @syncedAt,
+          @tocRows, @vendorRateRows, @transportRateRows, 'SYNCED'
+        )
+        ON CONFLICT(master_key) DO UPDATE SET
+          source_version = excluded.source_version,
+          checksum = excluded.checksum,
+          source_updated_at = excluded.source_updated_at,
+          synced_at = excluded.synced_at,
+          toc_rows = excluded.toc_rows,
+          vendor_rate_rows = excluded.vendor_rate_rows,
+          transport_rate_rows = excluded.transport_rate_rows,
+          status = excluded.status
+      `).run({
+        sourceVersion: input.sourceVersion || "ONLINE",
+        checksum: String(input.checksum).trim(),
+        sourceUpdatedAt: input.sourceUpdatedAt || null,
+        syncedAt: now,
+        tocRows: tocRows.length,
+        vendorRateRows: vendorRows.length,
+        transportRateRows: Number(input.transportRateRows || 0),
+      });
+    })();
+    this.log("MASTER_DATA_CACHE_REPLACED", "MASTER_DATA", "TOC_VENDOR_RATES", {
+      sourceVersion: input.sourceVersion || "ONLINE",
+      checksum: String(input.checksum).trim(),
+      tocRows: tocRows.length,
+      vendorRateRows: vendorRows.length,
+      transportRateRows: Number(input.transportRateRows || 0),
+    });
+    return this.getLocalMasterDataSummary();
+  }
+
+  getMasterDataSyncState() {
+    const row = this.db.prepare(`
+      SELECT * FROM master_data_sync_state WHERE master_key = 'TOC_VENDOR_RATES'
+    `).get();
+    return row ? {
+      masterKey: row.master_key,
+      sourceVersion: row.source_version,
+      checksum: row.checksum,
+      sourceUpdatedAt: row.source_updated_at || "",
+      syncedAt: row.synced_at,
+      tocRows: Number(row.toc_rows || 0),
+      vendorRateRows: Number(row.vendor_rate_rows || 0),
+      transportRateRows: Number(row.transport_rate_rows || 0),
+      status: row.status,
+    } : null;
+  }
+
+  getLocalMasterDataSummary() {
+    const toc = this.db.prepare(`
+      SELECT COUNT(*) AS total, MIN(valid_to) AS earliest_valid_to, MAX(valid_to) AS latest_valid_to
+      FROM local_toc_master
+    `).get();
+    const vendor = this.db.prepare(`
+      SELECT COUNT(*) AS total, MIN(valid_to) AS earliest_valid_to, MAX(valid_to) AS latest_valid_to
+      FROM local_vendor_rate_master
+    `).get();
+    return {
+      toc: {
+        total: Number(toc.total || 0),
+        earliestValidTo: toc.earliest_valid_to || "",
+        latestValidTo: toc.latest_valid_to || "",
+      },
+      vendorRates: {
+        total: Number(vendor.total || 0),
+        earliestValidTo: vendor.earliest_valid_to || "",
+        latestValidTo: vendor.latest_valid_to || "",
+      },
+      transportRates: { total: 0, status: "PENDING_SOURCE_DATA" },
+    };
+  }
+
+  getLocalVendorSuggestions(asOfDate = new Date().toISOString().slice(0, 10)) {
+    const activeVendorRates = this.db.prepare(`
+      SELECT vendor_name, service_name
+      FROM local_vendor_rate_master
+      WHERE valid_to >= ?
+      ORDER BY vendor_name COLLATE NOCASE, service_name COLLATE NOCASE
+    `).all(asOfDate);
+    const activeToc = this.db.prepare(`
+      SELECT toc_name
+      FROM local_toc_master
+      WHERE valid_to >= ?
+      ORDER BY toc_name COLLATE NOCASE
+    `).all(asOfDate);
+    const validity = this.db.prepare(`
+      SELECT MAX(valid_to) AS valid_to
+      FROM (
+        SELECT valid_to FROM local_vendor_rate_master WHERE valid_to >= ?
+        UNION ALL
+        SELECT valid_to FROM local_toc_master WHERE valid_to >= ?
+      )
+    `).get(asOfDate, asOfDate);
+    const unique = (values) => [...new Set(
+      values.map((value) => String(value || "").trim()).filter(Boolean),
+    )].sort((a, b) => a.localeCompare(b));
+    return {
+      vendorNames: unique(activeVendorRates.map((row) => row.vendor_name)),
+      vendorServices: unique(activeVendorRates.map((row) => row.service_name)),
+      tocNames: unique(activeToc.map((row) => row.toc_name)),
+      validTo: validity.valid_to || "",
+    };
   }
 
   close() {
@@ -406,7 +641,7 @@ class LocalDatabase {
       FROM vendor_hotel_drafts WHERE vendor_draft_id = ? ORDER BY stay_sequence
     `).all(draft.vendor_draft_id);
     const dayRows = this.db.prepare(`
-      SELECT tour_day_id, day_number, service_date, daywise_text, status
+      SELECT tour_day_id, day_number, service_date, day_title, start_time, finish_time, daywise_text, status
       FROM vendor_day_drafts WHERE vendor_draft_id = ? ORDER BY day_number
     `).all(draft.vendor_draft_id);
     const splitStatement = this.db.prepare(`
@@ -453,6 +688,9 @@ class LocalDatabase {
         tourDayId: day.tour_day_id,
         dayNumber: Number(day.day_number),
         serviceDate: day.service_date || "",
+        dayTitle: day.day_title || "",
+        startTime: day.start_time || "",
+        finishTime: day.finish_time || "",
         daywiseText: day.daywise_text,
         status: day.status,
         splits: splitStatement.all(day.tour_day_id).map((split) => ({
@@ -502,6 +740,13 @@ class LocalDatabase {
         throw new Error("Each Day Wise row must have a unique positive day number.");
       }
       dayNumbers.add(dayNumber);
+      const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (day.startTime && !timePattern.test(String(day.startTime))) {
+        throw new Error(`Day ${dayNumber} Start Time must use HH:MM.`);
+      }
+      if (day.finishTime && !timePattern.test(String(day.finishTime))) {
+        throw new Error(`Day ${dayNumber} Finish Time must use HH:MM.`);
+      }
       (day.splits || []).forEach((split) => {
         if (!allowedTypes.has(String(split.serviceType || "").toUpperCase())) {
           throw new Error("Split type must be Vendor, TOC, Vehicle, or Additional Services.");
@@ -589,8 +834,9 @@ class LocalDatabase {
       ));
       const insertDay = this.db.prepare(`
         INSERT INTO vendor_day_drafts (
-          tour_day_id, vendor_draft_id, day_number, service_date, daywise_text, status
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          tour_day_id, vendor_draft_id, day_number, service_date, day_title,
+          start_time, finish_time, daywise_text, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertSplit = this.db.prepare(`
         INSERT INTO vendor_service_splits (
@@ -602,6 +848,7 @@ class LocalDatabase {
         const dayId = day.tourDayId || this.id("TDAY");
         insertDay.run(
           dayId, draftId, Number(day.dayNumber), day.serviceDate || "",
+          String(day.dayTitle || "").trim(), day.startTime || "", day.finishTime || "",
           String(day.daywiseText || ""), day.status || "DRAFT",
         );
         (day.splits || []).forEach((split, index) => insertSplit.run(

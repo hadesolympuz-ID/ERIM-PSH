@@ -815,15 +815,24 @@ Vendor Booking
       Departure Date / Flight / Sector / Time
       Unlimited Hotel + Check-in Date + Check-out Date
     Generate inclusive Day 1..N from arrival through departure
+    Header input per Day:
+      Start Time = required before Micro Split and before online Post
+      Finish Time = optional for one-way/open-ended operations
+      Partial local draft may retain blank Start Time until that Day is processed
+    Derive hotel context per Day from ordered hotel check-in/check-out dates
+      Normal stay date = active hotel
+      Hotel transition date = outgoing hotel + incoming hotel
+      Unmatched date = Hotel not assigned warning
+      Display-only derivation; no duplicate per-Day hotel persistence
     Left: staff-pasted Day Wise text
     Right: independently scrollable posted DOCX
-    Split each day:
+    Split each day in a wide resizable two-pane dialog:
+      Left = Type | Suggested vendor name | Activity/detail | Add/remove
+      Right = current Day Wise reference; reserved email/evidence viewer
       Type = VENDOR | TOC | VEHICLE | ADDITIONAL_SERVICES
-      Activity/detail
-      Suggested vendor name
-      Add/remove split
+      Save split locally = atomic SQLite draft save; no online mutation
     Save local draft
-    Post structured data
+    Post structured data online = separate controlled action
 
   Revise Itinerary     prepared placeholder and notification route
   Cancel All Service   safe placeholder; no mutation
@@ -836,12 +845,32 @@ Vendor Booking
 | --- | --- | --- | --- |
 | `vendor_intake_drafts` | `vendor_draft_id`; unique `customer_code` | Source/version/file references plus editable tour header, Adult/Child/Infant pax, and extraction state. | `TOURS` through Apps Script. |
 | `vendor_hotel_drafts` | `hotel_stay_id` | Unlimited ordered hotel stays; no hotel check-in time. | `TOUR_HOTEL_STAYS`. |
-| `vendor_day_drafts` | `tour_day_id` | Inclusive Day 1..N, service date, pasted Day Wise text. | `TOUR_DAYS`. |
+| `vendor_day_drafts` | `tour_day_id` | Inclusive Day 1..N, service date, editable Tour Day Header, required-at-processing Start Time, optional Finish Time, and pasted Day Wise text. | `TOUR_DAYS`, including `start_time` and `finish_time`. |
 | `vendor_service_splits` | `service_id` | Pre-generation micro items and suggested vendor snapshot. | `SERVICES`. |
+| `local_toc_master` | `toc_id` | Local read cache of `TOC_MASTER`, including rates and source-row trace. Active through each row's `valid_to`; expired rows are excluded from suggestions. | `TOC_MASTER` in the central Google Sheet. |
+| `local_vendor_rate_master` | `vendor_rate_id` | Local read cache of `VENDOR_RATE_MASTER`, including original contract-validity note and source-row trace. Active through each row's `valid_to`; expired rows are excluded from suggestions. | `VENDOR_RATE_MASTER` in the central Google Sheet. |
+| `master_data_sync_state` | `master_key` | Last successful Google Sheet version, computed content checksum, source timestamp, row counts, and SQLite sync timestamp. | `MASTER_DATA_STATE` plus computed content from both master tabs. |
 
 Saving locally replaces only the current Customer Code's child draft rows
 inside one SQLite transaction. Stable IDs returned by the first save are reused
 on later edits. A failure rolls the entire draft write back.
+
+`Save split locally` uses this same transaction and persists the full current
+Vendor intake, including all Day Wise and micro-split rows. It never calls Apps
+Script, Google Sheets, Gmail, or Drive. The local rows become the source for the
+later Generate Booking stage; online publication remains a separate explicit
+action.
+
+The central Google Sheet is the source of truth. Every desktop startup reads
+`TOC_MASTER`, `VENDOR_RATE_MASTER`, and `MASTER_DATA_STATE`, computes a content
+checksum, and compares it with `master_data_sync_state`. Changed data replaces
+both local master tables inside one SQLite transaction; identical data returns
+`CURRENT` without rewriting. If Google is unavailable or validation fails, the
+last successful SQLite cache is retained. Type `TOC` uses the TOC cache; other
+service types currently use the Vendor service cache. Online `VENDORS` and
+`SERVICES` suggestions are merged and deduplicated when available. Transport
+rate data is intentionally empty pending the approved source workbook. No
+business rate rows are stored in GitHub or bundled into the installer.
 
 #### `vendor.intake.save` online contract
 

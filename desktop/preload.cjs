@@ -49,6 +49,14 @@ contextBridge.exposeInMainWorld("erim", {
     saveIntakeDraft: (details) => ipcRenderer.invoke("vendor:intake-draft-save", details),
     publishIntake: (details) => ipcRenderer.invoke("vendor:intake-publish", details),
   },
+  masterData: {
+    sync: () => ipcRenderer.invoke("master-data:sync"),
+    onStatus: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("master-data:status", listener);
+      return () => ipcRenderer.removeListener("master-data:status", listener);
+    },
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

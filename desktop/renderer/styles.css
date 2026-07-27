@@ -270,8 +270,20 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 }
 .vendor-intake-lookup input, .vendor-summary-fields input, .hotel-row input { margin-top: 6px; }
 .vendor-summary-fields {
-  display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 13px; padding: 20px;
-  border-bottom: 1px solid var(--line);
+  display: grid; gap: 16px; padding: 20px; border-bottom: 1px solid var(--line);
+}
+.vendor-identity-fields {
+  display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 13px;
+}
+.vendor-travel-fields {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px;
+}
+.vendor-travel-group {
+  display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px;
+  padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50);
+}
+.vendor-travel-group > strong {
+  grid-column: 1 / -1; color: var(--navy-700);
 }
 .vendor-hotels, .vendor-daywise-section { padding: 20px; border-bottom: 1px solid var(--line); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
@@ -282,22 +294,96 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
   gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50);
 }
 .hotel-sequence { align-self: center; color: var(--navy-700); font-weight: 850; }
-.vendor-work-columns { display: grid; grid-template-columns: minmax(420px,.95fr) minmax(500px,1.05fr); gap: 15px; }
-.vendor-day-list { display: grid; gap: 11px; max-height: 670px; overflow: auto; padding-right: 3px; }
-.vendor-day-card { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: #fff; }
+.vendor-work-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px; }
+.vendor-day-list {
+  display: flex; flex-direction: column; align-items: stretch;
+  height: 670px; max-height: none; gap: 14px;
+  overflow-x: hidden; overflow-y: auto; padding: 0 8px 10px 0;
+  overflow-anchor: none;
+}
+.vendor-day-card {
+  flex: 0 0 auto; height: auto; min-height: 440px;
+  border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: #fff;
+}
 .vendor-day-heading {
-  display: grid; grid-template-columns: auto 155px minmax(0,1fr) auto; gap: 10px;
-  align-items: center; padding: 11px 12px; background: var(--blue-50);
+  display: grid; gap: 14px; min-height: 205px; padding: 14px; background: var(--blue-50);
 }
-.vendor-day-heading strong { white-space: nowrap; }
-.vendor-day-card textarea { min-height: 92px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
-.vendor-split-panel { padding: 12px; border-top: 1px dashed #b9c6cf; background: #fbfdfe; }
-.vendor-split-list { display: grid; gap: 8px; }
+.vendor-day-primary {
+  display: grid; grid-template-columns: auto minmax(130px,.65fr) minmax(220px,1.7fr) auto auto;
+  gap: 10px; align-items: end;
+}
+.vendor-day-number { align-self: center; white-space: nowrap; }
+.vendor-day-date, .vendor-day-title, .vendor-day-time { display: grid; min-width: 0; }
+.vendor-day-date span, .vendor-day-title span, .vendor-day-time span {
+  margin-bottom: 4px; color: var(--muted); font-size: 9px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.vendor-day-date input, .vendor-day-title textarea, .vendor-day-time input { width: 100%; min-width: 0; }
+.vendor-day-title textarea {
+  height: 116px; min-height: 116px; max-height: 320px; margin: 0; resize: vertical; overflow-y: auto;
+}
+.vendor-day-times {
+  display: grid; grid-template-columns: repeat(2,minmax(130px,220px)); gap: 10px;
+}
+.vendor-day-times input { min-height: 46px; }
+.vendor-day-hotels {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px;
+  min-height: 72px; padding: 10px 14px; border-top: 1px solid var(--line); background: #fbfdfe;
+}
+.vendor-day-hotel-cell {
+  min-width: 0; padding: 8px 10px; border: 1px solid #d7e1e8; border-radius: 8px; background: #fff;
+}
+.vendor-day-hotel-cell span, .vendor-day-hotel-cell strong { display: block; }
+.vendor-day-hotel-cell span {
+  color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+}
+.vendor-day-hotel-cell strong { margin-top: 3px; overflow-wrap: anywhere; }
+.vendor-day-hotel-cell.full { grid-column: 1 / -1; }
+.vendor-day-hotel-cell.change { border-color: #9cbdd1; background: var(--blue-100); }
+.vendor-day-hotel-cell.warning { border-color: #e1bd78; background: #fff9ec; }
+.vendor-day-card textarea[data-vendor-day-field="daywiseText"] {
+  min-height: 160px; border: 0; border-top: 1px solid var(--line); border-radius: 0;
+}
 .vendor-split-row {
-  display: grid; grid-template-columns: 145px minmax(180px,1fr) minmax(150px,.65fr) auto;
-  gap: 8px; align-items: center;
+  display: grid; grid-template-columns: minmax(120px,.55fr) minmax(150px,.8fr) minmax(200px,1.3fr) auto;
+  gap: 9px; align-items: end; min-width: 0;
 }
-.vendor-split-actions { display: flex; justify-content: flex-end; margin-top: 9px; }
+.vendor-split-field { display: grid; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 800; }
+.vendor-split-field span { margin-bottom: 5px; text-transform: uppercase; letter-spacing: .04em; }
+.vendor-split-field input { width: 100%; min-width: 0; max-width: none; }
+.vendor-split-remove {
+  width: 30px; height: 30px; padding: 0; border: 1px solid #efb4b4; border-radius: 50%;
+  background: #fff5f5; color: #a92727; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.vendor-split-remove:hover { background: #fee2e2; border-color: #dc7777; }
+.vendor-split-dialog {
+  width: min(1420px, calc(100vw - 42px)); height: min(780px, calc(100vh - 42px));
+  min-width: min(900px, calc(100vw - 42px)); min-height: min(560px, calc(100vh - 42px));
+  max-width: calc(100vw - 20px); max-height: calc(100vh - 20px);
+  resize: both; overflow: auto;
+}
+#vendor-split-form { display: flex; flex-direction: column; min-height: 100%; }
+.vendor-split-dialog-layout {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px;
+  flex: 1; min-height: 0; padding: 16px; background: #f3f7fa;
+}
+.vendor-split-dialog-pane {
+  min-width: 0; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: #fff;
+}
+.vendor-split-dialog-pane .pane-heading { justify-content: space-between; gap: 12px; }
+.vendor-split-dialog-list {
+  display: grid; align-content: start; gap: 11px; height: calc(100% - 64px); padding: 14px; overflow: auto;
+}
+.vendor-split-evidence { display: grid; align-content: start; gap: 12px; height: calc(100% - 64px); padding: 14px; overflow: auto; }
+.vendor-split-day-reference {
+  padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50);
+}
+.vendor-split-day-reference span, .vendor-split-day-reference strong { display: block; }
+.vendor-split-day-reference span {
+  color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+}
+.vendor-split-day-reference strong { margin-top: 5px; }
+.vendor-split-day-reference p { margin: 12px 0 0; white-space: pre-wrap; line-height: 1.55; }
 .vendor-document-pane { min-width: 0; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
 .vendor-document-pane .pane-heading { justify-content: space-between; gap: 12px; }
 .vendor-document-scroll { height: 670px; }
@@ -309,7 +395,8 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 
 @media (max-width: 1180px) {
   .health-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .vendor-summary-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .vendor-identity-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .vendor-travel-fields { grid-template-columns: 1fr; }
   .vendor-work-columns { grid-template-columns: 1fr; }
   .vendor-document-scroll { height: 520px; }
 }

@@ -289,6 +289,9 @@ test("persists Vendor intake with unlimited hotel rows, daywise text, and micro 
     days: [{
       dayNumber: 1,
       serviceDate: "2026-07-22",
+      dayTitle: "Arrival in Bali",
+      startTime: "18:30",
+      finishTime: "20:00",
       daywiseText: "Arrival and transfer to hotel.",
       splits: [
         { serviceType: "VEHICLE", activityText: "Airport transfer", vendorName: "Transport A" },
@@ -302,6 +305,9 @@ test("persists Vendor intake with unlimited hotel rows, daywise text, and micro 
   assert.equal(saved.infantPax, 1);
   assert.equal(saved.hotels.length, 7);
   assert.equal(saved.days[0].splits.length, 2);
+  assert.equal(saved.days[0].dayTitle, "Arrival in Bali");
+  assert.equal(saved.days[0].startTime, "18:30");
+  assert.equal(saved.days[0].finishTime, "20:00");
   assert.match(saved.hotels[0].hotelStayId, /^HST-/);
   assert.match(saved.days[0].tourDayId, /^TDAY-/);
   assert.match(saved.days[0].splits[0].serviceId, /^SVC-/);
@@ -312,6 +318,9 @@ test("persists Vendor intake with unlimited hotel rows, daywise text, and micro 
     hotels: saved.hotels.slice(0, 2),
     days: [{
       ...saved.days[0],
+      dayTitle: "Arrival and Ubud transfer",
+      startTime: "19:00",
+      finishTime: "",
       daywiseText: "Updated arrival.",
       splits: saved.days[0].splits.slice(0, 1),
     }],
@@ -319,9 +328,67 @@ test("persists Vendor intake with unlimited hotel rows, daywise text, and micro 
   assert.equal(updated.vendorDraftId, saved.vendorDraftId);
   assert.equal(updated.hotels.length, 2);
   assert.equal(updated.days[0].daywiseText, "Updated arrival.");
+  assert.equal(updated.days[0].dayTitle, "Arrival and Ubud transfer");
+  assert.equal(updated.days[0].startTime, "19:00");
+  assert.equal(updated.days[0].finishTime, "");
   assert.equal(updated.days[0].splits.length, 1);
   assert.equal(database.listVendorIntakeDrafts().length, 1);
 }));
+
+test("replaces the local TOC and Vendor cache from online master data", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-rates-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  try {
+    database.replaceMasterData({
+      sourceVersion: "TEST-RATES-V1",
+      checksum: "test-checksum-v1",
+      sourceUpdatedAt: "2026-07-27T00:00:00.000Z",
+      transportRateRows: 0,
+      toc: [{
+      tocId: "TOC-TEST-1",
+      tocName: "Test Temple Entrance",
+      adultRateIdr: 100000,
+      childRateIdr: 50000,
+      childAge: "3-11",
+      validTo: "2026-12-16",
+      sourceSheet: "TEST",
+      sourceRow: 2,
+    }],
+      vendorRates: [{
+      vendorRateId: "VR-TEST-1",
+      serviceName: "Test Dinner",
+      vendorName: "Test Vendor",
+      adultRateIdr: 200000,
+      childRateIdr: 100000,
+      validTo: "2026-12-16",
+      sourceSheet: "TEST",
+      sourceRow: 2,
+    }],
+    });
+    const summary = database.getLocalMasterDataSummary();
+    assert.equal(summary.toc.total, 1);
+    assert.equal(summary.vendorRates.total, 1);
+    assert.equal(summary.toc.latestValidTo, "2026-12-16");
+    assert.equal(summary.vendorRates.latestValidTo, "2026-12-16");
+    assert.equal(summary.transportRates.total, 0);
+    assert.equal(summary.transportRates.status, "PENDING_SOURCE_DATA");
+    assert.equal(database.getMasterDataSyncState().checksum, "test-checksum-v1");
+
+    const active = database.getLocalVendorSuggestions("2026-12-16");
+    assert.deepEqual(active.tocNames, ["Test Temple Entrance"]);
+    assert.deepEqual(active.vendorNames, ["Test Vendor"]);
+    assert.deepEqual(active.vendorServices, ["Test Dinner"]);
+    assert.equal(active.validTo, "2026-12-16");
+
+    const expired = database.getLocalVendorSuggestions("2026-12-17");
+    assert.deepEqual(expired.tocNames, []);
+    assert.deepEqual(expired.vendorNames, []);
+    assert.deepEqual(expired.vendorServices, []);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("rejects invalid pax, duplicate day numbers, and unsupported Vendor split types", () => withDatabase((database) => {
   const base = {
@@ -346,4 +413,8 @@ test("rejects invalid pax, duplicate day numbers, and unsupported Vendor split t
     ...base,
     days: [{ dayNumber: 1, splits: [{ serviceType: "EMAIL" }] }],
   }), /Split type/i);
+  assert.throws(() => database.saveVendorIntakeDraft({
+    ...base,
+    days: [{ dayNumber: 1, startTime: "25:00", splits: [] }],
+  }), /Start Time.*HH:MM/i);
 }));

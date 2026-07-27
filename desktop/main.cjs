@@ -36,7 +36,10 @@ function createWindow() {
 
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.maximize();
+    mainWindow.show();
+  });
 
   if (isDev && process.env.ERIM_OPEN_DEVTOOLS === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -49,6 +52,10 @@ function registerIpc() {
     databasePath: database.filePath,
     dashboard: database.getDashboard(),
     settings: database.getPublicSettings(),
+    masterData: {
+      summary: database.getLocalMasterDataSummary(),
+      syncState: database.getMasterDataSyncState(),
+    },
   }));
 
   ipcMain.handle("draft:list", (_event, filters) => database.listDrafts(filters || {}));
@@ -90,6 +97,7 @@ function registerIpc() {
   ipcMain.handle("vendor:intake-draft-list", () => database.listVendorIntakeDrafts());
   ipcMain.handle("vendor:intake-draft-save", (_event, details) => database.saveVendorIntakeDraft(details));
   ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
+  ipcMain.handle("master-data:sync", () => googleWorkspace.syncMasterDataCache());
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
@@ -151,6 +159,20 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   updateService.scheduleInitialCheck();
+  setTimeout(() => {
+    googleWorkspace.syncMasterDataCache()
+      .then((result) => mainWindow?.webContents.send("master-data:status", result))
+      .catch((error) => {
+        database.log("MASTER_DATA_SYNC_FAILED", "MASTER_DATA", "TOC_VENDOR_RATES", {
+          message: error.message,
+        });
+        mainWindow?.webContents.send("master-data:status", {
+          status: "OFFLINE_CACHE",
+          message: error.message,
+          summary: database.getLocalMasterDataSummary(),
+        });
+      });
+  }, 1_500);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

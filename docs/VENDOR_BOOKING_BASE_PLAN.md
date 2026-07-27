@@ -324,8 +324,8 @@ event and recipient records remain available for the future lifecycle.
 | --- | --- | --- | --- | --- |
 | VB-00 | planning baseline | Data/status/API/UI contract | `DONE` | This baseline is approved and linked from project progress. |
 | VB-01 | v1.0.8 | Vendor role dashboard + generic Notification Inbox + claim/read-only concurrency | `PENDING` | Four independently scrolling dashboard sections follow the approved filters; two-user claim test passes; shared Inbox displays only job-description-permitted totals/information. |
-| VB-02 | v1.0.9a | Vendor/program/contact master cache + Universal Lookup | `PENDING` | Keyboard typeahead, aliases, stable IDs, and fallback pass dummy UAT. |
-| VB-03 | v1.0.9b | Daywise + micro-item + supplier split workspace | `PENDING` | New itinerary can be fully split without raw Sheet editing. |
+| VB-02 | v1.0.9a | Vendor/program/contact master cache + Universal Lookup | `IN PROGRESS` | Google Sheet source of truth now supplies 82 TOC entries and 232 Vendor rate rows through 2026-12-16; every desktop startup cross-checks content checksum and atomically refreshes SQLite only when changed. Full keyboard navigation, aliases, contacts, stable official vendor IDs, and fallback UAT remain. |
+| VB-03 | v1.0.9b | Daywise + micro-item + supplier split workspace | `IN PROGRESS` | New itinerary can be fully split without raw Sheet editing; each Day derives active/changeover hotels, requires Start Time before Split, permits optional Finish Time, uses a wide resizable two-pane editor, and Save Split persists only to local SQLite until a separate controlled Generate/online stage. |
 | VB-04 | v1.0.10 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
 | VB-05 | v1.0.10/12 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
 | VB-06 | v1.0.11 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
@@ -426,6 +426,8 @@ Implemented:
 - explicit `NEEDS_REVIEW` state so extraction never silently becomes official;
 - editable header including Adult/Child/Infant pax, unlimited hotel rows, inclusive Day 1..N builder, organic
   Day Wise paste field, and side-by-side source itinerary;
+- aligned Arrival/Departure summary groups and an editable Tour Day Header
+  beside each Day Wise service date, persisted to `TOUR_DAYS.day_title`;
 - per-day pre-generation split for Vendor, TOC, Vehicle, and Additional
   Services;
 - transactional local SQLite tables and stable IDs;

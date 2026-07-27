@@ -57,6 +57,91 @@ class GoogleWorkspaceService {
       .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])));
   }
 
+  async syncMasterDataCache() {
+    const [tocRecords, vendorRecords, stateRecords] = await Promise.all([
+      this.sheetRecords("TOC_MASTER"),
+      this.sheetRecords("VENDOR_RATE_MASTER"),
+      this.sheetRecords("MASTER_DATA_STATE").catch(() => []),
+    ]);
+    if (!tocRecords.length || !vendorRecords.length) {
+      throw new Error("Google Sheet TOC/Vendor master data is empty; existing SQLite cache was retained.");
+    }
+    const toc = tocRecords.map((row) => ({
+      tocId: String(row.toc_id || "").trim(),
+      tocName: String(row.toc_name || "").trim(),
+      adultRateIdr: row.adult_rate_idr === "" ? null : row.adult_rate_idr,
+      childRateIdr: row.child_rate_idr === "" ? null : row.child_rate_idr,
+      childAge: String(row.child_age || "").trim(),
+      notes: String(row.notes || "").trim(),
+      validTo: String(row.valid_to || "").trim(),
+      sourceSheet: String(row.source_sheet || "").trim(),
+      sourceRow: Number(row.source_row || 0) || null,
+      updatedAt: String(row.updated_at || "").trim(),
+    }));
+    const vendorRates = vendorRecords.map((row) => ({
+      vendorRateId: String(row.vendor_rate_id || "").trim(),
+      serviceName: String(row.service_name || "").trim(),
+      vendorName: String(row.vendor_name || "").trim(),
+      adultRateIdr: row.adult_rate_idr === "" ? null : row.adult_rate_idr,
+      childRateIdr: row.child_rate_idr === "" ? null : row.child_rate_idr,
+      notes: String(row.notes || "").trim(),
+      description: String(row.description || "").trim(),
+      contractValidity: String(row.contract_validity || "").trim(),
+      validTo: String(row.valid_to || "").trim(),
+      sourceSheet: String(row.source_sheet || "").trim(),
+      sourceRow: Number(row.source_row || 0) || null,
+      updatedAt: String(row.updated_at || "").trim(),
+    }));
+    const invalidToc = toc.find((row) => !row.tocId || !row.tocName || !row.validTo);
+    const invalidVendor = vendorRates.find((row) =>
+      !row.vendorRateId || !row.serviceName || !row.validTo
+    );
+    if (invalidToc || invalidVendor) {
+      throw new Error("Google Sheet master data contains a row without ID, name/service, or valid date.");
+    }
+    const checksum = masterDataChecksum(toc, vendorRates);
+    const state = stateRecords.find((row) =>
+      String(row.master_key || "").trim().toUpperCase() === "TOC_VENDOR_RATES"
+    ) || {};
+    const sourceVersion = String(state.version || "GOOGLE_SHEET").trim();
+    const existing = this.database.getMasterDataSyncState();
+    if (
+      existing?.checksum === checksum
+      && existing.tocRows === toc.length
+      && existing.vendorRateRows === vendorRates.length
+    ) {
+      return {
+        status: "CURRENT",
+        source: "GOOGLE_SHEET",
+        sourceVersion,
+        checksum,
+        tocRows: toc.length,
+        vendorRateRows: vendorRates.length,
+        transportRateRows: Number(state.transport_rate_rows || 0),
+        metadataChecksumMatches: !state.checksum || state.checksum === checksum,
+      };
+    }
+    const summary = this.database.replaceMasterData({
+      sourceVersion,
+      checksum,
+      sourceUpdatedAt: String(state.updated_at || "").trim(),
+      transportRateRows: Number(state.transport_rate_rows || 0),
+      toc,
+      vendorRates,
+    });
+    return {
+      status: "SYNCED",
+      source: "GOOGLE_SHEET",
+      sourceVersion,
+      checksum,
+      tocRows: toc.length,
+      vendorRateRows: vendorRates.length,
+      transportRateRows: Number(state.transport_rate_rows || 0),
+      metadataChecksumMatches: !state.checksum || state.checksum === checksum,
+      summary,
+    };
+  }
+
   async searchAgents(query) {
     const text = String(query || "").trim().toLowerCase();
     if (!text) return [];
@@ -264,7 +349,28 @@ class GoogleWorkspaceService {
 
   async getVendorIntakeContext(customerCode) {
     const itinerary = await this.getRevisionContext(customerCode);
-    const publications = await this.sheetRecords("DEPARTMENT_PUBLICATIONS");
+    const localSuggestions = this.database.getLocalVendorSuggestions();
+    const [publications, vendors, services] = await Promise.all([
+      this.sheetRecords("DEPARTMENT_PUBLICATIONS"),
+      this.sheetRecords("VENDORS").catch(() => []),
+      this.sheetRecords("SERVICES").catch(() => []),
+    ]);
+    const suggestions = {
+      vendorNames: uniqueSortedStrings([
+        ...localSuggestions.vendorNames,
+        ...vendors.map((row) =>
+          firstValue(row, ["vendor_name", "display_name", "legal_name", "name"])
+        ),
+      ]),
+      vendorServices: uniqueSortedStrings([
+        ...localSuggestions.vendorServices,
+        ...services.map((row) =>
+          firstValue(row, ["service_name", "service_description", "activity_name"])
+        ),
+      ]),
+      tocNames: localSuggestions.tocNames,
+      localMasterValidTo: localSuggestions.validTo,
+    };
     const source = publications
       .filter((row) =>
         String(row.customer_code || "").trim().toUpperCase() === itinerary.customerCode
@@ -286,6 +392,7 @@ class GoogleWorkspaceService {
         driveFileName: itinerary.driveFileName,
         driveFileUrl: itinerary.driveFileUrl,
         documentHtml: itinerary.documentHtml,
+        suggestions,
         conversionWarnings: itinerary.conversionWarnings,
         sourceRefreshedAt: new Date().toISOString(),
       };
@@ -305,6 +412,7 @@ class GoogleWorkspaceService {
       driveFileName: itinerary.driveFileName,
       driveFileUrl: itinerary.driveFileUrl,
       documentHtml: itinerary.documentHtml,
+      suggestions,
       arrivalDate: extracted.arrivalDate || "",
       arrivalFlight: extracted.arrivalFlight || "",
       arrivalSector: extracted.arrivalSector || "",
@@ -731,6 +839,28 @@ function firstValue(record, keys) {
   return "";
 }
 
+function uniqueSortedStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function masterDataChecksum(toc, vendorRates) {
+  const normalized = [
+    "TOC_MASTER",
+    ...toc.map((row) => [
+      row.tocId, row.tocName, row.adultRateIdr ?? "", row.childRateIdr ?? "",
+      row.childAge, row.notes, row.validTo, row.sourceSheet, row.sourceRow ?? "",
+    ].map((value) => String(value ?? "")).join("\u001f")),
+    "VENDOR_RATE_MASTER",
+    ...vendorRates.map((row) => [
+      row.vendorRateId, row.serviceName, row.vendorName, row.adultRateIdr ?? "",
+      row.childRateIdr ?? "", row.notes, row.description, row.contractValidity,
+      row.validTo, row.sourceSheet, row.sourceRow ?? "",
+    ].map((value) => String(value ?? "")).join("\u001f")),
+  ].join("\n");
+  return crypto.createHash("sha256").update(normalized).digest("hex");
+}
+
 function parseJsonObject(value) {
   try {
     const parsed = JSON.parse(String(value || ""));
@@ -816,4 +946,9 @@ function resolutionHoursFormula(row) {
   return `=IF(OR($J${row}="",$P${row}=""),"",(VALUE(SUBSTITUTE(LEFT($P${row},19),"T"," "))-VALUE(SUBSTITUTE(LEFT($J${row},19),"T"," ")))*24)`;
 }
 
-module.exports = { GoogleWorkspaceService, parseCustomerCode, sanitizeFilePart };
+module.exports = {
+  GoogleWorkspaceService,
+  masterDataChecksum,
+  parseCustomerCode,
+  sanitizeFilePart,
+};

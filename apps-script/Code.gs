@@ -194,7 +194,9 @@ function saveVendorIntake_(request, actor) {
         revision_id: intake.sourceRevisionId || "",
         day_number: day.dayNumber,
         service_date: day.serviceDate || "",
-        day_title: `Day ${day.dayNumber}`,
+        day_title: String(day.dayTitle || "").trim() || `Day ${day.dayNumber}`,
+        start_time: day.startTime || "",
+        finish_time: day.finishTime || "",
         location: "",
         arrival_departure_flag: Number(day.dayNumber) === 1 ? "ARRIVAL" : "",
         day_notes: day.daywiseText || "",
@@ -305,6 +307,13 @@ function validateVendorIntakePayload_(intake) {
       throw apiError_("VALIDATION_ERROR", "Day Wise numbers must be unique positive integers.");
     }
     dayNumbers[number] = true;
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!timePattern.test(String(day.startTime || ""))) {
+      throw apiError_("VALIDATION_ERROR", `Day ${number} Start Time is required and must use HH:MM.`);
+    }
+    if (day.finishTime && !timePattern.test(String(day.finishTime))) {
+      throw apiError_("VALIDATION_ERROR", `Day ${number} Finish Time must use HH:MM.`);
+    }
     (day.splits || []).forEach((split) => {
       if (!allowedTypes.includes(String(split.serviceType || "").toUpperCase())) {
         throw apiError_("VALIDATION_ERROR", "Unsupported Vendor micro split type.");
@@ -338,6 +347,7 @@ function ensureVendorSchema_() {
     "check_in_date", "check_out_date", "status", "record_version",
     "created_at", "created_by", "updated_at", "updated_by",
   ]);
+  ensureHeaders_("TOUR_DAYS", ["start_time", "finish_time"]);
   ensureHeaders_("SERVICES", ["suggested_vendor_id", "suggested_vendor_name"]);
 }
 
