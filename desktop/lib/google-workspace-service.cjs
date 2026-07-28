@@ -909,20 +909,93 @@ class GoogleWorkspaceService {
     return { ...result, local: this.database.getVendorIntakeDraftByCode(saved.customerCode) };
   }
 
+  async sendVendorBookingEmail(input = {}) {
+    const booking = this.database.getVendorBooking(String(input.bookingId || ""));
+    if (!booking) throw new Error("Generate the Vendor booking before sending.");
+    if (booking.communicationStatus === "SENT") {
+      throw new Error("This booking is already recorded as sent. Generate an amendment instead of resending it.");
+    }
+    if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
+    const cleanHeader = (value) => String(value || "").replace(/[\r\n]+/g, " ").trim();
+    const recipients = booking.recipients || [];
+    const byType = (type) => recipients
+      .filter((row) => String(row.recipientType || "").toUpperCase() === type)
+      .map((row) => cleanHeader(row.address))
+      .filter(Boolean);
+    const to = byType("TO");
+    if (!to.length) throw new Error("At least one TO email address is required.");
+    const headers = [
+      `To: ${to.join(", ")}`,
+      byType("CC").length ? `Cc: ${byType("CC").join(", ")}` : "",
+      byType("BCC").length ? `Bcc: ${byType("BCC").join(", ")}` : "",
+      `Subject: =?UTF-8?B?${Buffer.from(cleanHeader(booking.subject), "utf8").toString("base64")}?=`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: 8bit",
+    ].filter(Boolean);
+    const mime = `${headers.join("\r\n")}\r\n\r\n${String(booking.body || "").replace(/\r?\n/g, "\r\n")}`;
+    const payload = await this.authorizedFetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url") }),
+      },
+    );
+    const saved = this.database.recordVendorBookingEmailSent({
+      bookingId: booking.bookingId,
+      gmailMessageId: payload.id,
+      gmailThreadId: payload.threadId,
+    });
+    return { booking: saved, gmailMessageId: payload.id, gmailThreadId: payload.threadId };
+  }
+
   async getVendorDashboard() {
     const settings = this.database.getPublicSettings();
-    if (!settings.spreadsheetId || !this.authService?.status().connected) {
-      return { urgent: [], pending: [], replied: [], done: [], offline: true };
-    }
-    const [tours, publications, services, bookings, communications] = await Promise.all([
-      this.sheetRecords("TOURS"),
-      this.sheetRecords("DEPARTMENT_PUBLICATIONS"),
-      this.sheetRecords("SERVICES"),
-      this.sheetRecords("SUPPLIER_BOOKINGS"),
-      this.sheetRecords("COMMUNICATIONS"),
-    ]);
     const now = Date.now();
     const plusSeven = now + (7 * 86_400_000);
+    const localQueue = this.database.listVendorBookingQueue();
+    const localItem = (row) => ({
+      customerCode: row.customerCode,
+      customerName: row.customerName,
+      serviceName: `${row.supplierName} · ${row.serviceCount} service${row.serviceCount === 1 ? "" : "s"}`,
+      arrivalDate: row.arrivalDate,
+      status: row.workflowStatus,
+      packageKey: row.packageKey,
+      pendingRateCount: row.pendingRateCount,
+      source: "LOCAL_SPLIT",
+    });
+    const localPending = localQueue
+      .filter((row) => row.workflowStatus !== "SENT")
+      .map(localItem);
+    const localUrgent = localQueue
+      .filter((row) => row.workflowStatus !== "SENT")
+      .filter((row) => {
+        const arrival = new Date(row.arrivalDate || 0).getTime();
+        const age = now - new Date(row.updatedAt || 0).getTime();
+        return (arrival > 0 && arrival <= now + (3 * 86_400_000)) || age > 72 * 3_600_000;
+      })
+      .map(localItem);
+    const localDone = localQueue
+      .filter((row) => row.workflowStatus === "SENT")
+      .filter((row) => {
+        const arrival = new Date(row.arrivalDate || 0).getTime();
+        return arrival > now && arrival <= plusSeven;
+      })
+      .map(localItem);
+    if (!settings.spreadsheetId || !this.authService?.status().connected) {
+      return {
+        urgent: localUrgent, pending: localPending, replied: [], done: localDone,
+        offline: true, localQueueCount: localQueue.length,
+      };
+    }
+    const [tours, publications, services, bookings, communications] = await Promise.all([
+      this.sheetRecords("TOURS").catch(() => []),
+      this.sheetRecords("DEPARTMENT_PUBLICATIONS").catch(() => []),
+      this.sheetRecords("SERVICES").catch(() => []),
+      this.sheetRecords("SUPPLIER_BOOKINGS").catch(() => []),
+      this.sheetRecords("COMMUNICATIONS").catch(() => []),
+    ]);
     const tourById = new Map(tours.map((tour) => [String(tour.tour_id || ""), tour]));
     const serviceById = new Map(services.map((service) => [String(service.service_id || ""), service]));
     const latestReservation = new Map();
@@ -944,7 +1017,7 @@ class GoogleWorkspaceService {
         String(service.tour_id || "") === String(row.tour_id || "")
       ))
       .map((row) => dashboardTourItem(row, tourById.get(String(row.tour_id || ""))));
-    const pending = bookings
+    const onlinePending = bookings
       .filter((row) => !["SENT", "CONFIRMED", "CANCELED"].includes(String(row.status || "").toUpperCase()))
       .map((row) => {
         const service = serviceById.get(String(row.service_id || "")) || {};
@@ -958,14 +1031,29 @@ class GoogleWorkspaceService {
         && !["REVIEWED", "CLOSED"].includes(String(row.status || "").toUpperCase())
       )
       .map((row) => dashboardTourItem(row, tourById.get(String(row.tour_id || ""))));
-    const done = tours
+    const onlineDone = tours
       .filter((tour) => ["DONE", "COMPLETE", "COMPLETED"].includes(String(tour.overall_status || tour.status || "").toUpperCase()))
       .filter((tour) => {
         const arrival = new Date(tour.arrival_date || 0).getTime();
         return arrival > now && arrival <= plusSeven;
       })
       .map((tour) => dashboardTourItem(tour, tour));
-    return { urgent, pending, replied, done, offline: false };
+    const merge = (first, second) => {
+      const result = new Map();
+      [...first, ...second].forEach((row) => {
+        const key = row.packageKey || `${row.customerCode}|${row.serviceName || row.status || ""}`;
+        if (!result.has(key)) result.set(key, row);
+      });
+      return [...result.values()];
+    };
+    return {
+      urgent: merge(localUrgent, urgent),
+      pending: merge(localPending, onlinePending),
+      replied,
+      done: merge(localDone, onlineDone),
+      offline: false,
+      localQueueCount: localQueue.length,
+    };
   }
 
   async getRecheckContext(customerCode) {

@@ -492,6 +492,99 @@ test("keeps Additional Service bookable while its manual rate is pending", () =>
   assert.equal(split.status, "DRAFT");
 }));
 
+test("groups Vendor and Additional splits per supplier while excluding Transport and preserves booking history", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    sourceVersion: "VENDOR-BOOKING-TEST",
+    supplierTypes: [
+      { supplierTypeId: "ST-VENDOR", typeCode: "VENDOR", typeName: "Vendor", status: "ACTIVE", active: true },
+      { supplierTypeId: "ST-ADDITIONAL", typeCode: "ADDITIONAL_SERVICE", typeName: "Additional Service", status: "ACTIVE", active: true },
+      { supplierTypeId: "ST-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport", status: "ACTIVE", active: true },
+    ],
+    suppliers: [{
+      supplierId: "SUP-VENDOR-1", supplierTypeId: "ST-VENDOR", typeCode: "VENDOR",
+      supplierName: "Bali Activity", status: "ACTIVE", active: true,
+    }],
+    recipients: [{
+      recipientId: "REC-VENDOR-1", supplierId: "SUP-VENDOR-1", recipientType: "WHATSAPP",
+      channel: "WHATSAPP", address: "+62 812-0000-0000", status: "ACTIVE", active: true,
+    }],
+    sops: [{
+      sopId: "SOP-VENDOR-1", supplierId: "SUP-VENDOR-1",
+      bookingChannels: ["WHATSAPP"], bodyTemplate: "Booking {{customer_code}}",
+      status: "ACTIVE", active: true,
+    }],
+    products: [], contracts: [], rates: [],
+  });
+  database.saveVendorIntakeDraft({
+    customerCode: "TEST/VENDOR-BOOKING",
+    customerName: "Vendor Booking Guest",
+    adultPax: 2,
+    arrivalDate: "2026-09-01",
+    departureDate: "2026-09-03",
+    days: [{
+      dayNumber: 1, serviceDate: "2026-09-01", startTime: "09:00",
+      splits: [
+        {
+          serviceType: "VENDOR", activityText: "Rafting", supplierId: "SUP-VENDOR-1",
+          vendorName: "Bali Activity", rateStatus: "PENDING_RATE",
+        },
+        {
+          serviceType: "TRANSPORT", activityText: "Full Day Car",
+          vendorName: "Transport Partner", rateStatus: "RATE_READY", unitRateIdr: 700000,
+        },
+      ],
+    }, {
+      dayNumber: 2, serviceDate: "2026-09-02", startTime: "08:00",
+      splits: [{
+        serviceType: "VENDOR", activityText: "Cycling", supplierId: "SUP-VENDOR-1",
+        vendorName: "Bali Activity", rateStatus: "RATE_READY", unitRateIdr: 250000,
+      }, {
+        serviceType: "ADDITIONAL_SERVICE", activityText: "Floating Breakfast",
+        vendorName: "Villa Partner", priceSource: "MANUAL", unitRateIdr: 150000,
+        manualPriceReason: "Dynamic hotel add-on", manualRateSource: "WhatsApp quote",
+        rateStatus: "RATE_READY",
+      }],
+    }],
+  });
+
+  const queue = database.listVendorBookingQueue();
+  assert.equal(queue.length, 2);
+  const activity = queue.find((row) => row.supplierId === "SUP-VENDOR-1");
+  assert.equal(activity.serviceCount, 2);
+  assert.equal(activity.pendingRateCount, 1);
+  assert.ok(queue.every((row) => row.services.every((service) => service.serviceType !== "TRANSPORT")));
+
+  const preview = database.getVendorBookingPreview({
+    packageKey: activity.packageKey, actionType: "NEW",
+  });
+  assert.equal(preview.channel, "WHATSAPP");
+  assert.equal(preview.recipients[0].address, "+62 812-0000-0000");
+  assert.match(preview.body, /TEST\/VENDOR-BOOKING/);
+
+  const generated = database.saveVendorBookingPreview({
+    packageKey: activity.packageKey, actionType: "NEW",
+  });
+  assert.equal(generated.communicationStatus, "GENERATED");
+  assert.equal(generated.rateStatus, "PENDING_RATE");
+  const sent = database.recordVendorBookingExternalAction({
+    bookingId: generated.bookingId, externalReference: "WA 09:15 confirmed delivered",
+  });
+  assert.equal(sent.communicationStatus, "SENT");
+
+  const canceled = database.saveVendorBookingPreview({
+    packageKey: activity.packageKey, actionType: "CANCEL",
+    cancellationReason: "Guest canceled the tour",
+  });
+  assert.notEqual(canceled.bookingId, sent.bookingId);
+  assert.equal(canceled.actionType, "CANCEL");
+  const repeatedPreparation = database.saveVendorBookingPreview({
+    packageKey: activity.packageKey, actionType: "CANCEL",
+    cancellationReason: "Guest canceled the tour",
+  });
+  assert.equal(repeatedPreparation.bookingId, canceled.bookingId);
+  assert.equal(database.listVendorBookings().length, 2);
+}));
+
 test("uses dynamic Supplier Types and only exposes contract rates valid on the service date", () => withDatabase((database) => {
   database.replaceSupplierMasterCache({
     sourceVersion: "SUPPLIER-MASTER-TEST",

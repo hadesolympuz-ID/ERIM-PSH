@@ -359,7 +359,7 @@ event and recipient records remain available for the future lifecycle.
 | VB-03 | v1.0.9-v1.0.10 | Daywise + micro-item + supplier split workspace | `IN PROGRESS` | New itinerary can be fully split without raw Sheet editing; each Day derives active/changeover hotels, requires Start Time before Split, permits optional Finish Time, uses a wide resizable two-pane editor, and Save Split persists only to local SQLite until a separate controlled Generate/online stage. Five type-aware catalogues and independent booking/rate status are implemented in v1.0.10. |
 | VB-03A | v1.0.11 | Micro split Type dropdown hotfix | `DONE` | All five types remain visible in a fixed select regardless of the current selection. |
 | VB-03B | v1.1.6 | Supplier publication and Micro Split rehabilitation | `IN PROGRESS — FINAL UAT` | Dependency-aware Publish Sessions expose live Google-confirmed progress and safe resume; the complete Supplier/Product catalogue survives startup and itinerary loading; missing/invalid Rates produce `PENDING_RATE`; and per-Day service dates select the correct effective Contract Rate. Micro Split passed user trial, Apps Script Web App v18 is active, dashboard/collapse navigation is separated, and Product duplication supports tracked multi-select. The mixed-Type 94-record publish UAT remains. |
-| VB-04 | v1.0.12 | Template preview + safe Gmail/WhatsApp/portal send evidence | `PENDING` | DEV whitelist blocks unsafe send; exact sent snapshot is auditable. |
+| VB-04 | v1.1.7 | Template preview + safe Gmail/WhatsApp/portal send evidence | `IN PROGRESS — UAT READY` | Local Vendor/Additional packages, Supplier Master SOP/recipient preview, explicit Gmail send confirmation, external-channel evidence, and preserved local snapshots are implemented. Official Apps Script booking/communication publication, DEV recipient whitelist, attachments, and live send UAT remain. |
 | VB-05 | v1.0.12/14 | Reply inbox + per-micro-item review attempts | `PENDING` | Confirmed/Not Confirmed/Review Again work independently per item. |
 | VB-06 | v1.0.13 | Revision impact + amend/rebook/cancel | `PENDING` | Confirmed history survives; all affected items require human decisions. |
 | VB-07 | v1.0.14 | Completion gate + Vendor publication | `PENDING` | Incomplete item blocks completion; resolved case notifies Reservation. |
@@ -429,8 +429,15 @@ The following inputs are required before VB-04:
 - booking subject/body/attachment SOP;
 - approved template versioning rule.
 
-Until these are supplied, implementation must stop at preview/draft and may not
-send to arbitrary recipients.
+The production operator must still inspect the exact TO/CC/BCC, subject, body,
+services, channel, and rate warnings. The desktop never sends while generating.
+Email becomes available only for a generated Email snapshot and always shows a
+second explicit confirmation containing Supplier, TO, Subject, and connected
+sender account. UAT must use an approved recipient; arbitrary live-recipient
+testing is prohibited.
+
+The detailed operator procedure is recorded in
+`docs/VENDOR_BOOKING_GENERATE_SOP.md`.
 
 ## 16. Definition of done
 

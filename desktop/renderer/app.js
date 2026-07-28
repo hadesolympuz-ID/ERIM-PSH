@@ -13,6 +13,11 @@ const state = {
   onlineNotifications: [],
   followups: [],
   vendorDashboard: { urgent: [], pending: [], replied: [], done: [], offline: true },
+  vendorBookingQueue: [],
+  vendorBookings: [],
+  vendorBookingPreview: null,
+  selectedVendorPackageKey: "",
+  vendorIntakeMode: "NEW",
   vendorIntake: null,
   vendorSuggestions: {
     vendorNames: [],
@@ -178,16 +183,22 @@ async function refresh() {
     state.onlineNotifications = [];
   }
   try {
-    state.vendorDashboard = state.auth.connected
-      ? await window.erim.vendor.getDashboard()
-      : { urgent: [], pending: [], replied: [], done: [], offline: true };
+    [state.vendorDashboard, state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.getDashboard(),
+      window.erim.vendor.listBookingQueue(),
+      window.erim.vendor.listBookings(),
+    ]);
   } catch {
     state.vendorDashboard = { urgent: [], pending: [], replied: [], done: [], offline: true };
+    state.vendorBookingQueue = [];
+    state.vendorBookings = [];
   }
   renderChrome();
   renderDashboard();
   renderVendorDashboard();
   renderVendorInbox();
+  renderVendorBookingQueue();
+  renderVendorCancel();
   renderWorkspace();
   renderReservationFollowups();
   renderPersonalKpi();
@@ -279,7 +290,9 @@ function renderVendorDashboard() {
             item.status,
           ].filter(Boolean).join(" · "))}</small>
         </div>
-        ${bucket === "done" ? "" : `<button class="button ghost small" type="button" data-vendor-open-code="${escapeHtml(item.customerCode || "")}">Open</button>`}
+        ${bucket === "done" ? "" : `<button class="button ghost small" type="button"
+          data-vendor-open-code="${escapeHtml(item.customerCode || "")}"
+          data-vendor-open-package="${escapeHtml(item.packageKey || "")}">Open</button>`}
       </article>
     `).join("") : `<div class="empty-notifications">${data.offline ? "Connect Google to load online Vendor data." : `No ${bucket} item.`}</div>`;
   });
@@ -296,6 +309,257 @@ function renderVendorInbox() {
       <time class="notification-time">${formatDate(item.createdAt)}</time>
     </article>
   `).join("") : `<div class="empty-notifications">No Vendor notifications.</div>`;
+}
+
+function formatIdr(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
+}
+
+function vendorServiceRateLabel(service) {
+  const rates = [
+    service.adultRateIdr !== null && service.adultRateIdr !== undefined
+      ? `Adult ${formatIdr(service.adultRateIdr)}` : "",
+    service.childRateIdr !== null && service.childRateIdr !== undefined
+      ? `Child ${formatIdr(service.childRateIdr)}` : "",
+    service.unitRateIdr !== null && service.unitRateIdr !== undefined
+      ? `Unit ${formatIdr(service.unitRateIdr)}` : "",
+  ].filter(Boolean);
+  return rates.join(" · ") || "Rate amount pending";
+}
+
+function renderVendorBookingQueue() {
+  const list = $("#vendor-booking-queue-list");
+  if (!list) return;
+  const search = String($("#vendor-booking-search")?.value || "").trim().toLowerCase();
+  const rows = (state.vendorBookingQueue || []).filter((item) =>
+    !search || `${item.customerCode} ${item.customerName} ${item.supplierName}`.toLowerCase().includes(search)
+  );
+  $("#vendor-booking-package-count").textContent = state.vendorBookingQueue.length;
+  list.innerHTML = rows.length ? rows.map((item) => `
+    <button class="vendor-booking-queue-item${item.packageKey === state.selectedVendorPackageKey ? " selected" : ""}"
+      type="button" data-vendor-package-key="${escapeHtml(item.packageKey)}">
+      <span><strong>${escapeHtml(item.customerCode)}</strong><small>${escapeHtml(item.customerName)}</small></span>
+      <span><strong>${escapeHtml(item.supplierName)}</strong><small>${item.serviceCount} service · ${escapeHtml(item.workflowStatus.replaceAll("_", " "))}</small></span>
+      <span class="status ${item.pendingRateCount ? "conflict" : "synced"}">${item.pendingRateCount ? `${item.pendingRateCount} pending rate` : "Rate ready"}</span>
+    </button>
+  `).join("") : `<div class="empty-notifications">No Vendor or Additional Service split matches this filter.</div>`;
+}
+
+function recipientLines(recipients = []) {
+  return recipients.map((row) => `${row.recipientType || "TO"} | ${row.address}`).join("\n");
+}
+
+function parseRecipientLines(value) {
+  return String(value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [type, ...addressParts] = line.split("|");
+    return {
+      recipientType: String(type || "TO").trim().toUpperCase(),
+      address: addressParts.join("|").trim(),
+    };
+  }).filter((row) => row.address);
+}
+
+async function openVendorBookingPackage(packageKey, options = {}) {
+  state.selectedVendorPackageKey = packageKey;
+  try {
+    const preview = await window.erim.vendor.getBookingPreview({
+      packageKey,
+      actionType: options.actionType || $("#vendor-booking-action")?.value || "NEW",
+      channel: options.channel || "",
+      cancellationReason: options.cancellationReason || "",
+    });
+    state.vendorBookingPreview = preview;
+    renderVendorBookingQueue();
+    renderVendorBookingPreview();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderVendorBookingPreview() {
+  const preview = state.vendorBookingPreview;
+  $("#vendor-booking-empty").hidden = Boolean(preview);
+  $("#vendor-booking-preview").hidden = !preview;
+  if (!preview) return;
+  $("#vendor-booking-preview-title").textContent = `${preview.customerCode} · ${preview.supplierName}`;
+  $("#vendor-booking-preview-status").innerHTML = `${statusPill(preview.rateStatus)} ${statusPill(preview.workflowStatus)}`;
+  $("#vendor-booking-action").value = preview.actionType;
+  $("#vendor-booking-channel").innerHTML = preview.availableChannels.map((channel) =>
+    `<option value="${escapeHtml(channel)}"${channel === preview.channel ? " selected" : ""}>${escapeHtml(channel)}</option>`
+  ).join("");
+  $("#vendor-booking-recipients").value = recipientLines(preview.recipients);
+  $("#vendor-booking-subject").value = preview.subject;
+  $("#vendor-booking-body").value = preview.body;
+  $("#vendor-booking-service-summary").innerHTML = `
+    <div><strong>${preview.serviceCount} service</strong><small>${preview.adultPax} adult · ${preview.childPax} child · ${preview.infantPax} infant</small></div>
+    ${preview.services.map((service) => `
+      <article>
+        <span>Day ${service.dayNumber} · ${escapeHtml(service.serviceDate || "date pending")}</span>
+        <strong>${escapeHtml(service.productName || service.activityText)}</strong>
+        <small>${escapeHtml(service.priceBasis || "PER SERVICE")} · ${escapeHtml(vendorServiceRateLabel(service))} · ${escapeHtml(service.rateStatus)}</small>
+      </article>
+    `).join("")}
+  `;
+  const sop = preview.sop || {};
+  $("#vendor-booking-sop").innerHTML = [
+    sop.leadTime && `Lead time: ${sop.leadTime}`,
+    sop.cutoffTime && `Cut-off: ${sop.cutoffTime}`,
+    sop.portalUrl && `Portal: ${sop.portalUrl}`,
+    sop.confirmationProcedure && `Confirmation: ${sop.confirmationProcedure}`,
+    preview.pendingRateCount ? `${preview.pendingRateCount} rate belum final; booking tetap boleh dikirim.` : "",
+    !preview.masterLinked ? "Supplier belum terhubung ke Supplier Master; recipient/channel perlu dicek manual." : "",
+  ].filter(Boolean).map((line) => `<span>${escapeHtml(line)}</span>`).join("");
+  const generated = preview.latestBooking?.communicationStatus === "GENERATED";
+  $("#vendor-booking-send-panel").hidden = !generated || preview.channel === "EMAIL";
+  $("#send-vendor-booking-email").hidden = !generated || preview.channel !== "EMAIL";
+  $("#vendor-booking-send-note").textContent = preview.channel === "EMAIL"
+    ? generated
+      ? "Generated snapshot is ready. Send uses the connected employee Gmail and requires one final confirmation."
+      : "Generate first; email sending will then require explicit final confirmation."
+    : "Generate first, complete the external action, then record its reference/evidence.";
+}
+
+async function generateVendorBooking() {
+  const preview = state.vendorBookingPreview;
+  if (!preview) return toast("Choose a supplier package first.", true);
+  const recipients = parseRecipientLines($("#vendor-booking-recipients").value);
+  const channel = $("#vendor-booking-channel").value;
+  if (channel === "EMAIL" && !recipients.some((row) => row.recipientType === "TO")) {
+    return toast("Email booking requires at least one TO recipient.", true);
+  }
+  const button = $("#generate-vendor-booking");
+  button.disabled = true;
+  try {
+    const booking = await window.erim.vendor.generateBooking({
+      packageKey: preview.packageKey,
+      bookingId: preview.latestBooking?.bookingId || "",
+      actionType: $("#vendor-booking-action").value,
+      channel,
+      recipients,
+      subject: $("#vendor-booking-subject").value,
+      body: $("#vendor-booking-body").value,
+      cancellationReason: preview.cancellationReason || "",
+    });
+    [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.listBookingQueue(),
+      window.erim.vendor.listBookings(),
+    ]);
+    await openVendorBookingPackage(preview.packageKey, {
+      actionType: booking.actionType,
+      channel: booking.channel,
+      cancellationReason: booking.cancellationReason,
+    });
+    $("#vendor-booking-send-panel").hidden = booking.channel === "EMAIL";
+    toast(`${booking.actionType} booking generated for ${booking.supplierName}. Nothing was sent yet.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function recordVendorBookingSent() {
+  const booking = state.vendorBookingPreview?.latestBooking;
+  if (!booking?.bookingId) return toast("Generate this booking first.", true);
+  try {
+    await window.erim.vendor.recordExternalSent({
+      bookingId: booking.bookingId,
+      externalReference: $("#vendor-booking-external-reference").value,
+    });
+    await refresh();
+    await openVendorBookingPackage(state.selectedVendorPackageKey, {
+      actionType: booking.actionType, channel: booking.channel,
+    });
+    toast("External booking action recorded as sent with local evidence.");
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function sendVendorBookingEmail() {
+  const booking = state.vendorBookingPreview?.latestBooking;
+  if (!booking?.bookingId || booking.communicationStatus !== "GENERATED") {
+    return toast("Generate the latest email snapshot first.", true);
+  }
+  const to = (booking.recipients || [])
+    .filter((row) => row.recipientType === "TO").map((row) => row.address).join(", ");
+  const confirmed = window.confirm(
+    `Send this booking email now?\n\nSupplier: ${booking.supplierName}\nTO: ${to}\nSubject: ${booking.subject}\n\nThis action sends a real email from ${state.auth.email || "the connected Google account"}.`
+  );
+  if (!confirmed) return;
+  const button = $("#send-vendor-booking-email");
+  button.disabled = true;
+  button.textContent = "Sending...";
+  try {
+    const result = await window.erim.vendor.sendBookingEmail({ bookingId: booking.bookingId });
+    await refresh();
+    await openVendorBookingPackage(state.selectedVendorPackageKey, {
+      actionType: booking.actionType, channel: "EMAIL",
+    });
+    toast(`Email sent and recorded. Gmail message: ${result.gmailMessageId}`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Send email now";
+  }
+}
+
+function renderVendorCancel() {
+  const select = $("#vendor-cancel-customer");
+  if (!select) return;
+  const previous = select.value;
+  const customers = [...new Map((state.vendorBookingQueue || []).map((item) =>
+    [item.customerCode, item.customerName]
+  )).entries()];
+  select.innerHTML = `<option value="">Choose Customer Code</option>${customers.map(([code, name]) =>
+    `<option value="${escapeHtml(code)}">${escapeHtml(code)} · ${escapeHtml(name)}</option>`
+  ).join("")}`;
+  if (customers.some(([code]) => code === previous)) select.value = previous;
+  const cancellations = (state.vendorBookings || []).filter((row) => row.actionType === "CANCEL");
+  $("#vendor-cancel-package-list").innerHTML = cancellations.length ? cancellations.map((row) => `
+    <article class="vendor-cancel-record">
+      <div><strong>${escapeHtml(row.customerCode)} · ${escapeHtml(row.supplierName)}</strong><small>${escapeHtml(row.channel)} · ${escapeHtml(row.communicationStatus)} · ${escapeHtml(row.cancellationReason)}</small></div>
+      <button class="button ghost small" type="button" data-open-vendor-cancel="${escapeHtml(row.packageKey)}">Open</button>
+    </article>
+  `).join("") : `<div class="empty-notifications">No cancellation package prepared.</div>`;
+}
+
+async function prepareVendorCancelAll() {
+  const customerCode = $("#vendor-cancel-customer").value;
+  const reason = $("#vendor-cancel-reason").value.trim();
+  if (!customerCode || !reason) return toast("Customer Code and cancellation reason are required.", true);
+  const packages = state.vendorBookingQueue.filter((item) => item.customerCode === customerCode);
+  if (!packages.length) return toast("No Vendor package exists for this Customer Code.", true);
+  const button = $("#prepare-vendor-cancel");
+  button.disabled = true;
+  try {
+    for (const item of packages) {
+      const preview = await window.erim.vendor.getBookingPreview({
+        packageKey: item.packageKey, actionType: "CANCEL", cancellationReason: reason,
+      });
+      await window.erim.vendor.generateBooking({
+        packageKey: item.packageKey,
+        actionType: "CANCEL",
+        channel: preview.channel,
+        recipients: preview.recipients,
+        subject: preview.subject,
+        body: preview.body,
+        cancellationReason: reason,
+      });
+    }
+    [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.listBookingQueue(), window.erim.vendor.listBookings(),
+    ]);
+    renderVendorCancel();
+    renderVendorBookingQueue();
+    toast(`${packages.length} cancellation package(s) prepared. Nothing was sent.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderWorkspace() {
@@ -2665,6 +2929,19 @@ function vendorSplitTypeLabel(value) {
     || "Vendor";
 }
 
+function setVendorIntakeMode(mode = "NEW") {
+  state.vendorIntakeMode = mode === "REVISE" ? "REVISE" : "NEW";
+  $("#vendor-intake-mode-title").textContent = state.vendorIntakeMode === "REVISE"
+    ? "Revise Itinerary"
+    : "New Itinerary";
+  $("#vendor-intake-mode-description").textContent = state.vendorIntakeMode === "REVISE"
+    ? "Load the saved itinerary, edit affected days or Micro Split items, then save before generating supplier amendments."
+    : "Review extraction, complete Day Wise, and split services before entering Generate Booking.";
+  $("#save-vendor-draft").textContent = state.vendorIntakeMode === "REVISE"
+    ? "Save revised local draft"
+    : "Save local draft";
+}
+
 async function loadVendorItinerary(customerCode = "") {
   const code = String(customerCode || $("#vendor-customer-code").value || "").trim().toUpperCase();
   if (!code) return toast("Input Customer Code first.", true);
@@ -2730,8 +3007,10 @@ function openVendorNotification(actionUrl) {
     return loadVendorItinerary(code);
   }
   if (action === "vendor-revise-itinerary") {
-    showView("vendor-revise-itinerary", "VENDOR");
-    toast(`${code} opened in Vendor revision queue.`);
+    setVendorIntakeMode("REVISE");
+    showView("vendor-new-itinerary", "VENDOR");
+    $("#vendor-customer-code").value = code;
+    return loadVendorItinerary(code);
   }
 }
 
@@ -2781,7 +3060,10 @@ function bindEvents() {
         revise: "vendor-revise-itinerary", cancel: "vendor-cancel", kpi: "vendor-kpi",
       };
       showView(views[vendorAction.dataset.vendorAction], "VENDOR");
-      if (vendorAction.dataset.vendorAction === "new") $("#vendor-customer-code").focus();
+      if (vendorAction.dataset.vendorAction === "new") {
+        setVendorIntakeMode("NEW");
+        $("#vendor-customer-code").focus();
+      }
       return;
     }
     const reservationAction = event.target.closest("[data-reservation-action]");
@@ -3234,6 +3516,26 @@ function bindEvents() {
   $("#vendor-customer-code").addEventListener("change", () => loadVendorItinerary());
   $("#save-vendor-draft").addEventListener("click", () => saveVendorIntake(false));
   $("#post-vendor-intake").addEventListener("click", () => saveVendorIntake(true));
+  $("#vendor-booking-search").addEventListener("input", renderVendorBookingQueue);
+  $("#vendor-booking-action").addEventListener("change", () =>
+    openVendorBookingPackage(state.selectedVendorPackageKey, {
+      actionType: $("#vendor-booking-action").value,
+      channel: $("#vendor-booking-channel").value,
+    }));
+  $("#vendor-booking-channel").addEventListener("change", () =>
+    openVendorBookingPackage(state.selectedVendorPackageKey, {
+      actionType: $("#vendor-booking-action").value,
+      channel: $("#vendor-booking-channel").value,
+    }));
+  $("#generate-vendor-booking").addEventListener("click", generateVendorBooking);
+  $("#send-vendor-booking-email").addEventListener("click", sendVendorBookingEmail);
+  $("#record-vendor-booking-sent").addEventListener("click", recordVendorBookingSent);
+  $("#prepare-vendor-cancel").addEventListener("click", prepareVendorCancelAll);
+  $("#open-vendor-revise-workspace").addEventListener("click", () => {
+    setVendorIntakeMode("REVISE");
+    showView("vendor-new-itinerary", "VENDOR");
+    $("#vendor-customer-code").focus();
+  });
   $("#add-vendor-hotel").addEventListener("click", () => {
     const payload = collectVendorIntake();
     payload.hotels.push({ hotelStayId: "", hotelName: "", checkInDate: "", checkOutDate: "" });
@@ -3252,8 +3554,25 @@ function bindEvents() {
   document.body.addEventListener("click", (event) => {
     const notification = event.target.closest("[data-notification-action]");
     if (notification) return openVendorNotification(notification.dataset.notificationAction);
+    const vendorPackage = event.target.closest("[data-vendor-package-key]");
+    if (vendorPackage) return openVendorBookingPackage(vendorPackage.dataset.vendorPackageKey);
+    const openCancel = event.target.closest("[data-open-vendor-cancel]");
+    if (openCancel) {
+      showView("vendor-generate", "VENDOR");
+      return openVendorBookingPackage(openCancel.dataset.openVendorCancel, { actionType: "CANCEL" });
+    }
     const vendorOpen = event.target.closest("[data-vendor-open-code]");
     if (vendorOpen) {
+      const matchingPackage = state.vendorBookingQueue.find((item) =>
+        item.packageKey === vendorOpen.dataset.vendorOpenPackage
+      ) || state.vendorBookingQueue.find((item) =>
+        item.customerCode === vendorOpen.dataset.vendorOpenCode
+      );
+      if (matchingPackage) {
+        showView("vendor-generate", "VENDOR");
+        return openVendorBookingPackage(matchingPackage.packageKey);
+      }
+      setVendorIntakeMode("NEW");
       showView("vendor-new-itinerary", "VENDOR");
       $("#vendor-customer-code").value = vendorOpen.dataset.vendorOpenCode;
       return loadVendorItinerary(vendorOpen.dataset.vendorOpenCode);

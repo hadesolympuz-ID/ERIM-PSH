@@ -99,6 +99,14 @@ function registerIpc() {
   ipcMain.handle("vendor:intake-draft-list", () => database.listVendorIntakeDrafts());
   ipcMain.handle("vendor:intake-draft-save", (_event, details) => database.saveVendorIntakeDraft(details));
   ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
+  ipcMain.handle("vendor:booking-queue", () => database.listVendorBookingQueue());
+  ipcMain.handle("vendor:booking-list", () => database.listVendorBookings());
+  ipcMain.handle("vendor:booking-preview", (_event, details) => database.getVendorBookingPreview(details || {}));
+  ipcMain.handle("vendor:booking-generate", (_event, details) => database.saveVendorBookingPreview(details || {}));
+  ipcMain.handle("vendor:booking-email-send", (_event, details) =>
+    googleWorkspace.sendVendorBookingEmail(details || {}));
+  ipcMain.handle("vendor:booking-external-sent", (_event, details) =>
+    database.recordVendorBookingExternalAction(details || {}));
   ipcMain.handle("master-data:sync", () => googleWorkspace.syncMasterDataCache());
   ipcMain.handle("supplier-master:list", (_event, options) => googleWorkspace.listSupplierMaster(options || {}));
   ipcMain.handle("supplier-master:initialize", () => googleWorkspace.initializeSupplierMaster());

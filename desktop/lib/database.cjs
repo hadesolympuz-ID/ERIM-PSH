@@ -297,6 +297,52 @@ class LocalDatabase {
       CREATE INDEX IF NOT EXISTS idx_vendor_split_day
         ON vendor_service_splits(tour_day_id, split_sequence);
 
+      CREATE TABLE IF NOT EXISTS local_vendor_bookings (
+        booking_id TEXT PRIMARY KEY,
+        package_key TEXT NOT NULL,
+        customer_code TEXT NOT NULL,
+        tour_id TEXT,
+        supplier_id TEXT,
+        supplier_name TEXT NOT NULL,
+        supplier_type TEXT NOT NULL,
+        action_type TEXT NOT NULL DEFAULT 'NEW',
+        channel TEXT NOT NULL DEFAULT 'OTHERS',
+        booking_status TEXT NOT NULL DEFAULT 'DRAFT',
+        communication_status TEXT NOT NULL DEFAULT 'NOT_GENERATED',
+        supplier_result TEXT NOT NULL DEFAULT 'PENDING',
+        rate_status TEXT NOT NULL DEFAULT 'PENDING_RATE',
+        subject TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        recipients_json TEXT NOT NULL DEFAULT '[]',
+        source_revision_id TEXT,
+        cancellation_reason TEXT NOT NULL DEFAULT '',
+        external_reference TEXT NOT NULL DEFAULT '',
+        gmail_thread_id TEXT NOT NULL DEFAULT '',
+        gmail_message_id TEXT NOT NULL DEFAULT '',
+        generated_at TEXT,
+        sent_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_booking_package
+        ON local_vendor_bookings(package_key, action_type, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_booking_status
+        ON local_vendor_bookings(booking_status, communication_status, updated_at);
+
+      CREATE TABLE IF NOT EXISTS local_vendor_booking_services (
+        booking_service_id TEXT PRIMARY KEY,
+        booking_id TEXT NOT NULL,
+        service_id TEXT NOT NULL,
+        service_snapshot_json TEXT NOT NULL,
+        service_status TEXT NOT NULL DEFAULT 'REQUIRED',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(booking_id) REFERENCES local_vendor_bookings(booking_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_local_vendor_booking_service_booking
+        ON local_vendor_booking_services(booking_id, service_id);
+
       CREATE TABLE IF NOT EXISTS local_toc_master (
         toc_id TEXT PRIMARY KEY,
         toc_name TEXT NOT NULL,
@@ -2032,6 +2078,344 @@ class LocalDatabase {
       WHERE customer_code = ?
     `).run(this.now(), code);
     return this.getVendorIntakeDraftByCode(code);
+  }
+
+  listVendorBookingQueue() {
+    const catalog = this.getSupplierMasterCatalog();
+    const active = (row) => String(row.status || "ACTIVE").toUpperCase() !== "ARCHIVED"
+      && row.active !== false;
+    const suppliers = (catalog.suppliers || []).filter(active);
+    const products = new Map((catalog.products || []).filter(active)
+      .map((row) => [String(row.productId || ""), row]));
+    const supplierById = new Map(suppliers.map((row) => [String(row.supplierId || ""), row]));
+    const supplierByName = new Map(suppliers.map((row) => [
+      String(row.supplierName || "").trim().toUpperCase(), row,
+    ]));
+    const packages = new Map();
+    for (const summary of this.listVendorIntakeDrafts()) {
+      const intake = this.getVendorIntakeDraftByCode(summary.customer_code);
+      for (const day of intake?.days || []) {
+        for (const split of day.splits || []) {
+          const type = normalizeVendorSplitType(split.serviceType);
+          if (!["VENDOR", "ADDITIONAL_SERVICE"].includes(type)) continue;
+          const matchedSupplier = supplierById.get(String(split.supplierId || ""))
+            || supplierByName.get(String(split.vendorName || "").trim().toUpperCase())
+            || null;
+          const supplierId = String(matchedSupplier?.supplierId || split.supplierId || "");
+          const supplierName = String(matchedSupplier?.supplierName || split.vendorName || "Unassigned supplier").trim();
+          const identity = supplierId || `NAME:${supplierName.toUpperCase()}`;
+          const packageKey = `${intake.customerCode}|${identity}`;
+          if (!packages.has(packageKey)) {
+            packages.set(packageKey, {
+              packageKey,
+              customerCode: intake.customerCode,
+              customerName: intake.customerName,
+              tourId: intake.tourId || "",
+              sourceRevisionId: intake.sourceRevisionId || "",
+              arrivalDate: intake.arrivalDate || "",
+              departureDate: intake.departureDate || "",
+              adultPax: Number(intake.adultPax || 0),
+              childPax: Number(intake.childPax || 0),
+              infantPax: Number(intake.infantPax || 0),
+              updatedAt: intake.updatedAt || "",
+              supplierId,
+              supplierName,
+              supplierType: type,
+              masterLinked: Boolean(matchedSupplier),
+              services: [],
+            });
+          }
+          const product = products.get(String(split.productId || "")) || {};
+          packages.get(packageKey).services.push({
+            ...split,
+            serviceType: type,
+            dayNumber: Number(day.dayNumber || 0),
+            serviceDate: day.serviceDate || "",
+            dayTitle: day.dayTitle || "",
+            productName: product.productName || split.activityText,
+          });
+        }
+      }
+    }
+    const latestStatement = this.db.prepare(`
+      SELECT * FROM local_vendor_bookings
+      WHERE package_key = ?
+      ORDER BY updated_at DESC LIMIT 1
+    `);
+    return [...packages.values()].map((item) => {
+      const latest = latestStatement.get(item.packageKey);
+      const pendingRates = item.services.filter((service) => service.rateStatus !== "RATE_READY").length;
+      return {
+        ...item,
+        serviceCount: item.services.length,
+        pendingRateCount: pendingRates,
+        rateStatus: pendingRates ? "PENDING_RATE" : "RATE_READY",
+        latestBooking: latest ? this.vendorBookingRow(latest) : null,
+        workflowStatus: latest?.communication_status || "NOT_GENERATED",
+        updatedAt: latest?.updated_at || item.updatedAt,
+      };
+    }).sort((a, b) =>
+      String(a.arrivalDate || "9999").localeCompare(String(b.arrivalDate || "9999"))
+      || a.customerCode.localeCompare(b.customerCode)
+      || a.supplierName.localeCompare(b.supplierName)
+    );
+  }
+
+  getVendorBookingPreview(input = {}) {
+    const packageKey = String(input.packageKey || "");
+    const item = this.listVendorBookingQueue().find((row) => row.packageKey === packageKey);
+    if (!item) throw new Error("Vendor booking package was not found. Save the Micro Split first.");
+    const catalog = this.getSupplierMasterCatalog();
+    const active = (row) => String(row.status || "ACTIVE").toUpperCase() !== "ARCHIVED"
+      && row.active !== false;
+    const sops = (catalog.sops || []).filter((row) => active(row) && row.supplierId === item.supplierId);
+    const recipients = (catalog.recipients || [])
+      .filter((row) => active(row) && row.supplierId === item.supplierId && String(row.address || "").trim());
+    const contacts = (catalog.contacts || []).filter((row) => active(row) && row.supplierId === item.supplierId);
+    const sop = sops[0] || {};
+    const availableChannels = [...new Set([
+      ...(sop.bookingChannels || []),
+      ...recipients.map((row) => row.channel),
+      ...contacts.map((row) => row.preferredChannel),
+    ].map((value) => String(value || "").toUpperCase()).filter(Boolean))];
+    if (!availableChannels.length) availableChannels.push("OTHERS");
+    const channel = String(input.channel || availableChannels[0]).toUpperCase();
+    let selectedRecipients = recipients
+      .filter((row) => String(row.channel || "").toUpperCase() === channel)
+      .map((row) => ({
+        recipientType: String(row.recipientType || "TO").toUpperCase(),
+        address: String(row.address || "").trim(),
+        purpose: row.purpose || "",
+      }));
+    if (!selectedRecipients.length && channel === "EMAIL") {
+      selectedRecipients = contacts.filter((row) => row.email).map((row, index) => ({
+        recipientType: index ? "CC" : "TO", address: row.email, purpose: row.responsibility || "",
+      }));
+    }
+    if (!selectedRecipients.length && channel === "WHATSAPP") {
+      selectedRecipients = contacts.filter((row) => row.whatsapp).map((row) => ({
+        recipientType: "WHATSAPP", address: row.whatsapp, purpose: row.responsibility || "",
+      }));
+    }
+    const actionType = String(input.actionType || "NEW").toUpperCase();
+    const label = actionType === "CANCEL" ? "Cancellation" : actionType === "AMEND" ? "Amendment" : "Booking";
+    const values = {
+      customer_code: item.customerCode,
+      customer_name: item.customerName,
+      supplier_name: item.supplierName,
+      arrival_date: item.arrivalDate,
+      departure_date: item.departureDate,
+      adult_pax: item.adultPax,
+      child_pax: item.childPax,
+      infant_pax: item.infantPax,
+    };
+    const applyTemplate = (template) => String(template || "").replace(
+      /\{\{\s*([a-z_]+)\s*\}\}/gi,
+      (_match, key) => String(values[String(key).toLowerCase()] ?? ""),
+    );
+    const serviceLines = item.services.map((service) =>
+      `- Day ${service.dayNumber} | ${service.serviceDate || "date pending"} | ${service.productName}`
+      + `${service.quantity && Number(service.quantity) !== 1 ? ` | qty ${service.quantity}` : ""}`
+    ).join("\n");
+    const subject = applyTemplate(sop.subjectTemplate)
+      || `${label} ${item.customerCode} - ${item.customerName}`;
+    const defaultBody = [
+      `Dear ${item.supplierName} Team,`,
+      "",
+      `Please ${actionType === "CANCEL" ? "cancel all services" : actionType === "AMEND" ? "revise the booking" : "arrange the following booking"} for:`,
+      `Customer: ${item.customerName}`,
+      `Customer Code: ${item.customerCode}`,
+      `Pax: ${item.adultPax} adult, ${item.childPax} child, ${item.infantPax} infant`,
+      "",
+      serviceLines,
+      "",
+      actionType === "CANCEL" && input.cancellationReason
+        ? `Cancellation reason: ${String(input.cancellationReason).trim()}`
+        : "Please confirm availability and booking reference.",
+      "",
+      "Regards,",
+      "Peak Season Holidays",
+    ].join("\n");
+    return {
+      ...item,
+      actionType,
+      availableChannels,
+      channel,
+      recipients: selectedRecipients,
+      subject,
+      body: applyTemplate(sop.bodyTemplate) || defaultBody,
+      sop: {
+        leadTime: sop.leadTime || "",
+        cutoffTime: sop.cutoffTime || "",
+        portalUrl: sop.portalUrl || "",
+        accountReference: sop.accountReference || "",
+        confirmationProcedure: sop.confirmationProcedure || "",
+        amendmentProcedure: sop.amendmentProcedure || "",
+        cancellationProcedure: sop.cancellationProcedure || "",
+      },
+      cancellationReason: String(input.cancellationReason || ""),
+      canSendEmail: channel === "EMAIL"
+        && selectedRecipients.some((row) => row.recipientType === "TO" && row.address),
+      requiresExternalAction: channel !== "EMAIL",
+    };
+  }
+
+  saveVendorBookingPreview(input = {}) {
+    const preview = this.getVendorBookingPreview(input);
+    const now = this.now();
+    const requestedId = String(
+      input.bookingId
+      || (preview.latestBooking?.actionType === preview.actionType
+        ? preview.latestBooking.bookingId
+        : "")
+      || "",
+    );
+    const requested = requestedId ? this.getVendorBooking(requestedId) : null;
+    const canReuse = requested
+      && requested.actionType === preview.actionType
+      && requested.communicationStatus !== "SENT";
+    const bookingId = canReuse ? requestedId : this.id("VBK");
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_vendor_bookings (
+          booking_id, package_key, customer_code, tour_id, supplier_id, supplier_name,
+          supplier_type, action_type, channel, booking_status, communication_status,
+          supplier_result, rate_status, subject, body, recipients_json,
+          source_revision_id, cancellation_reason, generated_at, created_at, updated_at
+        ) VALUES (
+          @bookingId, @packageKey, @customerCode, @tourId, @supplierId, @supplierName,
+          @supplierType, @actionType, @channel, 'READY', 'GENERATED',
+          'PENDING', @rateStatus, @subject, @body, @recipientsJson,
+          @sourceRevisionId, @cancellationReason, @now, @now, @now
+        )
+        ON CONFLICT(booking_id) DO UPDATE SET
+          action_type=excluded.action_type, channel=excluded.channel,
+          booking_status='READY', communication_status='GENERATED',
+          rate_status=excluded.rate_status, subject=excluded.subject, body=excluded.body,
+          recipients_json=excluded.recipients_json,
+          cancellation_reason=excluded.cancellation_reason,
+          generated_at=excluded.generated_at, updated_at=excluded.updated_at
+      `).run({
+        ...preview,
+        bookingId,
+        recipientsJson: JSON.stringify(input.recipients || preview.recipients),
+        subject: String(input.subject || preview.subject),
+        body: String(input.body || preview.body),
+        now,
+      });
+      this.db.prepare("DELETE FROM local_vendor_booking_services WHERE booking_id = ?").run(bookingId);
+      const insert = this.db.prepare(`
+        INSERT INTO local_vendor_booking_services (
+          booking_service_id, booking_id, service_id, service_snapshot_json,
+          service_status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      preview.services.forEach((service) => insert.run(
+        this.id("VBS"), bookingId, service.serviceId, JSON.stringify(service),
+        preview.actionType === "CANCEL" ? "CANCEL_REQUIRED" : "REQUIRED", now,
+      ));
+    })();
+    this.log("VENDOR_BOOKING_GENERATED", "VENDOR_BOOKING", bookingId, {
+      customerCode: preview.customerCode,
+      supplierName: preview.supplierName,
+      actionType: preview.actionType,
+      serviceCount: preview.services.length,
+      rateStatus: preview.rateStatus,
+    });
+    return this.getVendorBooking(bookingId);
+  }
+
+  getVendorBooking(bookingId) {
+    const row = this.db.prepare("SELECT * FROM local_vendor_bookings WHERE booking_id = ?").get(bookingId);
+    if (!row) return null;
+    return {
+      ...this.vendorBookingRow(row),
+      services: this.db.prepare(`
+        SELECT service_snapshot_json FROM local_vendor_booking_services
+        WHERE booking_id = ? ORDER BY created_at
+      `).all(bookingId).map((item) => JSON.parse(item.service_snapshot_json)),
+    };
+  }
+
+  listVendorBookings() {
+    return this.db.prepare(`
+      SELECT * FROM local_vendor_bookings ORDER BY updated_at DESC
+    `).all().map((row) => this.vendorBookingRow(row));
+  }
+
+  recordVendorBookingExternalAction(input = {}) {
+    const bookingId = String(input.bookingId || "");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking) throw new Error("Generated booking was not found.");
+    const reference = String(input.externalReference || "").trim();
+    if (!reference) throw new Error("External booking reference or evidence note is required.");
+    const now = this.now();
+    const canceled = booking.actionType === "CANCEL";
+    this.db.prepare(`
+      UPDATE local_vendor_bookings
+      SET booking_status = ?, communication_status = 'SENT',
+        external_reference = ?, sent_at = ?, updated_at = ?
+      WHERE booking_id = ?
+    `).run(canceled ? "CANCELED" : "ACTIVE", reference, now, now, bookingId);
+    this.log("VENDOR_BOOKING_EXTERNAL_SENT", "VENDOR_BOOKING", bookingId, {
+      channel: booking.channel, externalReference: reference,
+    });
+    return this.getVendorBooking(bookingId);
+  }
+
+  recordVendorBookingEmailSent(input = {}) {
+    const bookingId = String(input.bookingId || "");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking) throw new Error("Generated booking was not found.");
+    if (booking.communicationStatus === "SENT") return booking;
+    const messageId = String(input.gmailMessageId || "").trim();
+    if (!messageId) throw new Error("Gmail message evidence is required.");
+    const now = this.now();
+    const canceled = booking.actionType === "CANCEL";
+    this.db.prepare(`
+      UPDATE local_vendor_bookings
+      SET booking_status = ?, communication_status = 'SENT',
+        gmail_thread_id = ?, gmail_message_id = ?, sent_at = ?, updated_at = ?
+      WHERE booking_id = ?
+    `).run(
+      canceled ? "CANCELED" : "ACTIVE",
+      String(input.gmailThreadId || ""), messageId, now, now, bookingId,
+    );
+    this.log("VENDOR_BOOKING_EMAIL_SENT", "VENDOR_BOOKING", bookingId, {
+      gmailMessageId: messageId,
+      gmailThreadId: String(input.gmailThreadId || ""),
+    });
+    return this.getVendorBooking(bookingId);
+  }
+
+  vendorBookingRow(row) {
+    return {
+      bookingId: row.booking_id,
+      packageKey: row.package_key,
+      customerCode: row.customer_code,
+      tourId: row.tour_id || "",
+      supplierId: row.supplier_id || "",
+      supplierName: row.supplier_name,
+      supplierType: row.supplier_type,
+      actionType: row.action_type,
+      channel: row.channel,
+      bookingStatus: row.booking_status,
+      communicationStatus: row.communication_status,
+      supplierResult: row.supplier_result,
+      rateStatus: row.rate_status,
+      subject: row.subject,
+      body: row.body,
+      recipients: JSON.parse(row.recipients_json || "[]"),
+      sourceRevisionId: row.source_revision_id || "",
+      cancellationReason: row.cancellation_reason || "",
+      externalReference: row.external_reference || "",
+      gmailThreadId: row.gmail_thread_id || "",
+      gmailMessageId: row.gmail_message_id || "",
+      generatedAt: row.generated_at || "",
+      sentAt: row.sent_at || "",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 
   listDrafts(filters = {}) {

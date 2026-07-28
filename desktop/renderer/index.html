@@ -158,8 +158,8 @@
             <div class="workspace-banner">
               <div>
                 <p class="eyebrow">Vendor Booking intake</p>
-                <h2>New Itinerary</h2>
-                <p>Review hasil ekstraksi, isi Day Wise, lalu split layanan. Belum ada generate atau send email pada tahap ini.</p>
+                <h2 id="vendor-intake-mode-title">New Itinerary</h2>
+                <p id="vendor-intake-mode-description">Review hasil ekstraksi, isi Day Wise, lalu split layanan sebelum masuk Generate Booking.</p>
               </div>
             </div>
             <div class="panel vendor-intake-panel">
@@ -241,17 +241,60 @@
             </div>
           </section>
 
-          <section id="vendor-generate-view" class="view vendor-placeholder-view">
-            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Generate</h2><p>Queue mikro berjenis Vendor yang sudah di-split dan siap masuk proses generating booking.</p></div></div>
-            <div class="panel"><div class="empty-notifications">Booking generator dan pengiriman email belum diaktifkan pada sprint ini.</div></div>
+          <section id="vendor-generate-view" class="view">
+            <div class="workspace-banner vendor-booking-banner">
+              <div><p class="eyebrow">Vendor Booking</p><h2>Generate & Send Booking</h2><p>Micro Split Vendor dan Additional Service dikelompokkan otomatis per supplier. Pending rate tetap dapat diproses.</p></div>
+              <div class="vendor-booking-summary"><strong id="vendor-booking-package-count">0</strong><span>supplier packages</span></div>
+            </div>
+            <div class="panel vendor-booking-layout">
+              <aside class="vendor-booking-queue">
+                <div class="panel-heading compact"><div><p class="eyebrow">Live queue</p><h2>Supplier packages</h2></div></div>
+                <label class="vendor-booking-search">Filter<input id="vendor-booking-search" placeholder="Customer code or supplier" /></label>
+                <div id="vendor-booking-queue-list" class="vendor-booking-queue-list"></div>
+              </aside>
+              <section class="vendor-booking-editor">
+                <div id="vendor-booking-empty" class="empty-notifications">Choose a supplier package to prepare its booking.</div>
+                <div id="vendor-booking-preview" hidden>
+                  <div class="vendor-booking-preview-heading">
+                    <div><p class="eyebrow">Controlled communication</p><h2 id="vendor-booking-preview-title">Booking preview</h2></div>
+                    <div id="vendor-booking-preview-status"></div>
+                  </div>
+                  <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
+                  <div class="vendor-booking-form-grid">
+                    <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
+                    <label>Channel<select id="vendor-booking-channel"></select></label>
+                    <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="3"></textarea></label>
+                    <label class="wide">Subject<input id="vendor-booking-subject" /></label>
+                    <label class="wide">Booking message<textarea id="vendor-booking-body" rows="15"></textarea></label>
+                  </div>
+                  <div id="vendor-booking-sop" class="vendor-booking-sop"></div>
+                  <div class="vendor-booking-actions">
+                    <span id="vendor-booking-send-note" class="muted-text">Generate saves a local evidence snapshot. Sending remains a separate explicit action.</span>
+                    <button id="send-vendor-booking-email" class="button danger" type="button" hidden>Send email now</button>
+                    <button id="generate-vendor-booking" class="button primary" type="button">Generate booking</button>
+                  </div>
+                  <div id="vendor-booking-send-panel" class="vendor-booking-send-panel" hidden>
+                    <label>External reference / evidence note<input id="vendor-booking-external-reference" placeholder="WhatsApp time, portal booking ID, or evidence note" /></label>
+                    <button id="record-vendor-booking-sent" class="button primary" type="button">Record as sent</button>
+                  </div>
+                </div>
+              </section>
+            </div>
           </section>
           <section id="vendor-revise-itinerary-view" class="view vendor-placeholder-view">
-            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Area perbandingan revisi dan dampak mikro booking sudah disiapkan sebagai tahap berikutnya.</p></div></div>
-            <div class="panel"><div class="empty-notifications">Belum ada perubahan booking otomatis pada sprint New Itinerary.</div></div>
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Revise memakai workspace itinerary dan Micro Split yang sama agar detail lama tidak perlu diketik ulang.</p></div></div>
+            <div class="panel vendor-revise-launch"><div><strong>Load current itinerary, edit only the affected day/service, then save.</strong><p class="muted-text">Setelah revisi tersimpan, buka Generate dan pilih Amendment untuk supplier yang terdampak.</p></div><button id="open-vendor-revise-workspace" class="button primary" type="button">Open revise workspace</button></div>
           </section>
           <section id="vendor-cancel-view" class="view vendor-placeholder-view">
-            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cancel All Service</h2><p>Placeholder aman sampai aturan cancel, approval, dan notifikasinya disepakati.</p></div></div>
-            <div class="panel"><div class="empty-notifications">Tidak ada aksi cancel yang aktif.</div></div>
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cancel All Services</h2><p>Prepare cancellation per supplier while preserving every original service and communication record.</p></div></div>
+            <div class="panel vendor-cancel-panel">
+              <div class="vendor-cancel-form">
+                <label>Customer Code<select id="vendor-cancel-customer"></select></label>
+                <label>Cancellation reason<textarea id="vendor-cancel-reason" rows="4" placeholder="Required for audit and supplier communication"></textarea></label>
+                <button id="prepare-vendor-cancel" class="button danger" type="button">Prepare cancellation packages</button>
+              </div>
+              <div><div class="panel-heading compact"><div><p class="eyebrow">Prepared only</p><h2>Cancellation packages</h2></div></div><div id="vendor-cancel-package-list"></div></div>
+            </div>
           </section>
           <section id="vendor-kpi-view" class="view vendor-placeholder-view">
             <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cek KPI</h2><p>Submenu personal KPI siap; rumus dan indikator akan mengikuti workflow final Vendor.</p></div></div>

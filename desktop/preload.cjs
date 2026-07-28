@@ -48,6 +48,12 @@ contextBridge.exposeInMainWorld("erim", {
     listIntakeDrafts: () => ipcRenderer.invoke("vendor:intake-draft-list"),
     saveIntakeDraft: (details) => ipcRenderer.invoke("vendor:intake-draft-save", details),
     publishIntake: (details) => ipcRenderer.invoke("vendor:intake-publish", details),
+    listBookingQueue: () => ipcRenderer.invoke("vendor:booking-queue"),
+    listBookings: () => ipcRenderer.invoke("vendor:booking-list"),
+    getBookingPreview: (details) => ipcRenderer.invoke("vendor:booking-preview", details),
+    generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
+    sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),
+    recordExternalSent: (details) => ipcRenderer.invoke("vendor:booking-external-sent", details),
   },
   masterData: {
     sync: () => ipcRenderer.invoke("master-data:sync"),

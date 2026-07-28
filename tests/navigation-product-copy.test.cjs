@@ -88,3 +88,20 @@ test("Micro Split suggestions preserve Supplier IDs and independently refresh Pr
   assert.doesNotMatch(app, /<select data-vendor-split-field="supplierId"/);
   assert.doesNotMatch(app, /label="\$\{escapeHtml\(item\.productCode \|\| item\.category/);
 });
+
+test("Vendor Booking exposes a live supplier queue, controlled sending, revise reuse, and cancellation preparation", () => {
+  assert.match(html, /Generate & Send Booking/);
+  assert.match(html, /id="vendor-booking-queue-list"/);
+  assert.match(html, /id="send-vendor-booking-email"/);
+  assert.match(html, /id="prepare-vendor-cancel"/);
+  assert.match(html, /id="open-vendor-revise-workspace"/);
+  assert.match(app, /listBookingQueue/);
+  assert.match(app, /function renderVendorBookingQueue/);
+  assert.match(app, /function sendVendorBookingEmail/);
+  assert.match(app, /window\.confirm/);
+  assert.match(app, /setVendorIntakeMode\("REVISE"\)/);
+  assert.match(preload, /vendor:booking-email-send/);
+  assert.match(main, /vendor:booking-email-send/);
+  assert.match(styles, /\.vendor-booking-layout/);
+  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.vendor-booking-layout/);
+});
