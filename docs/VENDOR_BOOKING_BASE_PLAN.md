@@ -68,11 +68,17 @@ Vendor role Dashboard (home)
   Done
 
 Vendor Booking
+  Itinerary Check
+    Search Client Code
+    View complete Day Wise and every Micro Split type
+    Open linked Vendor email thread or external evidence
+
   Notification Inbox (shared generic component)
-    Display event totals and latest information only
-    New Itinerary count
-    Revised Itinerary count
-    Other permitted event counts
+    Left: Generated / Sent Booking Register
+    Right: Work Notification Inbox
+      New Itinerary
+      Revised Itinerary
+      Other permitted event types added incrementally
 
   New Confirmation
     Load Customer Code
@@ -136,6 +142,128 @@ records. The Customer Code may show aggregated counts, such as `2 urgent`, `3
 pending`, and `1 replied`, and clicking a count opens the exact micro-items.
 `Done` remains a Customer Code summary and is excluded as soon as an unresolved
 later revision exists.
+
+### 3.1.1 Revised Vendor dashboard cards — next iteration
+
+The operational dashboard is refined into four explicit work stages:
+
+| Card | Working title | Inclusion rule | Primary action |
+| --- | --- | --- | --- |
+| 1 | `New Itinerary — Not Split` | A Vendor-owned new/revised itinerary has required work that has not been fully converted into Micro Split items and has not been marked complete by Vendor staff. | Open the shared New/Revise Itinerary workspace at the exact Customer Code and unresolved Day context. |
+| 2 | `Split — Not Generated` | Vendor-owned Micro Split items exist, but at least one supplier package has no current generated New/Amend/Cancel communication snapshot. Partially generated itineraries remain visible with generated/total counts. | Open Generate at the exact ungenerated supplier package. |
+| 3 | `Email Replied — Check Thread` | The newest linked inbound supplier email exists and has not completed human review. A reply never means automatically confirmed. | Open the exact Gmail thread beside its linked booking and append a review-open event. |
+| 4 | `Upcoming Arrival Recheck` | Arrival date is tomorrow (`D+1`) through `D+7`, inclusive. This is an arrival-readiness list, not merely a Done archive. | Open the separate `Itinerary Check` submenu at that Client Code. |
+
+All cards aggregate by Customer Code while displaying unresolved item/package
+counts. Clicking a count or action must preserve the exact Customer Code, Day,
+service ID, booking ID, and source revision. Opening or rechecking a record does
+not silently mark it done.
+
+The Card 4 date window uses the configured operational timezone. If today is
+28 July, it includes arrivals from 29 July through 4 August. An unresolved
+revision or cancellation remains visible in its applicable work card even when
+the itinerary is also inside the arrival-recheck window.
+
+### 3.1.2 Itinerary Check submenu
+
+`Itinerary Check` is a read/recheck submenu directly below the Vendor dashboard.
+It is also available independently when staff only need to inspect a booking.
+The user searches a Client Code and receives the complete itinerary as a compact
+linked hierarchy rather than a flat table:
+
+```text
+Client Code — Guest — Arrival/Departure
+├─ Day 1 — date — Day Wise subject/title
+│  ├─ Vendor — split item 1 — supplier — status — Email thread
+│  ├─ Transport — split item 2 — supplier/vehicle — status
+│  └─ TOC — split item 3 — location/service — status
+└─ Day 2 — date — Day Wise subject/title
+   └─ Additional Service — split item 1 — supplier — rate/status
+```
+
+Unlike the Vendor Generate queue, Itinerary Check displays every available split
+type: Vendor, Additional Service, Transport, TOC, and Luggage Van. It does not
+transfer ownership of Transport/TOC work to Vendor; those rows are inspection
+records and may later deep-link to their owning department.
+
+Each Day displays its Day Wise subject/title before the split rows. A Vendor
+split booked by Email displays a direct permitted link to its exact Gmail
+thread after the outbound message has a stored thread ID. The link must not be
+constructed from Subject text. WhatsApp, Portal, and Others show their stored
+external reference/evidence instead. A missing thread/evidence displays a clear
+status rather than a dead link.
+
+The desktop presentation may use visible connector lines and collapsible Day
+groups, but full text labels remain visible. Every split row includes Type,
+Supplier, Product/service, rate readiness, booking generation/sent state, and
+supplier result when available. The hierarchy is derived from stable
+Day/service/booking IDs and must not use row order as identity.
+
+Opening Itinerary Check is read-only by default. Searching, expanding a Day, or
+opening a Gmail thread does not change booking status, mark the itinerary done,
+or infer supplier confirmation. The Dashboard D+1–D+7 Recheck button opens this
+same submenu with the Client Code preloaded.
+
+### 3.2 Vendor Inbox two-section workspace
+
+Vendor Inbox is a two-section operational workspace with independent scrolling:
+
+#### Left — Generated / Sent Booking Register
+
+This section is the staff reference for booking work already prepared or sent.
+It uses a compact list view and includes both `GENERATED` and `SENT`, with the
+communication state always visible so Generated is never mistaken for Sent.
+
+Minimum visible information per booking package:
+
+- Customer/Client Code and Customer Name;
+- Adult, Child, and Infant pax;
+- Supplier name;
+- booked Product/service details, including applicable Day/date;
+- action type: New, Amendment, or Cancellation;
+- channel: Email, WhatsApp, Portal, or Others;
+- Generated time, Sent time, and current communication status;
+- rate readiness and supplier result when available;
+- direct Gmail thread link for an Email booking with a stored thread ID;
+- external reference/evidence for WhatsApp, Portal, or Others.
+
+The register provides:
+
+- one search field matching Client Code, Customer Name, Supplier, and
+  Product/service;
+- sort by Sent time newest/oldest, Generated time newest/oldest, and Client Code;
+- filters for communication state, channel, action type, supplier, and an
+  optional sent/generated date range;
+- a clear empty/missing-thread state instead of a dead link.
+
+Clicking a record opens its preserved booking snapshot. Clicking an Email link
+opens the exact permitted Gmail thread. Neither action changes the business
+status.
+
+#### Right — Work Notification Inbox
+
+This section contains incoming work events. The first confirmed event groups
+are:
+
+- New Itinerary;
+- Revised Itinerary.
+
+Additional event types will be introduced incrementally after their workflow is
+approved. Each notification displays Client Code, Customer Name when available,
+event type, source revision, received/published time, actor/source, and current
+work status. Its primary action deep-links to the exact work area:
+
+- New Itinerary → shared New Itinerary intake workspace;
+- Revised Itinerary → shared Revise Itinerary workspace with Client Code and
+  source revision preloaded.
+
+Opening a notification does not by itself mark work complete. Read,
+acknowledged, claimed, and completed remain separate states.
+
+The initial desktop ratio should favor the booking register because it carries
+more columns, while the right Work Inbox remains readable. At narrower widths,
+the two sections stack without overlapping; both retain their own filters and
+scroll position.
 
 Minimum visible card information:
 
@@ -438,6 +566,10 @@ testing is prohibited.
 
 The detailed operator procedure is recorded in
 `docs/VENDOR_BOOKING_GENERATE_SOP.md`.
+
+The approved scope, implementation order, safety ledger, and UAT gates for the
+next connected Vendor milestone are consolidated in
+`docs/VENDOR_NEXT_MILESTONE_PLAN.md`.
 
 ## 15.1 Next Generating workspace design — awaiting mail-merge sample
 

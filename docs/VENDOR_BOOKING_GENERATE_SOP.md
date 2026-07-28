@@ -123,3 +123,46 @@ communication evidence, and reason.
 - implement revision comparison and per-item impact decisions;
 - implement supplier-reply review, confirmation results, completion gate, and
   final Reservation handoff.
+
+## 9. Dashboard and Itinerary Check backlog
+
+The next Vendor dashboard iteration contains:
+
+1. New Itinerary not fully split and not marked complete by Vendor staff.
+2. Split items whose supplier booking communication has not been generated.
+3. Unreviewed supplier email replies linked to the exact Gmail thread.
+4. Itineraries arriving from D+1 through D+7 with a button that opens the
+   separate Itinerary Check submenu at the applicable Client Code.
+
+Itinerary Check is also accessible directly below Dashboard. Staff search a
+Client Code and receive Client → Day → Split Item. Each Day includes its Day
+Wise subject/title. The view includes Vendor, Additional Service, Transport,
+TOC, and Luggage Van rows for complete itinerary inspection.
+
+Every item shows Type, Supplier, Product/service, rate readiness,
+generation/sent status, supplier result, and its applicable action. A
+Vendor-by-Email item with stored Gmail evidence links directly to its exact
+thread. External channels display their evidence/reference. Transport/TOC rows
+remain owned by Transport even though they are visible here.
+
+Itinerary Check is read-only by default. Recheck is a human inspection action
+and does not infer confirmation from an inbound reply or mark work complete.
+
+## 10. Vendor Inbox backlog
+
+Vendor Inbox uses two sections:
+
+- Left: a searchable/sortable list of Generated and Sent booking packages.
+  Every row distinguishes Generated from Sent and shows Client Code, Customer
+  Name, Adult/Child/Infant pax, Supplier, Product/service, Day/date, action,
+  channel, timestamps, rate/result status, and Gmail thread or external
+  evidence when available.
+- Right: incoming Vendor work notifications. The first event types are New
+  Itinerary and Revised Itinerary; each deep-links to the exact shared intake
+  or revise workspace. Later event types are added only after their workflow is
+  approved.
+
+The left register searches Client Code, Customer Name, Supplier, and
+Product/service. It sorts by Sent time, Generated time, or Client Code, and may
+filter state, channel, action, supplier, and date range. Opening history,
+notification, or email thread does not mark the booking complete.
