@@ -790,6 +790,30 @@
       </form>
     </dialog>
 
+    <dialog id="supplier-archive-dialog" class="compact-dialog supplier-archive-dialog">
+      <form id="supplier-archive-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Controlled archive</p><h2 id="supplier-archive-title">Archive record</h2></div>
+          <button id="close-supplier-archive-dialog" class="icon-button" type="button" aria-label="Close">Ã—</button>
+        </div>
+        <div class="supplier-archive-content">
+          <div class="maintenance-warning">
+            <strong id="supplier-archive-record">Selected record</strong>
+            <p id="supplier-archive-impact">Historical bookings and documents will remain available.</p>
+          </div>
+          <label>Archive reason
+            <textarea id="supplier-archive-reason" name="reason" rows="4" required
+              placeholder="Explain why this record must no longer be available for new bookings."></textarea>
+          </label>
+          <small>This action is saved to Local Pending first. Nothing changes in Google until the reviewed batch is published.</small>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-archive-dialog" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-archive" class="button danger" type="submit">Queue archive locally</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="supplier-type-dialog" class="compact-dialog">
       <form id="supplier-type-form" method="dialog">
         <div class="dialog-heading"><div><p class="eyebrow">Dynamic classification</p><h2>Supplier Type</h2></div><button id="close-supplier-type-dialog" class="icon-button" type="button">×</button></div>

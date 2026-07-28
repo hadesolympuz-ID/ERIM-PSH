@@ -31,6 +31,7 @@ const state = {
   supplierMasterDrafts: [],
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
+  supplierArchiveTarget: null,
   supplierExcel: {
     typeCode: "VENDOR",
     batch: null,
@@ -1103,20 +1104,60 @@ async function uploadSupplierContract() {
   } catch (error) { toast(error.message, true); }
 }
 
-async function archiveSelectedSupplierEntity(entityKind, entityId, label) {
-  const reason = window.prompt(`Reason for archiving ${label}:`);
-  if (reason === null) return;
-  if (!reason.trim()) return toast("Archive reason is required.", true);
+function archiveImpactText(entityKind, entityId) {
+  if (entityKind === "SUPPLIER") {
+    const products = state.supplierMaster.products.filter((row) =>
+      row.supplierId === entityId && row.active !== false).length;
+    const contracts = state.supplierMaster.contracts.filter((row) =>
+      row.supplierId === entityId && row.active !== false).length;
+    return `${products} active product(s) and ${contracts} active contract(s) will stop appearing through this supplier. Historical bookings, rates, and documents remain available.`;
+  }
+  if (entityKind === "PRODUCT") {
+    const rates = state.supplierMaster.rates.filter((row) =>
+      row.productId === entityId && row.active !== false).length;
+    return `${rates} rate row(s) reference this product. It will stop appearing for new service selection; historical records remain available.`;
+  }
+  return "This contract and its rates will stop loading for new bookings. Historical bookings and the contract document remain available.";
+}
+
+function archiveSelectedSupplierEntity(entityKind, entityId, label) {
+  state.supplierArchiveTarget = { entityKind, entityId, label };
+  $("#supplier-archive-title").textContent = `Archive ${entityKind.toLowerCase().replaceAll("_", " ")}`;
+  $("#supplier-archive-record").textContent = label;
+  $("#supplier-archive-impact").textContent = archiveImpactText(entityKind, entityId);
+  $("#supplier-archive-form").reset();
+  $("#supplier-product-dialog").close();
+  $("#supplier-contract-dialog").close();
+  $("#supplier-archive-dialog").showModal();
+  $("#supplier-archive-reason").focus();
+}
+
+async function submitSupplierArchive(event) {
+  event.preventDefault();
+  const target = state.supplierArchiveTarget;
+  const reason = $("#supplier-archive-reason").value.trim();
+  if (!target) return toast("Choose a Supplier Master record first.", true);
+  if (!reason) return toast("Archive reason is required.", true);
+  const button = $("#confirm-supplier-archive");
+  button.disabled = true;
+  button.textContent = "Saving locally...";
   try {
     applySupplierLocalResult(await window.erim.supplierMaster.archive({
-      entityKind, entityId, reason: reason.trim(),
+      entityKind: target.entityKind,
+      entityId: target.entityId,
+      reason,
     }));
-    if (entityKind === "SUPPLIER") state.selectedSupplierId = "";
-    $("#supplier-product-dialog").close();
-    $("#supplier-contract-dialog").close();
+    if (target.entityKind === "SUPPLIER") state.selectedSupplierId = "";
+    $("#supplier-archive-dialog").close();
     renderSupplierMaster();
-    toast(`${label} archive queued locally. Historical booking snapshots remain available.`);
-  } catch (error) { toast(error.message, true); }
+    toast(`${target.label} archive queued locally. Historical booking snapshots remain available.`);
+    state.supplierArchiveTarget = null;
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Queue archive locally";
+  }
 }
 
 function draftActions(draft) {
@@ -2280,6 +2321,15 @@ function bindEvents() {
     list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
   });
   $("#refresh-supplier-master").addEventListener("click", () => loadSupplierMaster({ refresh: true }));
+  $("#close-supplier-archive-dialog").addEventListener("click", () => {
+    state.supplierArchiveTarget = null;
+    $("#supplier-archive-dialog").close();
+  });
+  $("#cancel-supplier-archive-dialog").addEventListener("click", () => {
+    state.supplierArchiveTarget = null;
+    $("#supplier-archive-dialog").close();
+  });
+  $("#supplier-archive-form").addEventListener("submit", submitSupplierArchive);
   $("#supplier-excel-template").addEventListener("click", async () => {
     try {
       const result = await window.erim.supplierExcel.downloadTemplate({

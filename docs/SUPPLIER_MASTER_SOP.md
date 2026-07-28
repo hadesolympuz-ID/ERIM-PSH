@@ -1,7 +1,7 @@
 # ERIM-PSH Supplier Master and Contract Rate SOP
 
 Document status: `APPROVED IMPLEMENTATION BASELINE`
-Effective release: `v1.1.3`
+Effective release: `v1.1.4`
 Owner: `Manager / Admin`
 Authoritative source: `ERIM-PSH Google Sheet + Google Drive`
 
@@ -182,6 +182,12 @@ This separates operational booking progress from commercial rate completion.
 Deletion is implemented as controlled archive so historical bookings never
 lose their supplier, product, contract, or rate reference. Archive requires a
 reason.
+
+The desktop uses an in-app archive dialog. It identifies the selected record,
+summarizes active Product, Contract, or Rate references, and saves the action to
+Local Pending before anything is published to Google. Browser-style
+`window.prompt` input is not used because it is unsupported in the packaged
+Electron workflow.
 
 Every create, edit, archive, initialization, and expiry event records actor,
 timestamp, entity, and change context in `AUDIT_LOG` and

@@ -78,3 +78,12 @@ test("Supplier Import Export exposes one-type selection and responsive non-overl
   assert.match(styles, /\.supplier-excel-layout\s*\{[\s\S]*minmax\(0,1fr\)/);
   assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.supplier-excel-layout\s*\{\s*grid-template-columns:\s*1fr/);
 });
+
+test("Supplier archive uses an in-app reason dialog instead of unsupported window.prompt", () => {
+  assert.match(html, /id="supplier-archive-dialog"/);
+  assert.match(html, /id="supplier-archive-reason"/);
+  assert.match(html, /Queue archive locally/);
+  assert.match(renderer, /function submitSupplierArchive/);
+  assert.match(renderer, /archiveImpactText/);
+  assert.doesNotMatch(renderer, /window\.prompt/);
+});
