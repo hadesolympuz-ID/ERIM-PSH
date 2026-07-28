@@ -31,6 +31,12 @@ const state = {
   supplierMasterDrafts: [],
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
+  supplierExcel: {
+    typeCode: "VENDOR",
+    batch: null,
+    batches: [],
+    selectedSupplierIds: new Set(),
+  },
 };
 
 const moduleDescriptions = {
@@ -467,6 +473,173 @@ async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
     status.className = "status failed";
     toast(error.message, true);
   }
+}
+
+const supplierExcelInitialTypes = [
+  ["VENDOR", "Vendor"],
+  ["TOC", "TOC"],
+  ["TRANSPORT", "Transport"],
+  ["LUGGAGE_VAN", "Luggage Van"],
+  ["ADDITIONAL_SERVICE", "Additional Service"],
+];
+
+function supplierExcelTypes() {
+  const byCode = new Map((state.supplierMaster.supplierTypes || [])
+    .filter((row) => row.active !== false)
+    .map((row) => [String(row.typeCode || "").toUpperCase(), row.typeName || row.typeCode]));
+  return supplierExcelInitialTypes.map(([code, fallback]) => [code, byCode.get(code) || fallback]);
+}
+
+function renderSupplierExcelTypes() {
+  $("#supplier-excel-type-tabs").innerHTML = supplierExcelTypes().map(([code, label]) => `
+    <button class="supplier-excel-type ${code === state.supplierExcel.typeCode ? "active" : ""}"
+      type="button" data-supplier-excel-type="${escapeHtml(code)}">${escapeHtml(label)}</button>
+  `).join("");
+}
+
+function supplierExcelFilters() {
+  const valueList = (selector) => {
+    const value = $(selector).value.trim();
+    return value ? [value] : [];
+  };
+  return {
+    typeCode: state.supplierExcel.typeCode,
+    locations: valueList("#supplier-excel-location"),
+    products: valueList("#supplier-excel-product"),
+    supplierStatuses: valueList("#supplier-excel-supplier-status"),
+    contractStatuses: valueList("#supplier-excel-contract-status"),
+    rateState: $("#supplier-excel-rate-state").value,
+    bookingChannels: valueList("#supplier-excel-channel"),
+    validFrom: $("#supplier-excel-valid-from").value,
+    validTo: $("#supplier-excel-valid-to").value,
+  };
+}
+
+function filteredSupplierExcelSuppliers() {
+  const query = $("#supplier-excel-search").value.trim().toLowerCase();
+  const location = $("#supplier-excel-location").value.trim().toLowerCase();
+  const product = $("#supplier-excel-product").value.trim().toLowerCase();
+  const status = $("#supplier-excel-supplier-status").value;
+  const productSupplierIds = new Set((state.supplierMaster.products || [])
+    .filter((row) => !product || String(row.productName || "").toLowerCase() === product)
+    .map((row) => row.supplierId));
+  return (state.supplierMaster.suppliers || []).filter((supplier) => {
+    if (String(supplier.typeCode || "").toUpperCase() !== state.supplierExcel.typeCode) return false;
+    if (supplier.active === false && !status) return false;
+    if (status && String(supplier.status || "").toUpperCase() !== status) return false;
+    if (location && !(supplier.destinations || []).some((value) =>
+      String(value).toLowerCase().includes(location))) return false;
+    if (product && !productSupplierIds.has(supplier.supplierId)) return false;
+    return !query || [
+      supplier.supplierName, supplier.supplierCode, ...(supplier.destinations || []),
+    ].some((value) => String(value || "").toLowerCase().includes(query));
+  });
+}
+
+function renderSupplierExcelSelection() {
+  const suppliers = filteredSupplierExcelSuppliers();
+  const selected = state.supplierExcel.selectedSupplierIds;
+  $("#supplier-excel-supplier-list").innerHTML = suppliers.length ? suppliers.map((supplier) => `
+    <label class="supplier-excel-supplier-row">
+      <input type="checkbox" data-supplier-excel-supplier="${escapeHtml(supplier.supplierId)}"
+        ${selected.has(supplier.supplierId) ? "checked" : ""} />
+      <span><strong>${escapeHtml(supplier.supplierName)}</strong><small>${escapeHtml([
+        supplier.supplierCode, ...(supplier.destinations || []),
+      ].filter(Boolean).join(" · "))}</small></span>
+      ${statusPill(supplier.status || "ACTIVE")}
+    </label>
+  `).join("") : `<div class="empty-notifications">No supplier matches this Type and filter.</div>`;
+  const allSelected = suppliers.length && suppliers.every((row) => selected.has(row.supplierId));
+  $("#supplier-excel-select-all").checked = Boolean(allSelected);
+  $("#supplier-excel-select-all").indeterminate = Boolean(
+    suppliers.some((row) => selected.has(row.supplierId)) && !allSelected);
+  $("#supplier-excel-selected-count").textContent = `${selected.size} selected`;
+  $("#supplier-excel-export").disabled = !selected.size;
+}
+
+async function loadSupplierExcelSuggestions() {
+  const suggestions = await window.erim.supplierExcel.suggestions({
+    typeCode: state.supplierExcel.typeCode,
+  });
+  const fill = (selector, values) => {
+    $(selector).innerHTML = (values || []).map((value) =>
+      `<option value="${escapeHtml(value)}"></option>`).join("");
+  };
+  fill("#supplier-excel-location-options", suggestions.locations);
+  fill("#supplier-excel-product-options", suggestions.products);
+  fill("#supplier-excel-channel-options", suggestions.bookingChannels);
+}
+
+function renderSupplierExcelBatch(batch) {
+  state.supplierExcel.batch = batch;
+  const summary = batch?.summary || {};
+  $("#supplier-excel-import-status").textContent = batch?.status || "Waiting for file";
+  $("#supplier-excel-import-status").className = `status ${
+    Number(summary.conflicts || 0) || Number(summary.invalid || 0) ? "conflict" : "synced"}`;
+  $("#supplier-excel-file-result").textContent = batch
+    ? `${batch.fileName} · ${batch.typeCode} · validated ${formatDate(batch.updatedAt)}`
+    : "No workbook selected.";
+  const cards = $$("#supplier-excel-summary article strong");
+  [summary.total, summary.ready, summary.conflicts, summary.invalid].forEach((value, index) => {
+    cards[index].textContent = String(value || 0);
+  });
+  const rows = batch?.analysis?.rows || [];
+  $("#supplier-excel-preview-rows").innerHTML = rows.length ? rows.slice(0, 100).map((row) => `
+    <tr>
+      <td>${escapeHtml(row.sourceSheet)} / ${escapeHtml(row.sourceRow)}</td>
+      <td><strong>${escapeHtml(row.payload?.supplier_code || "")}</strong><small class="table-subtext">${escapeHtml(
+        row.payload?.supplier_name || row.payload?.product_name || row.payload?.contract_number
+          || row.payload?.contact_name || row.payload?.address || row.entityKind
+      )}</small></td>
+      <td>${statusPill(row.status)}</td>
+      <td>${escapeHtml(row.issue?.conflictReason || "Ready to save as a new local record.")}</td>
+      <td>${row.issue?.existingRecordId
+        ? `<button class="button ghost small" type="button" data-supplier-excel-open-record="${escapeHtml(row.issue.existingRecordId)}">Open existing</button>`
+        : ""}</td>
+    </tr>
+  `).join("") : `<tr><td class="empty" colspan="5">No data row found in this workbook.</td></tr>`;
+  $("#supplier-excel-stage").disabled = !Number(summary.ready || 0) || batch?.status === "LOCAL_PENDING";
+  $("#supplier-excel-export-conflicts").disabled = !Number(summary.conflicts || 0) && !Number(summary.invalid || 0);
+}
+
+function renderSupplierExcelBatches() {
+  const batches = state.supplierExcel.batches || [];
+  $("#supplier-excel-batch-list").innerHTML = batches.length ? batches.map((batch) => `
+    <button class="supplier-excel-batch-row" type="button" data-supplier-excel-batch="${escapeHtml(batch.batchId)}">
+      <span><strong>${escapeHtml(batch.fileName)}</strong><small>${escapeHtml(batch.typeCode)} · ${escapeHtml(formatDate(batch.updatedAt))}</small></span>
+      <span><strong>${escapeHtml(batch.summary?.ready || 0)} ready</strong><small>${escapeHtml(
+        Number(batch.summary?.conflicts || 0) + Number(batch.summary?.invalid || 0))} issue(s)</small></span>
+      ${statusPill(batch.status)}
+    </button>
+  `).join("") : `<div class="empty-notifications">No local import batch yet.</div>`;
+}
+
+async function loadSupplierExcel() {
+  if (!state.supplierMasterLoaded) await loadSupplierMaster({ refresh: false });
+  renderSupplierExcelTypes();
+  await loadSupplierExcelSuggestions();
+  state.supplierExcel.batches = await window.erim.supplierExcel.listBatches();
+  renderSupplierExcelBatches();
+  renderSupplierExcelSelection();
+}
+
+function openSupplierExcelExistingRecord(recordId) {
+  const catalog = state.supplierMaster;
+  let supplier = (catalog.suppliers || []).find((row) => row.supplierId === recordId);
+  if (!supplier) {
+    const child = [
+      ...(catalog.contacts || []), ...(catalog.recipients || []), ...(catalog.sops || []),
+      ...(catalog.products || []), ...(catalog.contracts || []),
+    ].find((row) => [
+      row.contactId, row.recipientId, row.sopId, row.productId, row.contractId,
+    ].includes(recordId));
+    supplier = (catalog.suppliers || []).find((row) => row.supplierId === child?.supplierId);
+  }
+  if (!supplier) return toast("The existing record could not be located in the current local catalog.", true);
+  state.selectedSupplierTypeCode = supplier.typeCode;
+  state.selectedSupplierId = supplier.supplierId;
+  showView("supplier-master", "MANAGER_ADMIN");
+  renderSupplierMaster();
 }
 
 function supplierSuggestionsFromCatalog(catalog, serviceDate = new Date().toISOString().slice(0, 10)) {
@@ -966,7 +1139,7 @@ function showView(view, module = null) {
     node.classList.toggle("active", map[node.dataset.vendorAction] === view);
   });
   $$("[data-manager-action]").forEach((node) => {
-    node.classList.toggle("active", view === "supplier-master");
+    node.classList.toggle("active", node.dataset.managerAction === view);
   });
   const titles = {
     dashboard: ["Local workspace", "Operations dashboard"],
@@ -984,6 +1157,7 @@ function showView(view, module = null) {
     "vendor-cancel": ["Vendor Booking", "Cancel All Service"],
     "vendor-kpi": ["Vendor Booking", "Cek KPI"],
     "supplier-master": ["Manager / Admin", "Supplier Master & Contract Rates"],
+    "supplier-excel": ["Manager / Admin", "Supplier Data Import / Export"],
   };
   $("#view-eyebrow").textContent = titles[view][0];
   $("#view-title").textContent = titles[view][1];
@@ -2044,6 +2218,11 @@ function bindEvents() {
       if (!state.supplierMasterLoaded) loadSupplierMaster({ refresh: true });
       return;
     }
+    if (managerAction?.dataset.managerAction === "supplier-excel") {
+      showView("supplier-excel", "MANAGER_ADMIN");
+      loadSupplierExcel().catch((error) => toast(error.message, true));
+      return;
+    }
     const vendorAction = event.target.closest("[data-vendor-action]");
     if (vendorAction) {
       const views = {
@@ -2101,6 +2280,153 @@ function bindEvents() {
     list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
   });
   $("#refresh-supplier-master").addEventListener("click", () => loadSupplierMaster({ refresh: true }));
+  $("#supplier-excel-template").addEventListener("click", async () => {
+    try {
+      const result = await window.erim.supplierExcel.downloadTemplate({
+        typeCode: state.supplierExcel.typeCode,
+      });
+      if (!result.canceled) toast(`Template saved to ${result.filePath}`);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+  $("#supplier-excel-open-pending").addEventListener("click", () => {
+    showView("supplier-master", "MANAGER_ADMIN");
+    renderSupplierDraftStatus();
+    $("#supplier-draft-dialog").showModal();
+  });
+  $("#supplier-excel-type-tabs").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-supplier-excel-type]");
+    if (!button) return;
+    state.supplierExcel.typeCode = button.dataset.supplierExcelType;
+    state.supplierExcel.selectedSupplierIds.clear();
+    state.supplierExcel.batch = null;
+    renderSupplierExcelTypes();
+    renderSupplierExcelBatch(null);
+    try {
+      await loadSupplierExcelSuggestions();
+      renderSupplierExcelSelection();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+  $("#supplier-excel-select-file").addEventListener("click", async () => {
+    const button = $("#supplier-excel-select-file");
+    button.disabled = true;
+    $("#supplier-excel-import-status").textContent = "VALIDATING";
+    try {
+      const result = await window.erim.supplierExcel.analyzeImport({
+        typeCode: state.supplierExcel.typeCode,
+      });
+      if (!result.canceled) {
+        renderSupplierExcelBatch(result.batch);
+        state.supplierExcel.batches = await window.erim.supplierExcel.listBatches();
+        renderSupplierExcelBatches();
+        toast("Workbook validated. Review the ready rows and issues before saving locally.");
+      } else renderSupplierExcelBatch(state.supplierExcel.batch);
+    } catch (error) {
+      $("#supplier-excel-import-status").textContent = "FORMAT ERROR";
+      $("#supplier-excel-import-status").className = "status failed";
+      $("#supplier-excel-file-result").textContent = error.message;
+      toast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#supplier-excel-stage").addEventListener("click", async () => {
+    const batch = state.supplierExcel.batch;
+    if (!batch) return;
+    const button = $("#supplier-excel-stage");
+    button.disabled = true;
+    button.textContent = "Saving locally...";
+    try {
+      const result = await window.erim.supplierExcel.stageImport(batch.batchId);
+      applySupplierLocalResult(result);
+      renderSupplierMaster();
+      renderSupplierExcelBatch(result.batch);
+      state.supplierExcel.batches = await window.erim.supplierExcel.listBatches();
+      renderSupplierExcelBatches();
+      renderSupplierExcelSelection();
+      toast(`${result.batch.summary.staged || 0} Pending item(s) saved locally.`);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      button.textContent = "Save valid data locally";
+      button.disabled = state.supplierExcel.batch?.status === "LOCAL_PENDING";
+    }
+  });
+  $("#supplier-excel-export-conflicts").addEventListener("click", async () => {
+    try {
+      const result = await window.erim.supplierExcel.exportConflicts(state.supplierExcel.batch?.batchId);
+      if (!result.canceled) toast(`${result.issues} issue(s) exported to ${result.filePath}`);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+  $("#supplier-excel-preview-rows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-supplier-excel-open-record]");
+    if (button) openSupplierExcelExistingRecord(button.dataset.supplierExcelOpenRecord);
+  });
+  $("#supplier-excel-batch-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-supplier-excel-batch]");
+    if (!button) return;
+    const batch = state.supplierExcel.batches.find((row) =>
+      row.batchId === button.dataset.supplierExcelBatch);
+    if (batch) {
+      state.supplierExcel.typeCode = batch.typeCode;
+      renderSupplierExcelTypes();
+      renderSupplierExcelBatch(batch);
+    }
+  });
+  [
+    "#supplier-excel-search", "#supplier-excel-location", "#supplier-excel-product",
+    "#supplier-excel-supplier-status", "#supplier-excel-contract-status",
+    "#supplier-excel-rate-state", "#supplier-excel-channel",
+    "#supplier-excel-valid-from", "#supplier-excel-valid-to",
+  ].forEach((selector) => {
+    $(selector).addEventListener("input", renderSupplierExcelSelection);
+    $(selector).addEventListener("change", renderSupplierExcelSelection);
+  });
+  $("#supplier-excel-select-all").addEventListener("change", (event) => {
+    filteredSupplierExcelSuppliers().forEach((supplier) => {
+      if (event.target.checked) state.supplierExcel.selectedSupplierIds.add(supplier.supplierId);
+      else state.supplierExcel.selectedSupplierIds.delete(supplier.supplierId);
+    });
+    renderSupplierExcelSelection();
+  });
+  $("#supplier-excel-supplier-list").addEventListener("change", (event) => {
+    const input = event.target.closest("[data-supplier-excel-supplier]");
+    if (!input) return;
+    if (input.checked) state.supplierExcel.selectedSupplierIds.add(input.dataset.supplierExcelSupplier);
+    else state.supplierExcel.selectedSupplierIds.delete(input.dataset.supplierExcelSupplier);
+    renderSupplierExcelSelection();
+  });
+  $("#supplier-excel-clear-filters").addEventListener("click", () => {
+    [
+      "#supplier-excel-search", "#supplier-excel-location", "#supplier-excel-product",
+      "#supplier-excel-supplier-status", "#supplier-excel-contract-status",
+      "#supplier-excel-rate-state", "#supplier-excel-channel",
+      "#supplier-excel-valid-from", "#supplier-excel-valid-to",
+    ].forEach((selector) => { $(selector).value = ""; });
+    renderSupplierExcelSelection();
+  });
+  $("#supplier-excel-export").addEventListener("click", async () => {
+    const button = $("#supplier-excel-export");
+    button.disabled = true;
+    button.textContent = "Exporting...";
+    try {
+      const result = await window.erim.supplierExcel.exportCatalog({
+        ...supplierExcelFilters(),
+        supplierIds: [...state.supplierExcel.selectedSupplierIds],
+      });
+      if (!result.canceled) toast(`${result.counts.suppliers} supplier(s) exported to ${result.filePath}`);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      button.textContent = "Export selected";
+      button.disabled = !state.supplierExcel.selectedSupplierIds.size;
+    }
+  });
   $("#review-supplier-drafts").addEventListener("click", () => {
     renderSupplierDraftStatus();
     $("#supplier-draft-dialog").showModal();

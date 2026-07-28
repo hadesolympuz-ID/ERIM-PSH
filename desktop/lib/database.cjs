@@ -386,6 +386,20 @@ class LocalDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_supplier_master_drafts_status
         ON local_supplier_master_drafts(local_status, updated_at);
+
+      CREATE TABLE IF NOT EXISTS local_supplier_import_batches (
+        batch_id TEXT PRIMARY KEY,
+        file_name TEXT NOT NULL,
+        type_code TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary_json TEXT NOT NULL,
+        analysis_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_supplier_import_batches_status
+        ON local_supplier_import_batches(status, updated_at);
     `);
     this.migrateVendorServiceSplits();
     this.ensureColumn("local_sync_queue", "sync_mode", "TEXT");
@@ -967,6 +981,77 @@ class LocalDatabase {
   discardSupplierMasterDraft(draftId) {
     this.db.prepare("DELETE FROM local_supplier_master_drafts WHERE draft_id = ?").run(draftId);
     return { drafts: this.listSupplierMasterDrafts(), catalog: this.getSupplierMasterCatalog() };
+  }
+
+  saveSupplierImportBatch(input = {}) {
+    const batchId = String(input.batchId || `SIMPORT-${crypto.randomUUID()}`);
+    const now = this.now();
+    this.db.prepare(`
+      INSERT INTO local_supplier_import_batches (
+        batch_id, file_name, type_code, status, summary_json,
+        analysis_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(batch_id) DO UPDATE SET
+        status = excluded.status,
+        summary_json = excluded.summary_json,
+        analysis_json = excluded.analysis_json,
+        updated_at = excluded.updated_at
+    `).run(
+      batchId,
+      String(input.fileName || ""),
+      String(input.typeCode || ""),
+      String(input.status || "READY_FOR_REVIEW"),
+      JSON.stringify(input.summary || {}),
+      JSON.stringify(input.analysis || {}),
+      now,
+      now,
+    );
+    this.log("SUPPLIER_IMPORT_ANALYZED", "SUPPLIER_IMPORT_BATCH", batchId, {
+      fileName: input.fileName || "",
+      typeCode: input.typeCode || "",
+      summary: input.summary || {},
+    });
+    return this.getSupplierImportBatch(batchId);
+  }
+
+  getSupplierImportBatch(batchId) {
+    const row = this.db.prepare(`
+      SELECT * FROM local_supplier_import_batches WHERE batch_id = ?
+    `).get(batchId);
+    if (!row) return null;
+    return {
+      batchId: row.batch_id,
+      fileName: row.file_name,
+      typeCode: row.type_code,
+      status: row.status,
+      summary: JSON.parse(row.summary_json),
+      analysis: JSON.parse(row.analysis_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  listSupplierImportBatches() {
+    return this.db.prepare(`
+      SELECT batch_id FROM local_supplier_import_batches
+      ORDER BY updated_at DESC LIMIT 50
+    `).all().map((row) => this.getSupplierImportBatch(row.batch_id));
+  }
+
+  updateSupplierImportBatchStatus(batchId, status, summary) {
+    const existing = this.getSupplierImportBatch(batchId);
+    if (!existing) throw new Error("Supplier import batch was not found.");
+    this.db.prepare(`
+      UPDATE local_supplier_import_batches
+      SET status = ?, summary_json = ?, updated_at = ?
+      WHERE batch_id = ?
+    `).run(
+      status,
+      JSON.stringify(summary || existing.summary),
+      this.now(),
+      batchId,
+    );
+    return this.getSupplierImportBatch(batchId);
   }
 
   applySupplierMasterDrafts(catalog) {

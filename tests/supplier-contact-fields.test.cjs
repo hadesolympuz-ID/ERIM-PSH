@@ -65,3 +65,16 @@ test("Supplier Master exposes local staging, batch publish, and protected mainte
   assert.match(appsScript, /supplier\.master\.batch\.publish/);
   assert.match(appsScript, /assertSupplierMasterBaseVersion_/);
 });
+
+test("Supplier Import Export exposes one-type selection and responsive non-overlapping panels", () => {
+  assert.match(html, /data-manager-action="supplier-excel"/);
+  assert.match(html, /id="supplier-excel-view"/);
+  assert.match(html, /Save valid data locally/);
+  assert.match(html, /Select all filtered/);
+  assert.match(html, /Hotel will use a separate submenu/);
+  assert.match(renderer, /supplierExcelInitialTypes/);
+  assert.match(renderer, /window\.erim\.supplierExcel\.analyzeImport/);
+  assert.match(renderer, /window\.erim\.supplierExcel\.stageImport/);
+  assert.match(styles, /\.supplier-excel-layout\s*\{[\s\S]*minmax\(0,1fr\)/);
+  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.supplier-excel-layout\s*\{\s*grid-template-columns:\s*1fr/);
+});

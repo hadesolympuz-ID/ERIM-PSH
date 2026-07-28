@@ -1,7 +1,7 @@
 # ERIM-PSH Supplier Master and Contract Rate SOP
 
 Document status: `APPROVED IMPLEMENTATION BASELINE`
-Effective release: `v1.1.2`
+Effective release: `v1.1.3`
 Owner: `Manager / Admin`
 Authoritative source: `ERIM-PSH Google Sheet + Google Drive`
 
@@ -200,3 +200,16 @@ and Luggage Van examples and:
 
 Temporary records must be replaced with verified supplier and contract data
 before production financial use.
+
+## 11. Bulk Import / Export
+
+Use `Manager / Admin > Import / Export Data` for controlled bulk entry and
+selective export. Import is create-only, validates the official workbook before
+writing, saves valid records to the same local Pending queue, and retains
+conflicts per batch for export or direct correction in Supplier Master.
+
+The detailed procedure and workbook schema are recorded in
+`docs/SUPPLIER_IMPORT_EXPORT_SOP.md`.
+
+Hotel is not a Supplier Import Type. It will use a separate Hotel submenu and
+seasonal-rate model while reusing the common Excel mechanism.

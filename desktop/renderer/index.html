@@ -41,6 +41,7 @@
           <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN">Manager / Admin</button>
           <div class="nav-submenu" aria-label="Manager and Admin actions">
             <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
+            <button class="nav-subitem" data-manager-action="supplier-excel">Import / Export Data</button>
           </div>
           <button class="nav-item" data-view="sync">Sync Center <span id="sync-nav-count" class="nav-count">0</span></button>
           <button class="nav-item" data-view="admin">Admin DEV Console</button>
@@ -327,6 +328,107 @@
                 </section>
               </div>
             </div>
+          </section>
+
+          <section id="supplier-excel-view" class="view">
+            <div class="workspace-banner supplier-excel-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Supplier Data Import / Export</h2>
+                <p>Bulk-create supplier data locally, review conflicts, then publish the approved pending batch to Google. Hotel will use a separate submenu and seasonal-rate model.</p>
+              </div>
+              <div class="supplier-excel-banner-actions">
+                <button id="supplier-excel-template" class="button ghost small" type="button">Download Excel template</button>
+                <button id="supplier-excel-open-pending" class="button primary small" type="button">Open Pending Supplier Master</button>
+              </div>
+            </div>
+
+            <div class="supplier-excel-typebar panel">
+              <div>
+                <p class="eyebrow">Required scope</p>
+                <strong>Choose one supplier type</strong>
+                <small>One workbook and one export always belong to one Type.</small>
+              </div>
+              <div id="supplier-excel-type-tabs" class="supplier-excel-type-tabs"></div>
+            </div>
+
+            <div class="supplier-excel-layout">
+              <section class="panel supplier-excel-card">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">Create only</p><h2>Import new data</h2></div>
+                  <span id="supplier-excel-import-status" class="status">Waiting for file</span>
+                </div>
+                <div class="supplier-excel-card-body">
+                  <div class="supplier-excel-step">
+                    <span>1</span>
+                    <div><strong>Select the official Excel workbook</strong><small>Headers and table structure are checked before any record is saved.</small></div>
+                    <button id="supplier-excel-select-file" class="button primary" type="button">Select Excel</button>
+                  </div>
+                  <div id="supplier-excel-file-result" class="supplier-excel-message">No workbook selected.</div>
+                  <div id="supplier-excel-summary" class="supplier-excel-summary">
+                    <article><span>Total rows</span><strong>0</strong></article>
+                    <article class="success"><span>Ready</span><strong>0</strong></article>
+                    <article class="attention"><span>Conflicts</span><strong>0</strong></article>
+                    <article class="danger"><span>Invalid</span><strong>0</strong></article>
+                  </div>
+                  <div class="supplier-excel-preview">
+                    <div class="supplier-excel-subheading">
+                      <div><strong>Review result</strong><small>Conflicts are retained locally per import batch.</small></div>
+                      <button id="supplier-excel-export-conflicts" class="button ghost small" type="button" disabled>Export conflicts</button>
+                    </div>
+                    <div class="table-wrap supplier-excel-table-wrap">
+                      <table>
+                        <thead><tr><th>Sheet / row</th><th>Record</th><th>Result</th><th>Explanation</th><th></th></tr></thead>
+                        <tbody id="supplier-excel-preview-rows"><tr><td class="empty" colspan="5">Select a workbook to see the validation result.</td></tr></tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="supplier-excel-actions">
+                    <span>Valid rows become local Pending items; Excel never overwrites existing records.</span>
+                    <button id="supplier-excel-stage" class="button primary" type="button" disabled>Save valid data locally</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel supplier-excel-card">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">Selectable output</p><h2>Export supplier data</h2></div>
+                  <span id="supplier-excel-selected-count" class="status">0 selected</span>
+                </div>
+                <div class="supplier-excel-card-body">
+                  <div class="supplier-excel-filter-grid">
+                    <label class="wide">Search supplier<input id="supplier-excel-search" type="search" placeholder="Name, code, or destination" /></label>
+                    <label>Location<input id="supplier-excel-location" list="supplier-excel-location-options" placeholder="Bali, Ubud..." /></label>
+                    <label>Product<input id="supplier-excel-product" list="supplier-excel-product-options" placeholder="Service or product" /></label>
+                    <label>Supplier status<select id="supplier-excel-supplier-status"><option value="">All</option><option value="ACTIVE">Active</option><option value="ARCHIVED">Archived</option></select></label>
+                    <label>Contract status<select id="supplier-excel-contract-status"><option value="">All</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option><option value="FUTURE">Future</option></select></label>
+                    <label>Rate state<select id="supplier-excel-rate-state"><option value="">All</option><option value="HAS_ACTIVE_RATE">Has rate</option><option value="PENDING_RATE">Pending rate</option></select></label>
+                    <label>Booking channel<input id="supplier-excel-channel" list="supplier-excel-channel-options" placeholder="Email, WhatsApp..." /></label>
+                    <label>Valid from<input id="supplier-excel-valid-from" type="date" /></label>
+                    <label>Valid until<input id="supplier-excel-valid-to" type="date" /></label>
+                  </div>
+                  <datalist id="supplier-excel-location-options"></datalist>
+                  <datalist id="supplier-excel-product-options"></datalist>
+                  <datalist id="supplier-excel-channel-options"></datalist>
+                  <div class="supplier-excel-selection-heading">
+                    <label><input id="supplier-excel-select-all" type="checkbox" /> Select all filtered</label>
+                    <button id="supplier-excel-clear-filters" class="button ghost small" type="button">Clear filters</button>
+                  </div>
+                  <div id="supplier-excel-supplier-list" class="supplier-excel-supplier-list">
+                    <div class="empty-notifications">Choose a Type to load suppliers.</div>
+                  </div>
+                  <div class="supplier-excel-actions">
+                    <span>Export uses the same workbook format accepted by Import.</span>
+                    <button id="supplier-excel-export" class="button primary" type="button" disabled>Export selected</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section class="panel supplier-excel-history">
+              <div class="panel-heading"><div><p class="eyebrow">Local audit trail</p><h2>Recent import batches</h2></div></div>
+              <div id="supplier-excel-batch-list" class="supplier-excel-batch-list"><div class="empty-notifications">No local import batch yet.</div></div>
+            </section>
           </section>
 
           <section id="workspace-view" class="view">

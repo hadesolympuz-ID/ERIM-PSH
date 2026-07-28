@@ -567,6 +567,106 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 }
 .maintenance-warning p { margin: 7px 0 0; color: #7c4a4a; font-size: 11px; line-height: 1.5; }
 
+.supplier-excel-banner { align-items: center; }
+.supplier-excel-banner-actions {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
+}
+.supplier-excel-typebar {
+  display: grid; grid-template-columns: minmax(220px,.7fr) minmax(0,1.8fr);
+  gap: 18px; align-items: center; margin-bottom: 16px; padding: 17px 20px; overflow: visible;
+}
+.supplier-excel-typebar strong, .supplier-excel-typebar small { display: block; }
+.supplier-excel-typebar small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.supplier-excel-type-tabs { display: flex; min-width: 0; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.supplier-excel-type {
+  padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--navy-800); background: #fff; font-size: 11px; font-weight: 850; white-space: nowrap;
+}
+.supplier-excel-type:hover, .supplier-excel-type.active {
+  border-color: var(--navy-700); color: #fff; background: var(--navy-800);
+}
+.supplier-excel-layout {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; align-items: start;
+}
+.supplier-excel-card { min-width: 0; }
+.supplier-excel-card-body { min-width: 0; padding: 18px; }
+.supplier-excel-step {
+  display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 11px; align-items: center;
+  padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--blue-50);
+}
+.supplier-excel-step > span {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  color: #fff; background: var(--navy-800); font-weight: 850;
+}
+.supplier-excel-step strong, .supplier-excel-step small,
+.supplier-excel-subheading strong, .supplier-excel-subheading small { display: block; }
+.supplier-excel-step small, .supplier-excel-subheading small {
+  margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4;
+}
+.supplier-excel-message {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  color: var(--muted); background: #f8fafb; font-size: 11px; overflow-wrap: anywhere;
+}
+.supplier-excel-summary {
+  display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-top: 13px;
+}
+.supplier-excel-summary article {
+  min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: #fff;
+}
+.supplier-excel-summary article.success { background: var(--green-soft); border-color: #b5dfca; }
+.supplier-excel-summary article.attention { background: #fff8e6; border-color: #ead49f; }
+.supplier-excel-summary article.danger { background: var(--red-soft); border-color: #efc1bd; }
+.supplier-excel-summary span, .supplier-excel-summary strong { display: block; }
+.supplier-excel-summary span {
+  color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; white-space: nowrap;
+}
+.supplier-excel-summary strong { margin-top: 5px; font-size: 21px; }
+.supplier-excel-preview { min-width: 0; margin-top: 15px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.supplier-excel-subheading, .supplier-excel-selection-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 13px; background: var(--blue-50);
+}
+.supplier-excel-table-wrap { max-height: 340px; }
+.supplier-excel-table-wrap table { min-width: 720px; }
+.supplier-excel-table-wrap td { max-width: 310px; overflow-wrap: anywhere; }
+.supplier-excel-actions {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px;
+}
+.supplier-excel-actions span { max-width: 62%; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.supplier-excel-actions .button { flex: 0 0 auto; }
+.supplier-excel-filter-grid {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px;
+}
+.supplier-excel-filter-grid label {
+  min-width: 0; color: var(--muted); font-size: 10px; font-weight: 800;
+}
+.supplier-excel-filter-grid input, .supplier-excel-filter-grid select { margin-top: 5px; }
+.supplier-excel-selection-heading { margin-top: 14px; border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; }
+.supplier-excel-selection-heading label { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; }
+.supplier-excel-selection-heading input, .supplier-excel-supplier-row input { width: auto; }
+.supplier-excel-supplier-list {
+  max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 0 0 10px 10px;
+}
+.supplier-excel-supplier-row {
+  display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center;
+  padding: 12px 13px; border-top: 1px solid var(--line); background: #fff;
+}
+.supplier-excel-supplier-row:first-child { border-top: 0; }
+.supplier-excel-supplier-row:hover { background: var(--blue-50); }
+.supplier-excel-supplier-row strong, .supplier-excel-supplier-row small { display: block; }
+.supplier-excel-supplier-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.supplier-excel-history { margin-top: 16px; }
+.supplier-excel-batch-list { display: grid; }
+.supplier-excel-batch-row {
+  display: grid; grid-template-columns: minmax(0,1.7fr) minmax(120px,.6fr) auto;
+  gap: 14px; align-items: center; width: 100%; padding: 13px 20px;
+  border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left;
+}
+.supplier-excel-batch-row:first-child { border-top: 0; }
+.supplier-excel-batch-row:hover { background: var(--blue-50); }
+.supplier-excel-batch-row strong, .supplier-excel-batch-row small { display: block; }
+.supplier-excel-batch-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
 @media (max-width: 1180px) {
   .health-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .vendor-identity-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -575,4 +675,13 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
   .vendor-document-scroll { height: 520px; }
   .supplier-master-columns { grid-template-columns: 1fr; }
   .supplier-master-left { border-right: 0; border-bottom: 1px solid var(--line); }
+  .supplier-excel-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1100px) {
+  .supplier-excel-typebar { grid-template-columns: 1fr; }
+  .supplier-excel-type-tabs { justify-content: flex-start; }
+  .supplier-excel-banner { align-items: flex-start; }
+  .supplier-excel-step { grid-template-columns: 34px minmax(0,1fr); }
+  .supplier-excel-step .button { grid-column: 1 / -1; width: 100%; }
 }

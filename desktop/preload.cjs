@@ -70,6 +70,15 @@ contextBridge.exposeInMainWorld("erim", {
     discardDraft: (draftId) => ipcRenderer.invoke("supplier-master:draft-discard", draftId),
     uploadContract: (details) => ipcRenderer.invoke("supplier-master:contract-upload", details),
   },
+  supplierExcel: {
+    downloadTemplate: (details) => ipcRenderer.invoke("supplier-excel:template", details),
+    analyzeImport: (details) => ipcRenderer.invoke("supplier-excel:import-analyze", details),
+    stageImport: (batchId) => ipcRenderer.invoke("supplier-excel:import-stage", batchId),
+    listBatches: () => ipcRenderer.invoke("supplier-excel:batch-list"),
+    exportConflicts: (batchId) => ipcRenderer.invoke("supplier-excel:conflicts-export", batchId),
+    exportCatalog: (details) => ipcRenderer.invoke("supplier-excel:catalog-export", details),
+    suggestions: (details) => ipcRenderer.invoke("supplier-excel:suggestions", details),
+  },
   settings: {
     save: (values) => ipcRenderer.invoke("settings:save", values),
   },

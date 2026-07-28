@@ -6,6 +6,7 @@ const { UpdateService } = require("./lib/update-service.cjs");
 const { GoogleAuthService } = require("./lib/google-auth-service.cjs");
 const { BackendHealthService } = require("./lib/backend-health-service.cjs");
 const { GoogleWorkspaceService } = require("./lib/google-workspace-service.cjs");
+const { SupplierExcelService } = require("./lib/supplier-excel-service.cjs");
 
 let mainWindow;
 let database;
@@ -14,6 +15,7 @@ let updateService;
 let googleAuth;
 let backendHealth;
 let googleWorkspace;
+let supplierExcel;
 
 const isDev = !app.isPackaged;
 
@@ -112,6 +114,19 @@ function registerIpc() {
     googleWorkspace.discardSupplierMasterDraft(draftId));
   ipcMain.handle("supplier-master:contract-upload", (_event, details) =>
     googleWorkspace.selectAndUploadSupplierContract(details));
+  ipcMain.handle("supplier-excel:template", (_event, details) =>
+    supplierExcel.downloadTemplate(details || {}));
+  ipcMain.handle("supplier-excel:import-analyze", (_event, details) =>
+    supplierExcel.analyzeImport(details || {}));
+  ipcMain.handle("supplier-excel:import-stage", (_event, batchId) =>
+    supplierExcel.stageImport(batchId));
+  ipcMain.handle("supplier-excel:batch-list", () => supplierExcel.listBatches());
+  ipcMain.handle("supplier-excel:conflicts-export", (_event, batchId) =>
+    supplierExcel.exportConflicts(batchId));
+  ipcMain.handle("supplier-excel:catalog-export", (_event, details) =>
+    supplierExcel.exportCatalog(details || {}));
+  ipcMain.handle("supplier-excel:suggestions", (_event, details) =>
+    supplierExcel.suggestions(details || {}));
 
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
@@ -164,6 +179,26 @@ app.whenReady().then(() => {
         ],
       });
       return result.canceled ? null : result.filePaths[0];
+    },
+  });
+  supplierExcel = new SupplierExcelService({
+    database,
+    templatePath: path.join(__dirname, "assets", "supplier-import-template.xlsx"),
+    chooseFile: async (options = {}) => {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: options.title || "Choose Supplier Excel Workbook",
+        properties: ["openFile"],
+        filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
+      });
+      return result.canceled ? null : result.filePaths[0];
+    },
+    saveFile: async (options = {}) => {
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: options.title || "Save Supplier Excel Workbook",
+        defaultPath: options.defaultPath,
+        filters: options.filters || [{ name: "Excel Workbook", extensions: ["xlsx"] }],
+      });
+      return result.canceled ? null : result.filePath;
     },
   });
   updateService = new UpdateService({

@@ -4,7 +4,7 @@ Document status: `APPROVED BASELINE`
 Prepared: 2026-07-27
 Target sequence: v1.0.8-v1.1.x
 
-## Supplier Master foundation — v1.1.0-v1.1.2
+## Supplier Master foundation — v1.1.0-v1.1.3
 
 The Manager/Admin `Supplier Master` submenu is the shared foundation for all
 Vendor Booking rate and booking-address selection. It supports data-driven
@@ -28,6 +28,12 @@ for Google after every record, review the pending queue, then publish selected
 changes in one dependency-ordered batch. Per-entity audit remains detailed,
 while users receive one summary notification per successful batch. Initialize /
 migrate remains on the same page inside protected System Maintenance.
+
+The v1.1.3 workflow adds a dedicated Manager/Admin Import / Export submenu.
+Excel import is create-only, validates the official schema, records conflicts
+per local batch, and stages valid rows into the same Pending queue. Filtered
+exports use the same workbook format. Hotel remains outside Supplier Master and
+will later use a separate seasonal-rate submenu.
 
 ## 1. Purpose
 
