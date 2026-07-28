@@ -439,6 +439,37 @@ testing is prohibited.
 The detailed operator procedure is recorded in
 `docs/VENDOR_BOOKING_GENERATE_SOP.md`.
 
+## 15.1 Next Generating workspace design — awaiting mail-merge sample
+
+The next Generating iteration must use an item-level readiness workspace:
+
+1. The main panel displays every Micro Split item owned by Vendor Booking, with
+   Customer Code, Day/date, Supplier, Product/service, Type, rate status,
+   contract status, and selected booking channel.
+2. Every incomplete prerequisite displays an actionable notice, not only an
+   error label. Initial cases include non-contracted/manual items, missing
+   WhatsApp number, missing email/recipient, missing portal reference, missing
+   Booking SOP, and a channel selected without its required destination.
+3. Each notice includes an `Open entry detail` action that opens the exact
+   Supplier/Product/Contract/Contact/Recipient/SOP record. Saved corrections
+   use the existing local Pending → controlled publish workflow and refresh the
+   Generating item without staff retyping it.
+4. The booking channel is selected from the active channels listed in that
+   Supplier's Booking SOP. Staff may change the channel before generation, and
+   the system revalidates the destination requirements for the new choice.
+5. Selecting Email opens a dedicated two-section popup:
+   - left: outgoing email selection, recipients, subject, mail-merge preview,
+     item selection, and generation controls;
+   - right: the permitted Gmail context/view required to verify the booking
+     conversation and final generated message.
+6. Generating remains separate from sending. No popup open, channel change, or
+   data correction may implicitly send a communication.
+
+The approved mail-merge body sample and Subject format are pending from the
+project owner. Template token names, conditional sections, formatting,
+attachments, and Gmail-side interaction must not be finalized before those
+samples are received.
+
 ## 16. Definition of done
 
 A Vendor Booking phase is `DONE` only when:

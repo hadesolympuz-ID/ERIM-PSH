@@ -106,6 +106,19 @@ communication evidence, and reason.
 
 - publish official Supplier Booking, Booking Service, Communication, and
   Recipient records through Apps Script/Google Sheets with idempotent retry;
+- replace the current package-first editor with an all-item Vendor readiness
+  panel showing Type, Supplier, Product/service, contract/rate, channel, and
+  destination completeness;
+- add actionable notices for non-contracted items, missing WhatsApp/email,
+  missing portal details, missing recipients, and missing Booking SOP;
+- deep-link every notice to the exact Supplier Master entry detail, then
+  refresh the booking item after the correction enters Local Pending;
+- allow the generating channel to be selected or changed only from active
+  Booking SOP channels and revalidate its required destination;
+- add an Email generation popup with outgoing selection/mail-merge preview on
+  the left and the permitted Gmail context on the right;
+- apply the project owner's pending sample mail-merge body and Subject format
+  before finalizing template tokens or layout;
 - add DEV recipient whitelist and attachment controls;
 - implement revision comparison and per-item impact decisions;
 - implement supplier-reply review, confirmation results, completion gate, and
