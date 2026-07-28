@@ -5,10 +5,11 @@ const mammoth = require("mammoth");
 const { extractItineraryFromHtml } = require("./itinerary-extractor.cjs");
 
 class GoogleWorkspaceService {
-  constructor({ database, authService, chooseFile, downloadDirectory }) {
+  constructor({ database, authService, chooseFile, downloadDirectory, onSupplierPublishProgress }) {
     this.database = database;
     this.authService = authService;
     this.chooseFile = chooseFile;
+    this.onSupplierPublishProgress = onSupplierPublishProgress || (() => {});
     this.downloadDirectory = downloadDirectory || path.join(process.cwd(), "downloads", "ERIM-PSH", "Itineraries");
   }
 
@@ -215,8 +216,113 @@ class GoogleWorkspaceService {
     return this.database.discardSupplierMasterDraft(draftId);
   }
 
-  async publishSupplierMasterDrafts({ draftIds = [] } = {}) {
-    const selected = new Set((draftIds || []).map(String));
+  listSupplierPublishSessions() {
+    return this.database.listSupplierPublishSessions();
+  }
+
+  supplierPublishPlan(drafts) {
+    const catalog = this.database.getSupplierMasterCatalog();
+    const supplierById = new Map((catalog.suppliers || []).map((row) => [row.supplierId, row]));
+    const productById = new Map((catalog.products || []).map((row) => [row.productId, row]));
+    const stageOrder = { TYPE: 0, SUPPLIER: 1, PRODUCT: 2, CONTRACT: 3, ARCHIVE: 4 };
+    const stageName = {
+      TYPE: "TYPE",
+      SUPPLIER: "SUPPLIER",
+      PRODUCT: "PRODUCT",
+      CONTRACT: "CONTRACT_RATE",
+      ARCHIVE: "ARCHIVE",
+    };
+    const labelFor = (draft) => {
+      const payload = draft.payload || {};
+      return payload.typeName || payload.supplierName || payload.productName
+        || payload.contractNumber || payload.label || draft.entityId;
+    };
+    return drafts.map((draft) => {
+      const payload = draft.payload || {};
+      const supplier = supplierById.get(payload.supplierId || draft.parentId);
+      const archivedProduct = productById.get(payload.entityId);
+      const typeCode = String(
+        payload.typeCode
+        || supplier?.typeCode
+        || supplierById.get(archivedProduct?.supplierId)?.typeCode
+        || "UNASSIGNED"
+      ).toUpperCase();
+      return {
+        ...draft,
+        typeCode,
+        stage: stageName[draft.entityKind] || draft.entityKind,
+        stageOrder: stageOrder[draft.entityKind] ?? 9,
+        itemLabel: labelFor(draft),
+      };
+    }).sort((left, right) =>
+      left.typeCode.localeCompare(right.typeCode)
+      || left.stageOrder - right.stageOrder
+      || left.updatedAt.localeCompare(right.updatedAt)
+    );
+  }
+
+  emitSupplierPublishProgress(session) {
+    this.onSupplierPublishProgress(session);
+    return session;
+  }
+
+  supplierPublishReadbackConfirmed(catalog, item) {
+    const find = (rows, key, id) => (rows || []).find((row) => String(row[key]) === String(id));
+    if (item.entityKind === "TYPE") {
+      return Boolean(find(catalog.supplierTypes, "supplierTypeId", item.entityId));
+    }
+    if (item.entityKind === "SUPPLIER") {
+      return Boolean(find(catalog.suppliers, "supplierId", item.entityId));
+    }
+    if (item.entityKind === "PRODUCT") {
+      return Boolean(find(catalog.products, "productId", item.entityId));
+    }
+    if (item.entityKind === "CONTRACT") {
+      const contract = find(catalog.contracts, "contractId", item.entityId);
+      const expectedRateIds = (item.payload.rates || []).map((rate) => rate.contractRateId).filter(Boolean);
+      return Boolean(contract) && expectedRateIds.every((rateId) =>
+        find(catalog.rates, "contractRateId", rateId)
+      );
+    }
+    if (item.entityKind === "ARCHIVE") {
+      const targetKind = String(item.payload.entityKind || "").toUpperCase();
+      const config = {
+        SUPPLIER_TYPE: ["supplierTypes", "supplierTypeId"],
+        SUPPLIER: ["suppliers", "supplierId"],
+        PRODUCT: ["products", "productId"],
+        CONTRACT: ["contracts", "contractId"],
+      }[targetKind];
+      if (!config) return false;
+      const row = find(catalog[config[0]], config[1], item.payload.entityId);
+      return Boolean(row) && row.active === false;
+    }
+    return false;
+  }
+
+  async publishSupplierMasterDrafts({ draftIds = [], sessionId = "" } = {}) {
+    const previousSession = sessionId
+      ? this.database.getSupplierPublishSession(sessionId)
+      : null;
+    const resumedDraftIds = previousSession
+      ? previousSession.items.filter((item) => item.status !== "SYNCED").map((item) => item.draftId)
+      : [];
+    if (previousSession && !resumedDraftIds.length) {
+      return {
+        status: previousSession.status,
+        session: previousSession,
+        results: [],
+        summary: {
+          total: previousSession.totalItems,
+          synced: previousSession.confirmedItems,
+          failed: previousSession.failedItems + previousSession.blockedItems,
+          conflicts: previousSession.conflictItems,
+          blocked: previousSession.blockedItems,
+        },
+        drafts: this.database.listSupplierMasterDrafts(),
+        catalog: this.database.getSupplierMasterCatalog(),
+      };
+    }
+    const selected = new Set((resumedDraftIds.length ? resumedDraftIds : draftIds || []).map(String));
     const drafts = this.database.listSupplierMasterDrafts()
       .filter((draft) => !selected.size || selected.has(draft.draftId));
     if (!drafts.length) {
@@ -227,43 +333,189 @@ class GoogleWorkspaceService {
         summary: { total: 0, synced: 0, failed: 0, conflicts: 0 },
       };
     }
-    drafts.forEach((draft) => this.database.setSupplierMasterDraftStatus(draft.draftId, "SYNCING"));
-    let response;
+    const plan = this.supplierPublishPlan(drafts);
+    let session = previousSession
+      ? this.database.resetSupplierPublishSession(previousSession.sessionId, plan.map((item) => item.draftId))
+      : this.database.createSupplierPublishSession(plan);
+    this.emitSupplierPublishProgress(session);
+    const results = [];
+    const failedEntityIds = new Set();
+    const selectedEntityIds = new Set(plan.map((item) => item.entityId));
+    const chunkSize = 20;
+    const dependencies = (item) => {
+      if (item.entityKind === "PRODUCT") return [item.payload.supplierId];
+      if (item.entityKind === "CONTRACT") {
+        return [
+          item.payload.supplierId,
+          ...(item.payload.rates || []).map((rate) => rate.productId),
+        ].filter(Boolean);
+      }
+      return [];
+    };
+    const groups = [];
+    plan.forEach((item) => {
+      const key = `${item.typeCode}:${item.stage}`;
+      const current = groups.at(-1);
+      if (!current || current.key !== key) groups.push({ key, items: [item] });
+      else current.items.push(item);
+    });
+    for (const [groupIndex, group] of groups.entries()) {
+      const publishable = [];
+      for (const item of group.items) {
+        const blockedBy = dependencies(item).find((entityId) =>
+          selectedEntityIds.has(entityId) && failedEntityIds.has(entityId)
+        );
+        if (blockedBy) {
+          failedEntityIds.add(item.entityId);
+          this.database.setSupplierMasterDraftStatus(item.draftId, "FAILED", {
+            code: "BLOCKED_BY_DEPENDENCY",
+            message: `Dependency ${blockedBy} was not confirmed in Google.`,
+          });
+          session = this.database.updateSupplierPublishSessionItem(
+            session.sessionId,
+            item.draftId,
+            "BLOCKED_BY_DEPENDENCY",
+            {
+              errorCode: "BLOCKED_BY_DEPENDENCY",
+              errorMessage: `Dependency ${blockedBy} was not confirmed in Google.`,
+              typeCode: item.typeCode,
+              stage: item.stage,
+              itemLabel: item.itemLabel,
+            },
+          );
+          this.emitSupplierPublishProgress(session);
+        } else {
+          publishable.push(item);
+        }
+      }
+      for (let offset = 0; offset < publishable.length; offset += chunkSize) {
+        const chunk = publishable.slice(offset, offset + chunkSize);
+        for (const item of chunk) {
+          this.database.setSupplierMasterDraftStatus(item.draftId, "SYNCING");
+          session = this.database.updateSupplierPublishSessionItem(
+            session.sessionId,
+            item.draftId,
+            "PUBLISHING",
+            { typeCode: item.typeCode, stage: item.stage, itemLabel: item.itemLabel },
+          );
+          this.emitSupplierPublishProgress(session);
+        }
+        let response;
+        try {
+          response = await this.callAppsScript("supplier.master.batch.publish", {
+            requestId: `${session.sessionId}-${group.key}-${Math.floor(offset / chunkSize) + 1}`,
+            broadcast: groupIndex === groups.length - 1 && offset + chunkSize >= publishable.length,
+            sessionTotal: session.totalItems,
+            changes: chunk.map((draft) => ({
+              draftId: draft.draftId,
+              entityKind: draft.entityKind,
+              entityId: draft.entityId,
+              baseRecordVersion: draft.baseRecordVersion,
+              payload: draft.payload,
+            })),
+          });
+        } catch (error) {
+          for (const item of chunk) {
+            failedEntityIds.add(item.entityId);
+            const errorDetails = {
+              code: error.code || "PUBLISH_FAILED",
+              message: error.message,
+            };
+            this.database.setSupplierMasterDraftStatus(item.draftId, "FAILED", errorDetails);
+            session = this.database.updateSupplierPublishSessionItem(
+              session.sessionId,
+              item.draftId,
+              "FAILED",
+              {
+                errorCode: errorDetails.code,
+                errorMessage: errorDetails.message,
+                typeCode: item.typeCode,
+                stage: item.stage,
+                itemLabel: item.itemLabel,
+              },
+            );
+            results.push({
+              draftId: item.draftId,
+              entityId: item.entityId,
+              status: "FAILED",
+              errorCode: errorDetails.code,
+              message: errorDetails.message,
+            });
+            this.emitSupplierPublishProgress(session);
+          }
+          continue;
+        }
+        if (response.catalog) this.database.replaceSupplierMasterCache(response.catalog);
+        for (const item of chunk) {
+          session = this.database.updateSupplierPublishSessionItem(
+            session.sessionId,
+            item.draftId,
+            "VERIFYING",
+            { typeCode: item.typeCode, stage: item.stage, itemLabel: item.itemLabel },
+          );
+          this.emitSupplierPublishProgress(session);
+          const result = (response.results || []).find((row) => row.draftId === item.draftId);
+          const readbackConfirmed = result?.status === "SYNCED"
+            && this.supplierPublishReadbackConfirmed(
+              response.catalog || this.database.getSupplierMasterCatalog(),
+              item,
+            );
+          const status = readbackConfirmed
+            ? "SYNCED"
+            : result?.status === "CONFLICT" ? "CONFLICT" : "FAILED";
+          const errorCode = result?.status === "SYNCED" && !readbackConfirmed
+            ? "READBACK_MISSING" : result?.errorCode || "";
+          const message = result?.status === "SYNCED" && !readbackConfirmed
+            ? "Google accepted the request but the record was not found during readback."
+            : result?.message || "";
+          if (status !== "SYNCED") failedEntityIds.add(item.entityId);
+          this.database.setSupplierMasterDraftStatus(item.draftId, status, {
+            code: errorCode,
+            message,
+          });
+          session = this.database.updateSupplierPublishSessionItem(
+            session.sessionId,
+            item.draftId,
+            status,
+            {
+              errorCode,
+              errorMessage: message,
+              typeCode: item.typeCode,
+              stage: item.stage,
+              itemLabel: item.itemLabel,
+            },
+          );
+          results.push({
+            draftId: item.draftId,
+            entityId: item.entityId,
+            status,
+            errorCode,
+            message,
+          });
+          this.emitSupplierPublishProgress(session);
+        }
+      }
+    }
     try {
-      response = await this.callAppsScript("supplier.master.batch.publish", {
-        requestId: `SMBATCH-${crypto.randomUUID()}`,
-        changes: drafts.map((draft) => ({
-          draftId: draft.draftId,
-          entityKind: draft.entityKind,
-          entityId: draft.entityId,
-          baseRecordVersion: draft.baseRecordVersion,
-          payload: draft.payload,
-        })),
-      });
-    } catch (error) {
-      drafts.forEach((draft) => this.database.setSupplierMasterDraftStatus(
-        draft.draftId,
-        "FAILED",
-        { code: error.code || "PUBLISH_FAILED", message: error.message },
-      ));
-      throw error;
+      const reconciled = await this.listSupplierMaster({ refresh: true });
+      if (reconciled.catalog) this.database.replaceSupplierMasterCache(reconciled.catalog);
+    } catch {
+      // Confirmed chunk readbacks remain authoritative in SQLite when final refresh is offline.
     }
-    const results = response.results || [];
-    for (const draft of drafts) {
-      const result = results.find((row) => row.draftId === draft.draftId);
-      const status = result?.status === "SYNCED"
-        ? "SYNCED"
-        : result?.status === "CONFLICT" ? "CONFLICT" : "FAILED";
-      this.database.setSupplierMasterDraftStatus(draft.draftId, status, {
-        code: result?.errorCode || "",
-        message: result?.message || "",
-      });
-    }
-    if (response.catalog) this.database.replaceSupplierMasterCache(response.catalog);
+    session = this.database.refreshSupplierPublishSession(session.sessionId);
+    this.emitSupplierPublishProgress(session);
+    const summary = {
+      total: session.totalItems,
+      synced: session.confirmedItems,
+      failed: session.failedItems + session.blockedItems,
+      conflicts: session.conflictItems,
+      blocked: session.blockedItems,
+    };
     return {
-      status: "PUBLISHED",
+      status: session.status,
+      session,
       results,
-      summary: response.summary || {},
+      summary,
       drafts: this.database.listSupplierMasterDrafts(),
       catalog: this.database.getSupplierMasterCatalog(),
     };
@@ -558,6 +810,7 @@ class GoogleWorkspaceService {
       this.sheetRecords("SERVICES").catch(() => []),
     ]);
     const suggestions = {
+      ...localSuggestions,
       vendorNames: uniqueSortedStrings([
         ...localSuggestions.vendorNames,
         ...vendors.map((row) =>

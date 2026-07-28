@@ -29,6 +29,8 @@ const state = {
   },
   supplierMasterLoaded: false,
   supplierMasterDrafts: [],
+  supplierPublishSession: null,
+  supplierPublishSessions: [],
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
   supplierArchiveTarget: null,
@@ -479,20 +481,66 @@ function renderSupplierDraftStatus() {
   $("#publish-selected-supplier-drafts").disabled = !pending.length;
 }
 
-async function publishSupplierDrafts(draftIds = []) {
+function renderSupplierPublishProgress(session = state.supplierPublishSession) {
+  const panel = $("#supplier-publish-progress");
+  if (!session) {
+    panel.hidden = true;
+    return;
+  }
+  state.supplierPublishSession = session;
+  panel.hidden = false;
+  const percent = Number(session.progressPercent || 0);
+  $("#supplier-publish-percent").textContent = `${percent}%`;
+  $("#supplier-publish-progress-bar").value = percent;
+  $("#supplier-publish-current").textContent = [
+    session.currentTypeCode,
+    String(session.currentStage || "").replaceAll("_", " "),
+    session.currentItemLabel,
+  ].filter(Boolean).join(" · ") || session.status;
+  $("#supplier-publish-count").textContent =
+    `${session.confirmedItems || 0} of ${session.totalItems || 0} records confirmed in Google`;
+  const stageGroups = new Map();
+  (session.items || []).forEach((item) => {
+    const key = `${item.typeCode} · ${item.stage.replaceAll("_", " ")}`;
+    const group = stageGroups.get(key) || { total: 0, synced: 0, issues: 0 };
+    group.total += 1;
+    if (item.status === "SYNCED") group.synced += 1;
+    if (["FAILED", "CONFLICT", "BLOCKED_BY_DEPENDENCY"].includes(item.status)) group.issues += 1;
+    stageGroups.set(key, group);
+  });
+  $("#supplier-publish-stage-summary").innerHTML = [...stageGroups.entries()].map(([label, group]) =>
+    `<span>${escapeHtml(label)} · ${group.synced}/${group.total}${group.issues ? ` · ${group.issues} issue` : ""}</span>`
+  ).join("");
+  $("#supplier-publish-item-list").innerHTML = (session.items || []).map((item) => `
+    <div class="supplier-publish-item">
+      <span><strong>${escapeHtml(item.itemLabel)}</strong><small>${escapeHtml(item.typeCode)} · ${escapeHtml(item.stage.replaceAll("_", " "))}${item.errorMessage ? ` · ${escapeHtml(item.errorMessage)}` : ""}</small></span>
+      ${statusPill(item.status)}
+    </div>
+  `).join("");
+  $("#resume-supplier-publish-session").hidden =
+    !["COMPLETED_WITH_ISSUES", "FAILED"].includes(session.status);
+}
+
+async function loadLatestSupplierPublishSession() {
+  state.supplierPublishSessions = await window.erim.supplierMaster.listPublishSessions();
+  state.supplierPublishSession = state.supplierPublishSessions[0] || null;
+  renderSupplierPublishProgress();
+}
+
+async function publishSupplierDrafts(draftIds = [], sessionId = "") {
   $("#publish-selected-supplier-drafts").disabled = true;
   $("#publish-supplier-drafts").disabled = true;
   $("#supplier-master-sync-status").textContent = "PUBLISHING";
   try {
-    const result = await window.erim.supplierMaster.publishDrafts({ draftIds });
+    const result = await window.erim.supplierMaster.publishDrafts({ draftIds, sessionId });
     applySupplierLocalResult(result);
+    if (result.session) renderSupplierPublishProgress(result.session);
     renderSupplierMaster();
     state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
     renderVendorSuggestions(state.vendorSuggestions);
     $("#supplier-master-sync-status").textContent = "SYNCED";
     $("#supplier-master-sync-status").className = "status synced";
     const summary = result.summary || {};
-    if (!state.supplierMasterDrafts.length) $("#supplier-draft-dialog").close();
     toast(`${summary.synced || 0} change(s) published; ${summary.conflicts || 0} conflict(s), ${summary.failed || 0} failed.`);
   } catch (error) {
     state.supplierMasterDrafts = await window.erim.supplierMaster.listDrafts();
@@ -711,15 +759,9 @@ function supplierSuggestionsFromCatalog(catalog, serviceDate = new Date().toISOS
   const productById = new Map(products.map((row) => [row.productId, row]));
   const supplierById = new Map(suppliers.map((row) => [row.supplierId, row]));
   const valid = (date, from, to) => (!from || date >= from) && (!to || date <= to);
-  const rates = (catalog.rates || []).filter((row) => row.active !== false).filter((rate) => {
+  const allRates = (catalog.rates || []).filter((row) => row.active !== false).map((rate) => {
     const contract = contractById.get(rate.contractId);
-    return contract && valid(
-      serviceDate,
-      rate.validFrom || contract.validFrom,
-      rate.validTo || contract.validTo,
-    );
-  }).map((rate) => {
-    const contract = contractById.get(rate.contractId) || {};
+    if (!contract) return null;
     const product = productById.get(rate.productId) || {};
     const supplier = supplierById.get(product.supplierId || contract.supplierId) || {};
     const basis = String(rate.priceBasis || "PER_SERVICE").toUpperCase();
@@ -743,11 +785,15 @@ function supplierSuggestionsFromCatalog(catalog, serviceDate = new Date().toISOS
       priceSource: "CONTRACT",
       contractNumber: contract.contractNumber || "",
     };
-  });
+  }).filter(Boolean);
+  const rates = allRates.filter((rate) =>
+    valid(serviceDate, rate.validFrom, rate.validTo)
+  );
   const byType = (code) => rates.filter((rate) => rate.typeCode === code);
   const unique = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return {
     ...catalog,
+    allRates,
     rates,
     vendorRates: byType("VENDOR"),
     tocRates: byType("TOC"),
@@ -1001,8 +1047,16 @@ function renderSupplierProductsAndContracts() {
     $("#supplier-product-contract-list").innerHTML = `<div class="empty-notifications">Choose a supplier from the left.</div>`;
     return;
   }
-  const products = state.supplierMaster.products.filter((row) => row.supplierId === supplier.supplierId && row.active !== false);
-  const contracts = state.supplierMaster.contracts.filter((row) => row.supplierId === supplier.supplierId && row.active !== false);
+  const newestLocalFirst = (left, right) =>
+    Number(Boolean(right.localDraftStatus)) - Number(Boolean(left.localDraftStatus))
+    || String(right.localDraftUpdatedAt || right.updatedAt || "")
+      .localeCompare(String(left.localDraftUpdatedAt || left.updatedAt || ""));
+  const products = state.supplierMaster.products
+    .filter((row) => row.supplierId === supplier.supplierId && row.active !== false)
+    .sort(newestLocalFirst);
+  const contracts = state.supplierMaster.contracts
+    .filter((row) => row.supplierId === supplier.supplierId && row.active !== false)
+    .sort(newestLocalFirst);
   const rates = state.supplierMaster.rates.filter((row) => row.active !== false);
   const productCards = products.map((product) => `
     <article class="supplier-product-card">
@@ -1059,6 +1113,7 @@ function openSupplierProductDialog(productId = "") {
   $("#supplier-product-dialog-title").textContent = product.productId ? `Edit ${product.productName}` : "Add Product";
   $("#archive-supplier-product").hidden = !product.productId;
   $("#supplier-product-dialog").showModal();
+  if (!product.productId) setTimeout(() => form.elements.productName.focus(), 0);
 }
 
 async function saveSupplierProductForm(event) {
@@ -1195,6 +1250,7 @@ function openSupplierContractDialog(contractId = "") {
   $("#supplier-contract-dialog-title").textContent = contract.contractId ? `Edit ${contract.contractNumber}` : "New Contract";
   $("#archive-supplier-contract").hidden = !contract.contractId;
   $("#supplier-contract-dialog").showModal();
+  if (!contract.contractId) setTimeout(() => form.elements.contractNumber.focus(), 0);
 }
 
 function collectContractRates() {
@@ -1913,7 +1969,7 @@ function updateVendorDayHotels() {
 
 function vendorSplitCatalog(serviceType) {
   const type = normalizeVendorSplitType(serviceType);
-  return (state.vendorSuggestions.rates || [
+  return (state.vendorSuggestions.allRates || state.vendorSuggestions.rates || [
     ...(state.vendorSuggestions.vendorRates || []),
     ...(state.vendorSuggestions.tocRates || []),
     ...(state.vendorSuggestions.transportRates || []),
@@ -2313,7 +2369,20 @@ function collectVendorIntake() {
 }
 
 function populateVendorIntake(context) {
-  if (context.suggestions) state.vendorSuggestions = context.suggestions;
+  if (context.suggestions) {
+    const incoming = context.suggestions;
+    const current = state.vendorSuggestions || {};
+    state.vendorSuggestions = {
+      ...current,
+      ...incoming,
+      supplierTypes: incoming.supplierTypes?.length ? incoming.supplierTypes : current.supplierTypes || [],
+      suppliers: incoming.suppliers?.length ? incoming.suppliers : current.suppliers || [],
+      products: incoming.products?.length ? incoming.products : current.products || [],
+      contracts: incoming.contracts?.length ? incoming.contracts : current.contracts || [],
+      rates: incoming.rates?.length ? incoming.rates : current.rates || [],
+      allRates: incoming.allRates?.length ? incoming.allRates : current.allRates || [],
+    };
+  }
   state.vendorIntake = { ...context, suggestions: state.vendorSuggestions };
   const form = $("#vendor-intake-form");
   const scalarFields = [
@@ -2624,9 +2693,10 @@ function bindEvents() {
       toast(error.message, true);
     }
   });
-  $("#supplier-excel-open-pending").addEventListener("click", () => {
+  $("#supplier-excel-open-pending").addEventListener("click", async () => {
     showView("supplier-master", "MANAGER_ADMIN");
     renderSupplierDraftStatus();
+    await loadLatestSupplierPublishSession();
     $("#supplier-draft-dialog").showModal();
   });
   $("#supplier-excel-type-tabs").addEventListener("click", async (event) => {
@@ -2761,8 +2831,9 @@ function bindEvents() {
       button.disabled = !state.supplierExcel.selectedSupplierIds.size;
     }
   });
-  $("#review-supplier-drafts").addEventListener("click", () => {
+  $("#review-supplier-drafts").addEventListener("click", async () => {
     renderSupplierDraftStatus();
+    await loadLatestSupplierPublishSession();
     $("#supplier-draft-dialog").showModal();
   });
   $("#publish-supplier-drafts").addEventListener("click", () => publishSupplierDrafts());
@@ -2775,6 +2846,11 @@ function bindEvents() {
     const draftIds = $$("[data-supplier-draft-select]:checked").map((node) => node.value);
     if (!draftIds.length) return toast("Choose at least one pending change.", true);
     publishSupplierDrafts(draftIds);
+  });
+  $("#resume-supplier-publish-session").addEventListener("click", () => {
+    const sessionId = state.supplierPublishSession?.sessionId;
+    if (!sessionId) return;
+    publishSupplierDrafts([], sessionId);
   });
   $("#open-supplier-maintenance").addEventListener("click", () => {
     $("#supplier-maintenance-confirmation").value = "";
@@ -2853,8 +2929,11 @@ function bindEvents() {
   $("#supplier-contract-form").addEventListener("submit", saveSupplierContractForm);
   $("#close-supplier-contract-dialog").addEventListener("click", () => $("#supplier-contract-dialog").close());
   $("#cancel-supplier-contract-dialog").addEventListener("click", () => $("#supplier-contract-dialog").close());
-  $("#add-contract-rate").addEventListener("click", () =>
-    $("#supplier-contract-rate-list").insertAdjacentHTML("beforeend", contractRateMarkup({})));
+  $("#add-contract-rate").addEventListener("click", () => {
+    const list = $("#supplier-contract-rate-list");
+    list.insertAdjacentHTML("afterbegin", contractRateMarkup({}));
+    list.querySelector("[data-contract-rate='productId']")?.focus();
+  });
   $("#upload-supplier-contract").addEventListener("click", uploadSupplierContract);
   $("#archive-supplier-contract").addEventListener("click", () => {
     const id = $("#supplier-contract-form").elements.contractId.value;
@@ -3245,4 +3324,17 @@ loadNavigationPreferences();
 applyNavigationPreferences();
 renderTransportOperation();
 bindEvents();
+window.erim.supplierMaster.onPublishProgress((session) => {
+  renderSupplierPublishProgress(session);
+});
+window.erim.masterData.onStatus((payload) => {
+  const supplierResult = payload?.supplierMaster;
+  const catalog = supplierResult?.catalog;
+  if (!catalog) return;
+  state.supplierMaster = supplierCatalogFrom(supplierResult);
+  state.supplierMasterLoaded = true;
+  state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
+  renderVendorSuggestions(state.vendorSuggestions);
+  if (state.currentView === "supplier-master") renderSupplierMaster();
+});
 refresh().catch((error) => toast(error.message, true));

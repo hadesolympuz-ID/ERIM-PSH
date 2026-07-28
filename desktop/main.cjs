@@ -112,6 +112,8 @@ function registerIpc() {
   ipcMain.handle("supplier-master:drafts-list", () => googleWorkspace.listSupplierMasterDrafts());
   ipcMain.handle("supplier-master:drafts-publish", (_event, details) =>
     googleWorkspace.publishSupplierMasterDrafts(details || {}));
+  ipcMain.handle("supplier-master:publish-sessions-list", () =>
+    googleWorkspace.listSupplierPublishSessions());
   ipcMain.handle("supplier-master:draft-discard", (_event, draftId) =>
     googleWorkspace.discardSupplierMasterDraft(draftId));
   ipcMain.handle("supplier-master:contract-upload", (_event, details) =>
@@ -166,6 +168,8 @@ app.whenReady().then(() => {
   googleWorkspace = new GoogleWorkspaceService({
     database,
     authService: googleAuth,
+    onSupplierPublishProgress: (payload) =>
+      mainWindow?.webContents.send("supplier-master:publish-progress", payload),
     downloadDirectory: path.join(app.getPath("downloads"), "ERIM-PSH", "Itineraries"),
     chooseFile: async (options = {}) => {
       const result = await dialog.showOpenDialog(mainWindow, {

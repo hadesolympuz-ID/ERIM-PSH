@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld("erim", {
     archive: (details) => ipcRenderer.invoke("supplier-master:archive", details),
     listDrafts: () => ipcRenderer.invoke("supplier-master:drafts-list"),
     publishDrafts: (details) => ipcRenderer.invoke("supplier-master:drafts-publish", details),
+    listPublishSessions: () => ipcRenderer.invoke("supplier-master:publish-sessions-list"),
+    onPublishProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("supplier-master:publish-progress", listener);
+      return () => ipcRenderer.removeListener("supplier-master:publish-progress", listener);
+    },
     discardDraft: (draftId) => ipcRenderer.invoke("supplier-master:draft-discard", draftId),
     uploadContract: (details) => ipcRenderer.invoke("supplier-master:contract-upload", details),
   },

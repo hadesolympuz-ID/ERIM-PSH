@@ -796,12 +796,12 @@ function publishSupplierMasterBatch_(request, actor) {
     const synced = results.filter((row) => row.status === "SYNCED").length;
     const conflicts = results.filter((row) => row.status === "CONFLICT").length;
     const failed = results.length - synced - conflicts;
-    if (synced) {
+    if (synced && request.broadcast !== false) {
       const now = new Date().toISOString();
       broadcastSupplierMasterNotification_({
         type: "SUPPLIER_MASTER_BATCH_PUBLISHED",
         title: "Supplier Master updated",
-        message: `${actor.fullName || actor.employeeId} published ${synced} Supplier Master change(s).`,
+        message: `${actor.fullName || actor.employeeId} published ${Number(request.sessionTotal || synced)} Supplier Master change(s).`,
         actionUrl: "supplier-master",
       }, actor, now);
     }

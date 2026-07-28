@@ -51,3 +51,14 @@ test("Product cards expose bulk duplicate workflow through the local pending bri
   assert.match(preload, /duplicateProduct:.*supplier-master:product-duplicate/);
   assert.match(main, /supplier-master:product-duplicate/);
 });
+
+test("Supplier publishing exposes confirmed live progress and top-positioned new records", () => {
+  assert.match(html, /id="supplier-publish-progress"/);
+  assert.match(html, /id="supplier-publish-progress-bar"/);
+  assert.match(html, /records confirmed/);
+  assert.match(preload, /supplier-master:publish-progress/);
+  assert.match(main, /supplier-master:publish-progress/);
+  assert.match(app, /renderSupplierPublishProgress/);
+  assert.match(app, /newestLocalFirst/);
+  assert.match(app, /insertAdjacentHTML\("afterbegin", contractRateMarkup/);
+});

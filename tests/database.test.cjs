@@ -8,6 +8,7 @@ const { LocalDatabase } = require("../desktop/lib/database.cjs");
 const { SyncService } = require("../desktop/lib/sync-service.cjs");
 const { BackendHealthService } = require("../desktop/lib/backend-health-service.cjs");
 const { GoogleAuthService } = require("../desktop/lib/google-auth-service.cjs");
+const { GoogleWorkspaceService } = require("../desktop/lib/google-workspace-service.cjs");
 
 function withDatabase(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-"));
@@ -544,6 +545,126 @@ test("uses dynamic Supplier Types and only exposes contract rates valid on the s
   });
   assert.equal(saved.days[0].splits[0].serviceType, "RESTAURANT");
 }));
+
+test("keeps published suppliers and products selectable when no valid rate exists", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    sourceVersion: "NO-RATE-CATALOG",
+    supplierTypes: [{
+      supplierTypeId: "ST-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport",
+      displayOrder: 30, status: "ACTIVE", active: true,
+    }],
+    suppliers: [{
+      supplierId: "SUP-NO-RATE", supplierTypeId: "ST-TRANSPORT",
+      typeCode: "TRANSPORT", supplierName: "No Rate Transport", status: "ACTIVE", active: true,
+    }],
+    products: [{
+      productId: "PROD-NO-RATE", supplierId: "SUP-NO-RATE",
+      productName: "Future Vehicle", status: "ACTIVE", active: true,
+    }],
+    contracts: [],
+    rates: [],
+  });
+
+  const suggestions = database.getLocalVendorSuggestions("2026-08-01");
+  assert.equal(suggestions.suppliers[0].supplierId, "SUP-NO-RATE");
+  assert.equal(suggestions.products[0].productId, "PROD-NO-RATE");
+  assert.equal(suggestions.rates.length, 0);
+}));
+
+test("tracks confirmed Supplier Publish Session percentage independently from failures", () => withDatabase((database) => {
+  const session = database.createSupplierPublishSession([{
+    draftId: "SUPPLIER-SUP-1",
+    entityKind: "SUPPLIER",
+    entityId: "SUP-1",
+    typeCode: "TRANSPORT",
+    stage: "SUPPLIER",
+    itemLabel: "Supplier One",
+  }, {
+    draftId: "PRODUCT-PROD-1",
+    entityKind: "PRODUCT",
+    entityId: "PROD-1",
+    typeCode: "TRANSPORT",
+    stage: "PRODUCT",
+    itemLabel: "Product One",
+  }]);
+  assert.equal(session.progressPercent, 0);
+
+  const halfway = database.updateSupplierPublishSessionItem(
+    session.sessionId, "SUPPLIER-SUP-1", "SYNCED",
+  );
+  assert.equal(halfway.confirmedItems, 1);
+  assert.equal(halfway.progressPercent, 50);
+
+  const finished = database.updateSupplierPublishSessionItem(
+    session.sessionId,
+    "PRODUCT-PROD-1",
+    "FAILED",
+    { errorCode: "TEST_FAILURE", errorMessage: "Readback missing." },
+  );
+  assert.equal(finished.status, "COMPLETED_WITH_ISSUES");
+  assert.equal(finished.progressPercent, 50);
+  assert.equal(finished.failedItems, 1);
+  assert.equal(database.listSupplierPublishSessions()[0].sessionId, session.sessionId);
+}));
+
+test("publishes a selected Supplier chain in dependency stages with confirmed progress", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-publish-session-"));
+  const database = new LocalDatabase(path.join(directory, "test.sqlite"));
+  try {
+    database.replaceSupplierMasterCache({
+      supplierTypes: [{
+        supplierTypeId: "ST-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport",
+        status: "ACTIVE", active: true,
+      }],
+    });
+    const supplier = database.saveSupplierMasterDraft("SUPPLIER", {
+      supplierId: "SUP-STAGED", typeCode: "TRANSPORT",
+      supplierName: "Staged Transport", status: "ACTIVE",
+    }).draft;
+    const product = database.saveSupplierMasterDraft("PRODUCT", {
+      productId: "PROD-STAGED", supplierId: "SUP-STAGED",
+      productName: "Staged Vehicle", status: "ACTIVE",
+    }).draft;
+    const contract = database.saveSupplierMasterDraft("CONTRACT", {
+      contractId: "CTR-STAGED", supplierId: "SUP-STAGED", contractNumber: "CTR/TEST",
+      validFrom: "2026-01-01", validTo: "2026-12-31",
+      rates: [{
+        contractRateId: "RATE-STAGED", productId: "PROD-STAGED",
+        priceBasis: "PER_VEHICLE", amount: 500000,
+      }],
+    }).draft;
+    const progress = [];
+    const calls = [];
+    const service = new GoogleWorkspaceService({
+      database,
+      authService: { status: () => ({ connected: true }) },
+      onSupplierPublishProgress: (session) => progress.push(session.progressPercent),
+    });
+    service.callAppsScript = async (route, payload) => {
+      if (route === "supplier.master.list") return database.getSupplierMasterCatalog();
+      calls.push(payload.changes.map((row) => row.entityKind));
+      return {
+        results: payload.changes.map((row) => ({
+          draftId: row.draftId, entityId: row.entityId, status: "SYNCED",
+        })),
+        catalog: database.getSupplierMasterCatalog(),
+      };
+    };
+
+    const result = await service.publishSupplierMasterDrafts({
+      draftIds: [supplier.draftId, product.draftId, contract.draftId],
+    });
+    assert.deepEqual(calls, [["SUPPLIER"], ["PRODUCT"], ["CONTRACT"]]);
+    assert.equal(result.session.status, "COMPLETED");
+    assert.equal(result.session.progressPercent, 100);
+    assert.equal(result.summary.synced, 3);
+    assert.ok(progress.includes(0));
+    assert.equal(progress.at(-1), 100);
+  } finally {
+    database.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("stages a complete Supplier Master chain locally before one batch publish", () => withDatabase((database) => {
   database.replaceSupplierMasterCache({

@@ -949,6 +949,20 @@
         <label><input id="select-all-supplier-drafts" type="checkbox" checked /> Select all pending</label>
         <span id="supplier-queue-summary" class="muted-text">No pending changes.</span>
       </div>
+      <section id="supplier-publish-progress" class="supplier-publish-progress" hidden>
+        <div class="supplier-publish-progress-heading">
+          <div>
+            <p class="eyebrow">Google readback progress</p>
+            <strong id="supplier-publish-current">Preparing Publish Session…</strong>
+            <small id="supplier-publish-count">0 of 0 records confirmed</small>
+          </div>
+          <strong id="supplier-publish-percent">0%</strong>
+        </div>
+        <progress id="supplier-publish-progress-bar" max="100" value="0"></progress>
+        <div id="supplier-publish-stage-summary" class="supplier-publish-stage-summary"></div>
+        <div id="supplier-publish-item-list" class="supplier-publish-item-list"></div>
+        <button id="resume-supplier-publish-session" class="button ghost small" type="button" hidden>Resume unresolved items</button>
+      </section>
       <div id="supplier-draft-list" class="supplier-draft-list"></div>
       <div class="dialog-actions">
         <button id="cancel-supplier-draft-dialog" class="button ghost" type="button">Close</button>

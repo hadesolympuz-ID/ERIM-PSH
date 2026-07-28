@@ -387,6 +387,43 @@ class LocalDatabase {
       CREATE INDEX IF NOT EXISTS idx_supplier_master_drafts_status
         ON local_supplier_master_drafts(local_status, updated_at);
 
+      CREATE TABLE IF NOT EXISTS local_supplier_publish_sessions (
+        session_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        total_items INTEGER NOT NULL DEFAULT 0,
+        confirmed_items INTEGER NOT NULL DEFAULT 0,
+        failed_items INTEGER NOT NULL DEFAULT 0,
+        conflict_items INTEGER NOT NULL DEFAULT 0,
+        blocked_items INTEGER NOT NULL DEFAULT 0,
+        progress_percent INTEGER NOT NULL DEFAULT 0,
+        current_type_code TEXT,
+        current_stage TEXT,
+        current_item_label TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS local_supplier_publish_session_items (
+        session_id TEXT NOT NULL,
+        draft_id TEXT NOT NULL,
+        entity_kind TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        type_code TEXT,
+        stage TEXT NOT NULL,
+        item_label TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'WAITING',
+        error_code TEXT,
+        error_message TEXT,
+        sequence_no INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(session_id, draft_id),
+        FOREIGN KEY(session_id) REFERENCES local_supplier_publish_sessions(session_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_supplier_publish_session_items_status
+        ON local_supplier_publish_session_items(session_id, status, sequence_no);
+
       CREATE TABLE IF NOT EXISTS local_supplier_import_batches (
         batch_id TEXT PRIMARY KEY,
         file_name TEXT NOT NULL,
@@ -684,7 +721,10 @@ class LocalDatabase {
 
   getLocalVendorSuggestions(asOfDate = new Date().toISOString().slice(0, 10)) {
     const supplierSuggestions = this.getSupplierSuggestions(asOfDate);
-    if (supplierSuggestions.supplierTypes.length && supplierSuggestions.rates.length) {
+    if (
+      supplierSuggestions.supplierTypes.length
+      && (supplierSuggestions.suppliers.length || supplierSuggestions.products.length)
+    ) {
       return supplierSuggestions;
     }
     const activeVendorRates = this.db.prepare(`
@@ -1128,6 +1168,168 @@ class LocalDatabase {
     );
   }
 
+  createSupplierPublishSession(items = []) {
+    const sessionId = `SPUB-${crypto.randomUUID()}`;
+    const now = this.now();
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_supplier_publish_sessions (
+          session_id, status, total_items, created_at, updated_at
+        ) VALUES (?, 'PREFLIGHT', ?, ?, ?)
+      `).run(sessionId, items.length, now, now);
+      const insertItem = this.db.prepare(`
+        INSERT INTO local_supplier_publish_session_items (
+          session_id, draft_id, entity_kind, entity_id, type_code, stage,
+          item_label, status, sequence_no, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)
+      `);
+      items.forEach((item, index) => insertItem.run(
+        sessionId,
+        item.draftId,
+        item.entityKind,
+        item.entityId,
+        item.typeCode || "UNASSIGNED",
+        item.stage,
+        item.itemLabel || item.entityId,
+        index + 1,
+        now,
+      ));
+    })();
+    return this.getSupplierPublishSession(sessionId);
+  }
+
+  resetSupplierPublishSession(sessionId, draftIds = []) {
+    const ids = new Set(draftIds.map(String));
+    const items = this.getSupplierPublishSession(sessionId)?.items || [];
+    const now = this.now();
+    this.db.transaction(() => {
+      items
+        .filter((item) => ids.has(item.draftId) && item.status !== "SYNCED")
+        .forEach((item) => this.db.prepare(`
+          UPDATE local_supplier_publish_session_items
+          SET status = 'WAITING', error_code = NULL, error_message = NULL, updated_at = ?
+          WHERE session_id = ? AND draft_id = ?
+        `).run(now, sessionId, item.draftId));
+      this.db.prepare(`
+        UPDATE local_supplier_publish_sessions
+        SET status = 'PREFLIGHT', completed_at = NULL, updated_at = ?
+        WHERE session_id = ?
+      `).run(now, sessionId);
+    })();
+    return this.refreshSupplierPublishSession(sessionId, { status: "PREFLIGHT" });
+  }
+
+  updateSupplierPublishSessionItem(sessionId, draftId, status, details = {}) {
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE local_supplier_publish_session_items
+      SET status = ?, error_code = ?, error_message = ?, updated_at = ?
+      WHERE session_id = ? AND draft_id = ?
+    `).run(
+      status,
+      details.errorCode || null,
+      details.errorMessage || null,
+      now,
+      sessionId,
+      draftId,
+    );
+    return this.refreshSupplierPublishSession(sessionId, details);
+  }
+
+  refreshSupplierPublishSession(sessionId, details = {}) {
+    const counts = this.db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'SYNCED' THEN 1 ELSE 0 END) AS confirmed,
+        SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed,
+        SUM(CASE WHEN status = 'CONFLICT' THEN 1 ELSE 0 END) AS conflicts,
+        SUM(CASE WHEN status = 'BLOCKED_BY_DEPENDENCY' THEN 1 ELSE 0 END) AS blocked,
+        SUM(CASE WHEN status IN ('WAITING','PUBLISHING','VERIFYING') THEN 1 ELSE 0 END) AS pending
+      FROM local_supplier_publish_session_items
+      WHERE session_id = ?
+    `).get(sessionId);
+    const total = Number(counts.total || 0);
+    const confirmed = Number(counts.confirmed || 0);
+    const terminal = confirmed + Number(counts.failed || 0)
+      + Number(counts.conflicts || 0) + Number(counts.blocked || 0);
+    const status = details.status || (
+      terminal === total
+        ? (confirmed === total ? "COMPLETED" : "COMPLETED_WITH_ISSUES")
+        : "PUBLISHING"
+    );
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE local_supplier_publish_sessions
+      SET status = ?, confirmed_items = ?, failed_items = ?, conflict_items = ?,
+        blocked_items = ?, progress_percent = ?, current_type_code = COALESCE(?, current_type_code),
+        current_stage = COALESCE(?, current_stage),
+        current_item_label = COALESCE(?, current_item_label), updated_at = ?,
+        completed_at = CASE WHEN ? IN ('COMPLETED','COMPLETED_WITH_ISSUES') THEN ? ELSE completed_at END
+      WHERE session_id = ?
+    `).run(
+      status,
+      confirmed,
+      Number(counts.failed || 0),
+      Number(counts.conflicts || 0),
+      Number(counts.blocked || 0),
+      total ? Math.floor((confirmed / total) * 100) : 100,
+      details.typeCode || null,
+      details.stage || null,
+      details.itemLabel || null,
+      now,
+      status,
+      now,
+      sessionId,
+    );
+    return this.getSupplierPublishSession(sessionId);
+  }
+
+  getSupplierPublishSession(sessionId) {
+    const row = this.db.prepare(`
+      SELECT * FROM local_supplier_publish_sessions WHERE session_id = ?
+    `).get(sessionId);
+    if (!row) return null;
+    const items = this.db.prepare(`
+      SELECT * FROM local_supplier_publish_session_items
+      WHERE session_id = ? ORDER BY sequence_no
+    `).all(sessionId);
+    return {
+      sessionId: row.session_id,
+      status: row.status,
+      totalItems: Number(row.total_items || 0),
+      confirmedItems: Number(row.confirmed_items || 0),
+      failedItems: Number(row.failed_items || 0),
+      conflictItems: Number(row.conflict_items || 0),
+      blockedItems: Number(row.blocked_items || 0),
+      progressPercent: Number(row.progress_percent || 0),
+      currentTypeCode: row.current_type_code || "",
+      currentStage: row.current_stage || "",
+      currentItemLabel: row.current_item_label || "",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at || "",
+      items: items.map((item) => ({
+        draftId: item.draft_id,
+        entityKind: item.entity_kind,
+        entityId: item.entity_id,
+        typeCode: item.type_code || "",
+        stage: item.stage,
+        itemLabel: item.item_label,
+        status: item.status,
+        errorCode: item.error_code || "",
+        errorMessage: item.error_message || "",
+        updatedAt: item.updated_at,
+      })),
+    };
+  }
+
+  listSupplierPublishSessions({ limit = 20 } = {}) {
+    return this.db.prepare(`
+      SELECT session_id FROM local_supplier_publish_sessions
+      ORDER BY updated_at DESC LIMIT ?
+    `).all(Number(limit || 20)).map((row) => this.getSupplierPublishSession(row.session_id));
+  }
+
   discardSupplierMasterDraft(draftId) {
     this.db.prepare("DELETE FROM local_supplier_master_drafts WHERE draft_id = ?").run(draftId);
     return { drafts: this.listSupplierMasterDrafts(), catalog: this.getSupplierMasterCatalog() };
@@ -1213,7 +1415,7 @@ class LocalDatabase {
       else collection.push(next);
     };
     for (const draft of this.listSupplierMasterDrafts()) {
-      const payload = draft.payload;
+      const payload = { ...draft.payload, localDraftUpdatedAt: draft.updatedAt };
       if (draft.entityKind === "TYPE") upsert(result.supplierTypes, "supplierTypeId", payload);
       if (draft.entityKind === "SUPPLIER") {
         upsert(result.suppliers, "supplierId", payload);
@@ -1258,13 +1460,8 @@ class LocalDatabase {
     const supplierById = new Map(suppliers.map((row) => [row.supplierId, row]));
     const productById = new Map(products.map((row) => [row.productId, row]));
     const inRange = (date, from, to) => (!from || date >= from) && (!to || date <= to);
-    const rates = catalog.rates
+    const allRates = catalog.rates
       .filter(active)
-      .filter((rate) => {
-        const contract = contractById.get(rate.contractId);
-        return contract
-          && inRange(asOfDate, rate.validFrom || contract.validFrom, rate.validTo || contract.validTo);
-      })
       .map((rate) => {
         const contract = contractById.get(rate.contractId) || {};
         const product = productById.get(rate.productId) || {};
@@ -1293,7 +1490,11 @@ class LocalDatabase {
           exclusion: product.exclusion || "",
           termsAndConditions: product.termsAndConditions || contract.termsAndConditions || "",
         };
-      });
+      })
+      .filter((rate) => rate.contractId && rate.productId);
+    const rates = allRates.filter((rate) =>
+      inRange(asOfDate, rate.validFrom, rate.validTo)
+    );
     const byType = (typeCode) => rates.filter((row) => row.typeCode === typeCode);
     const unique = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
     return {
@@ -1302,6 +1503,7 @@ class LocalDatabase {
       suppliers,
       products,
       contracts,
+      allRates,
       rates,
       vendorRates: byType("VENDOR"),
       tocRates: byType("TOC"),
