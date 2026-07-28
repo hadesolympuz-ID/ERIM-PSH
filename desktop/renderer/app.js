@@ -2031,6 +2031,18 @@ function idr(value) {
     : "";
 }
 
+function vendorSplitProductPriceLabel(product, serviceType, supplierId, serviceDate = "") {
+  const rate = vendorSplitRate(serviceType, supplierId, product.productId, serviceDate);
+  if (!rate) return "Pending rate";
+  const parts = [
+    hasKnownRate(rate.adultRateIdr) ? `Adult ${idr(rate.adultRateIdr)}` : "",
+    hasKnownRate(rate.childRateIdr) ? `Child ${idr(rate.childRateIdr)}` : "",
+    hasKnownRate(rate.unitRateIdr) ? idr(rate.unitRateIdr) : "",
+    rate.priceBasis ? rate.priceBasis.replaceAll("_", " ") : "",
+  ].filter(Boolean);
+  return parts.join(" · ") || "Pending rate";
+}
+
 function vendorSplitRateMarkup(split = {}) {
   const type = normalizeVendorSplitType(split.serviceType || "VENDOR");
   const rate = vendorSplitRate(type, split.supplierId, split.productId || split.serviceMasterId, split.serviceDate);
@@ -2139,6 +2151,7 @@ function vendorSplitRow(split = {}, index = 0) {
   const suggestionKey = ++state.vendorSplitSuggestionSequence;
   const supplierListId = `vendor-supplier-suggestions-${suggestionKey}`;
   const productListId = `vendor-product-suggestions-${suggestionKey}`;
+  const serviceDate = $("#vendor-split-dialog")?.dataset.serviceDate || "";
   return `
     <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}"
       data-service-type="${normalizedType}"
@@ -2167,7 +2180,9 @@ function vendorSplitRow(split = {}, index = 0) {
           ${selectedSupplierId ? "" : "disabled"} />
         <input data-vendor-split-field="productId" type="hidden" value="${escapeHtml(selectedProductId)}" />
         <datalist id="${productListId}" data-vendor-product-list>
-          ${products.map((row) => `<option value="${escapeHtml(row.productName)}" label="${escapeHtml(row.productCode || row.category || "")}"></option>`).join("")}
+          ${products.map((row) => `<option value="${escapeHtml(row.productName)}" label="${escapeHtml(
+            vendorSplitProductPriceLabel(row, normalizedType, selectedSupplierId, serviceDate)
+          )}"></option>`).join("")}
         </datalist>
       </label>
       <div class="vendor-split-rate-panel" data-vendor-split-rate-panel>
@@ -2176,7 +2191,7 @@ function vendorSplitRow(split = {}, index = 0) {
           serviceType: normalizedType,
           supplierId: selectedSupplierId,
           productId: selectedProductId,
-          serviceDate: $("#vendor-split-dialog")?.dataset.serviceDate || "",
+          serviceDate,
         })}
       </div>
       <button class="vendor-split-remove" type="button" data-remove-vendor-split="${index}" aria-label="Remove service" title="Remove service">×</button>
@@ -2495,8 +2510,11 @@ function refreshVendorSplitRow(row, { resetSupplier = false, resetProduct = fals
   productSearch.value = resetSupplier || resetProduct
     ? "" : selectedProduct?.productName || previousProductText;
   productSearch.disabled = !supplierInput.value;
+  const serviceDate = $("#vendor-split-dialog")?.dataset.serviceDate || "";
   productList.innerHTML = products.map((item) =>
-    `<option value="${escapeHtml(item.productName)}" label="${escapeHtml(item.productCode || item.category || "")}"></option>`
+    `<option value="${escapeHtml(item.productName)}" label="${escapeHtml(
+      vendorSplitProductPriceLabel(item, type, supplierInput.value, serviceDate)
+    )}"></option>`
   ).join("");
   const existingUnit = row.querySelector('[data-vendor-split-field="unitRateIdr"]')?.value ?? "";
   const existingBasis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";

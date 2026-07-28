@@ -69,7 +69,10 @@ test("Micro Split suggestions preserve Supplier IDs and independently refresh Pr
   assert.match(app, /data-vendor-split-field="supplierId" type="hidden"/);
   assert.match(app, /data-vendor-split-field="productId" type="hidden"/);
   assert.match(app, /function resolveVendorSplitSuggestion/);
+  assert.match(app, /function vendorSplitProductPriceLabel/);
+  assert.match(app, /vendorSplitProductPriceLabel\(item, type, supplierInput\.value, serviceDate\)/);
   assert.match(app, /resetSupplier = false, resetProduct = false/);
   assert.match(app, /refreshVendorSplitRow\(row, \{ resetProduct: changed \}\)/);
   assert.doesNotMatch(app, /<select data-vendor-split-field="supplierId"/);
+  assert.doesNotMatch(app, /label="\$\{escapeHtml\(item\.productCode \|\| item\.category/);
 });

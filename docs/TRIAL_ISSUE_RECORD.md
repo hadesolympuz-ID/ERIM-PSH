@@ -266,6 +266,9 @@ reset behavior clears both Supplier and Product when only Product should reset.
   lists while keeping canonical hidden IDs for persistence and rate lookup.
 - Supplier Code and Product Code can also resolve an exact typed match.
 - Product suggestions remain disabled until a valid Supplier is resolved.
+- Product suggestion rows display Product name with the Contract Rate valid for
+  the Day service date; missing Rates display `Pending rate` instead of Product
+  Code.
 
 **Acceptance test**
 
