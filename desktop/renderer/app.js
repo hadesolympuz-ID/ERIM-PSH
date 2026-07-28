@@ -31,6 +31,7 @@ const state = {
   supplierMasterDrafts: [],
   supplierPublishSession: null,
   supplierPublishSessions: [],
+  vendorSplitSuggestionSequence: 0,
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
   supplierArchiveTarget: null,
@@ -2133,14 +2134,11 @@ function vendorSplitRow(split = {}, index = 0) {
   );
   const selectedProductId = split.productId || split.serviceMasterId
     || products.find((row) => row.productName === split.activityText)?.productId || "";
-  const supplierOptions = [
-    `<option value="">Choose supplier</option>`,
-    ...suppliers.map((row) => `<option value="${escapeHtml(row.supplierId)}"${row.supplierId === selectedSupplierId ? " selected" : ""}>${escapeHtml(row.supplierName)}</option>`),
-  ].join("");
-  const productOptions = [
-    `<option value="">Choose service/product</option>`,
-    ...products.map((row) => `<option value="${escapeHtml(row.productId)}"${row.productId === selectedProductId ? " selected" : ""}>${escapeHtml(row.productName)}</option>`),
-  ].join("");
+  const selectedSupplier = suppliers.find((row) => row.supplierId === selectedSupplierId);
+  const selectedProduct = products.find((row) => row.productId === selectedProductId);
+  const suggestionKey = ++state.vendorSplitSuggestionSequence;
+  const supplierListId = `vendor-supplier-suggestions-${suggestionKey}`;
+  const productListId = `vendor-product-suggestions-${suggestionKey}`;
   return `
     <div class="vendor-split-row" data-service-id="${escapeHtml(split.serviceId || "")}"
       data-service-type="${normalizedType}"
@@ -2153,11 +2151,24 @@ function vendorSplitRow(split = {}, index = 0) {
       </label>
       <label class="vendor-split-field">
         <span data-vendor-provider-label>${provider.label}</span>
-        <select data-vendor-split-field="supplierId">${supplierOptions}</select>
+        <input data-vendor-split-suggestion="supplier" list="${supplierListId}"
+          value="${escapeHtml(selectedSupplier?.supplierName || split.vendorName || "")}"
+          placeholder="Type or choose supplier" autocomplete="off" />
+        <input data-vendor-split-field="supplierId" type="hidden" value="${escapeHtml(selectedSupplierId)}" />
+        <datalist id="${supplierListId}" data-vendor-supplier-list>
+          ${suppliers.map((row) => `<option value="${escapeHtml(row.supplierName)}" label="${escapeHtml(row.supplierCode || row.typeCode || "")}"></option>`).join("")}
+        </datalist>
       </label>
       <label class="vendor-split-field">
         <span>Supplier Service / Product</span>
-        <select data-vendor-split-field="productId">${productOptions}</select>
+        <input data-vendor-split-suggestion="product" list="${productListId}"
+          value="${escapeHtml(selectedProduct?.productName || split.activityText || "")}"
+          placeholder="Type or choose service/product" autocomplete="off"
+          ${selectedSupplierId ? "" : "disabled"} />
+        <input data-vendor-split-field="productId" type="hidden" value="${escapeHtml(selectedProductId)}" />
+        <datalist id="${productListId}" data-vendor-product-list>
+          ${products.map((row) => `<option value="${escapeHtml(row.productName)}" label="${escapeHtml(row.productCode || row.category || "")}"></option>`).join("")}
+        </datalist>
       </label>
       <div class="vendor-split-rate-panel" data-vendor-split-rate-panel>
         ${vendorSplitRateMarkup({
@@ -2182,8 +2193,12 @@ function collectVendorSplitRows(container) {
     const productInput = row.querySelector('[data-vendor-split-field="productId"]');
     const supplierId = supplierInput.value;
     const productId = productInput.value;
-    const vendorName = supplierInput.selectedOptions[0]?.textContent.trim() || "";
-    const activityText = productInput.selectedOptions[0]?.textContent.trim() || "";
+    const vendorName = (state.vendorSuggestions.suppliers || [])
+      .find((item) => item.supplierId === supplierId)?.supplierName
+      || row.querySelector('[data-vendor-split-suggestion="supplier"]')?.value.trim() || "";
+    const activityText = (state.vendorSuggestions.products || [])
+      .find((item) => item.productId === productId)?.productName
+      || row.querySelector('[data-vendor-split-suggestion="product"]')?.value.trim() || "";
     const matchedRate = vendorSplitRate(serviceType, supplierId, productId);
     const manualRateInput = row.querySelector('[data-vendor-split-field="unitRateIdr"]');
     const manualRate = manualRateInput?.value === "" || manualRateInput === null
@@ -2446,11 +2461,15 @@ function refreshVendorServiceOptions(vendorName = "") {
     .map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
 }
 
-function refreshVendorSplitRow(row, { resetSelection = false } = {}) {
+function refreshVendorSplitRow(row, { resetSupplier = false, resetProduct = false } = {}) {
   if (!row) return;
   const typeInput = row.querySelector('[data-vendor-split-field="serviceType"]');
   const supplierInput = row.querySelector('[data-vendor-split-field="supplierId"]');
+  const supplierSearch = row.querySelector('[data-vendor-split-suggestion="supplier"]');
+  const supplierList = row.querySelector("[data-vendor-supplier-list]");
   const productInput = row.querySelector('[data-vendor-split-field="productId"]');
+  const productSearch = row.querySelector('[data-vendor-split-suggestion="product"]');
+  const productList = row.querySelector("[data-vendor-product-list]");
   const type = normalizeVendorSplitType(typeInput?.value);
   if (!type) return;
   const provider = vendorSplitProviderConfig(type);
@@ -2458,22 +2477,27 @@ function refreshVendorSplitRow(row, { resetSelection = false } = {}) {
   row.querySelector("[data-vendor-provider-label]").textContent = provider.label;
   const suppliers = (state.vendorSuggestions.suppliers || [])
     .filter((item) => item.active !== false && item.typeCode === type);
-  const currentSupplierId = resetSelection ? "" : supplierInput.value;
-  supplierInput.innerHTML = [
-    `<option value="">Choose supplier</option>`,
-    ...suppliers.map((item) => `<option value="${escapeHtml(item.supplierId)}">${escapeHtml(item.supplierName)}</option>`),
-  ].join("");
-  supplierInput.value = suppliers.some((item) => item.supplierId === currentSupplierId)
-    ? currentSupplierId : "";
+  const previousSupplierText = supplierSearch.value;
+  const currentSupplierId = resetSupplier ? "" : supplierInput.value;
+  const selectedSupplier = suppliers.find((item) => item.supplierId === currentSupplierId);
+  supplierInput.value = selectedSupplier?.supplierId || "";
+  supplierSearch.value = resetSupplier
+    ? "" : selectedSupplier?.supplierName || previousSupplierText;
+  supplierList.innerHTML = suppliers.map((item) =>
+    `<option value="${escapeHtml(item.supplierName)}" label="${escapeHtml(item.supplierCode || item.typeCode || "")}"></option>`
+  ).join("");
   const products = (state.vendorSuggestions.products || [])
     .filter((item) => item.active !== false && item.supplierId === supplierInput.value);
-  const currentProductId = resetSelection ? "" : productInput.value;
-  productInput.innerHTML = [
-    `<option value="">Choose service/product</option>`,
-    ...products.map((item) => `<option value="${escapeHtml(item.productId)}">${escapeHtml(item.productName)}</option>`),
-  ].join("");
-  productInput.value = products.some((item) => item.productId === currentProductId)
-    ? currentProductId : "";
+  const previousProductText = productSearch.value;
+  const currentProductId = resetSupplier || resetProduct ? "" : productInput.value;
+  const selectedProduct = products.find((item) => item.productId === currentProductId);
+  productInput.value = selectedProduct?.productId || "";
+  productSearch.value = resetSupplier || resetProduct
+    ? "" : selectedProduct?.productName || previousProductText;
+  productSearch.disabled = !supplierInput.value;
+  productList.innerHTML = products.map((item) =>
+    `<option value="${escapeHtml(item.productName)}" label="${escapeHtml(item.productCode || item.category || "")}"></option>`
+  ).join("");
   const existingUnit = row.querySelector('[data-vendor-split-field="unitRateIdr"]')?.value ?? "";
   const existingBasis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";
   const existingQuantity = row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1;
@@ -2491,6 +2515,44 @@ function refreshVendorSplitRow(row, { resetSelection = false } = {}) {
     manualRateSource: existingSource,
     manualEvidenceRef: existingEvidence,
   });
+}
+
+function resolveVendorSplitSuggestion(input) {
+  const row = input.closest(".vendor-split-row");
+  if (!row) return;
+  const kind = input.dataset.vendorSplitSuggestion;
+  const normalized = input.value.trim().toLocaleLowerCase();
+  if (kind === "supplier") {
+    const type = normalizeVendorSplitType(
+      row.querySelector('[data-vendor-split-field="serviceType"]').value,
+    );
+    const supplier = (state.vendorSuggestions.suppliers || []).find((item) =>
+      item.active !== false
+      && item.typeCode === type
+      && [item.supplierName, item.supplierCode].some((value) =>
+        String(value || "").trim().toLocaleLowerCase() === normalized
+      )
+    );
+    const supplierId = row.querySelector('[data-vendor-split-field="supplierId"]');
+    const changed = supplierId.value !== (supplier?.supplierId || "");
+    supplierId.value = supplier?.supplierId || "";
+    if (supplier) input.value = supplier.supplierName;
+    refreshVendorSplitRow(row, { resetProduct: changed });
+    return;
+  }
+  if (kind === "product") {
+    const supplierId = row.querySelector('[data-vendor-split-field="supplierId"]').value;
+    const product = (state.vendorSuggestions.products || []).find((item) =>
+      item.active !== false
+      && item.supplierId === supplierId
+      && [item.productName, item.productCode].some((value) =>
+        String(value || "").trim().toLocaleLowerCase() === normalized
+      )
+    );
+    row.querySelector('[data-vendor-split-field="productId"]').value = product?.productId || "";
+    if (product) input.value = product.productName;
+    refreshVendorSplitRow(row);
+  }
 }
 
 function normalizeVendorSplitType(value) {
@@ -3112,17 +3174,8 @@ function bindEvents() {
         Number(event.target.dataset.maxSize || 80),
       );
     }
-    if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
-      const row = event.target.closest(".vendor-split-row");
-      const type = normalizeVendorSplitType(event.target.value);
-      if (type) refreshVendorSplitRow(row, { resetSelection: row.dataset.serviceType !== type });
-    } else if (event.target.matches(
-      '[data-vendor-split-field="supplierId"], [data-vendor-split-field="productId"]',
-    )) {
-      const row = event.target.closest(".vendor-split-row");
-      refreshVendorSplitRow(row, {
-        resetSelection: event.target.matches('[data-vendor-split-field="supplierId"]'),
-      });
+    if (event.target.matches("[data-vendor-split-suggestion]")) {
+      resolveVendorSplitSuggestion(event.target);
     } else if (event.target.matches('[data-vendor-split-field="unitRateIdr"]')) {
       const badge = event.target.closest(".vendor-split-row")?.querySelector("[data-vendor-rate-status]");
       const ready = hasKnownRate(event.target.value);
@@ -3136,6 +3189,19 @@ function bindEvents() {
   document.body.addEventListener("change", (event) => {
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
       updateVendorDayHotels();
+    }
+    if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
+      const row = event.target.closest(".vendor-split-row");
+      const type = normalizeVendorSplitType(event.target.value);
+      if (type) {
+        const typeChanged = row.dataset.serviceType !== type;
+        refreshVendorSplitRow(row, {
+          resetSupplier: typeChanged,
+          resetProduct: typeChanged,
+        });
+      }
+    } else if (event.target.matches("[data-vendor-split-suggestion]")) {
+      resolveVendorSplitSuggestion(event.target);
     }
   });
   $("#draft-form").addEventListener("submit", async (event) => {

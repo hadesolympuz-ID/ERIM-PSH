@@ -241,3 +241,35 @@ update in this order:
 Further Vendor Booking and Transport operational item expansion should begin
 only after this gate passes, because those modules depend on the same Supplier,
 Product, Contract, Rate, and Micro Split authority.
+
+---
+
+### UAT-116-001 — Micro Split Supplier selection clears before Product lookup
+
+**Status:** `IMPLEMENTED / PACKAGED UAT PENDING`
+**Priority:** Blocker
+**Area:** Vendor Booking → New Itinerary → Daywise Micro Split
+
+**Observed**
+
+Selecting a Type loads the correct Supplier list, but selecting a Supplier does
+not persist the Supplier ID. The Product field remains empty because the shared
+reset behavior clears both Supplier and Product when only Product should reset.
+
+**Implemented behavior**
+
+- Type changes clear Supplier and Product.
+- Supplier changes preserve the selected Supplier ID and clear only Product.
+- Product changes preserve both parent selections and refresh the applicable
+  contract-rate result.
+- Supplier and Product controls accept typed search with native suggestion
+  lists while keeping canonical hidden IDs for persistence and rate lookup.
+- Supplier Code and Product Code can also resolve an exact typed match.
+- Product suggestions remain disabled until a valid Supplier is resolved.
+
+**Acceptance test**
+
+For Vendor, TOC, Transport, Luggage Van, and Additional Service, select a Type,
+type or choose a Supplier, and type or choose one of its Products. Verify the
+visible names and hidden IDs remain selected, the Product list belongs only to
+that Supplier, and Save Split preserves the relationship after reopen.

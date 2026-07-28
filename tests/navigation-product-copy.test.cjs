@@ -62,3 +62,14 @@ test("Supplier publishing exposes confirmed live progress and top-positioned new
   assert.match(app, /newestLocalFirst/);
   assert.match(app, /insertAdjacentHTML\("afterbegin", contractRateMarkup/);
 });
+
+test("Micro Split suggestions preserve Supplier IDs and independently refresh Product choices", () => {
+  assert.match(app, /data-vendor-split-suggestion="supplier"/);
+  assert.match(app, /data-vendor-split-suggestion="product"/);
+  assert.match(app, /data-vendor-split-field="supplierId" type="hidden"/);
+  assert.match(app, /data-vendor-split-field="productId" type="hidden"/);
+  assert.match(app, /function resolveVendorSplitSuggestion/);
+  assert.match(app, /resetSupplier = false, resetProduct = false/);
+  assert.match(app, /refreshVendorSplitRow\(row, \{ resetProduct: changed \}\)/);
+  assert.doesNotMatch(app, /<select data-vendor-split-field="supplierId"/);
+});
