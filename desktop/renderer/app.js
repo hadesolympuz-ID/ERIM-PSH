@@ -31,6 +31,7 @@ const state = {
   supplierMasterDrafts: [],
   supplierPublishSession: null,
   supplierPublishSessions: [],
+  supplierPublishActive: false,
   vendorSplitSuggestionSequence: 0,
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
@@ -512,8 +513,13 @@ function renderSupplierPublishProgress(session = state.supplierPublishSession) {
       ${statusPill(item.status)}
     </div>
   `).join("");
-  $("#resume-supplier-publish-session").hidden =
-    !["COMPLETED_WITH_ISSUES", "FAILED"].includes(session.status);
+  const unresolvedItems = (session.items || []).filter((item) => item.status !== "SYNCED");
+  const resumeButton = $("#resume-supplier-publish-session");
+  resumeButton.hidden = !unresolvedItems.length || state.supplierPublishActive;
+  resumeButton.disabled = state.supplierPublishActive;
+  resumeButton.textContent = session.status === "PUBLISHING"
+    ? `Resume interrupted session (${unresolvedItems.length})`
+    : `Resume unresolved items (${unresolvedItems.length})`;
 }
 
 async function loadLatestSupplierPublishSession() {
@@ -523,6 +529,8 @@ async function loadLatestSupplierPublishSession() {
 }
 
 async function publishSupplierDrafts(draftIds = [], sessionId = "") {
+  state.supplierPublishActive = true;
+  renderSupplierPublishProgress();
   $("#publish-selected-supplier-drafts").disabled = true;
   $("#publish-supplier-drafts").disabled = true;
   $("#supplier-master-sync-status").textContent = "PUBLISHING";
@@ -543,6 +551,9 @@ async function publishSupplierDrafts(draftIds = [], sessionId = "") {
     $("#supplier-master-sync-status").textContent = "FAILED";
     $("#supplier-master-sync-status").className = "status failed";
     toast(error.message, true);
+  } finally {
+    state.supplierPublishActive = false;
+    renderSupplierPublishProgress();
   }
 }
 

@@ -70,6 +70,9 @@ and an interrupted session resumes without duplicates or missing records.
   protected as `BLOCKED_BY_DEPENDENCY`, with no orphan Contract publication.
 - A clean Web App deployment was created as Version 19 and passed HTTP 200 JSON
   health verification. The desktop SQLite setting was migrated to its new URL.
+- The progress panel now exposes `Resume interrupted session` when a persisted
+  session still carries `PUBLISHING` after an app restart; the control remains
+  disabled while a live in-process publication is actually running.
 - Final acceptance remains pending a safe Resume of the same session. Already
   confirmed records must not be republished.
 

@@ -68,6 +68,9 @@ test("Supplier publishing exposes confirmed live progress and top-positioned new
   assert.match(preload, /supplier-master:publish-progress/);
   assert.match(main, /supplier-master:publish-progress/);
   assert.match(app, /renderSupplierPublishProgress/);
+  assert.match(app, /supplierPublishActive: false/);
+  assert.match(app, /Resume interrupted session/);
+  assert.match(app, /unresolvedItems\.length/);
   assert.match(app, /newestLocalFirst/);
   assert.match(app, /insertAdjacentHTML\("afterbegin", contractRateMarkup/);
 });
