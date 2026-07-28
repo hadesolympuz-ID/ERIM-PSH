@@ -60,6 +60,19 @@ first, Product second, and Contract/Rate last; progress is visible down to the
 current item and confirmed percentage; every central relationship resolves;
 and an interrupted session resumes without duplicates or missing records.
 
+**Live UAT evidence — 2026-07-28**
+
+- A 39-item mixed-stage Transport session was correctly grouped and divided
+  into backend chunks under one Publish Session.
+- Four records were Google-confirmed before the existing Web App deployment
+  began redirecting to HTTP 404.
+- Seventeen Products were retained as `FAILED`; their seventeen Contracts were
+  protected as `BLOCKED_BY_DEPENDENCY`, with no orphan Contract publication.
+- A clean Web App deployment was created as Version 19 and passed HTTP 200 JSON
+  health verification. The desktop SQLite setting was migrated to its new URL.
+- Final acceptance remains pending a safe Resume of the same session. Already
+  confirmed records must not be republished.
+
 ---
 
 ### UAT-115-002 — Department dashboard click conflicts with submenu collapse
