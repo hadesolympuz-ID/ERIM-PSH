@@ -16,9 +16,13 @@ test("sidebar supports logo show-hide and independently collapsible text menu gr
   assert.match(html, /data-menu-group="vendor"/);
   assert.match(html, /data-menu-group="transport"/);
   assert.match(html, /data-menu-group="manager"/);
+  assert.match(html, /data-menu-toggle="reservation"/);
+  assert.match(html, /aria-label="Open Vendor Booking dashboard"/);
   assert.match(app, /NAVIGATION_PREFERENCE_KEY/);
   assert.match(app, /sidebarHidden/);
   assert.match(app, /toggleMenuGroup/);
+  assert.match(app, /const collapseControl = event\.target\.closest\("\[data-menu-toggle\]"\)/);
+  assert.doesNotMatch(app, /state\.currentModule === module[\s\S]{0,120}toggleMenuGroup/);
   assert.match(styles, /\.app-shell\.sidebar-hidden/);
   assert.match(styles, /\.nav-submenu\.collapsed/);
   assert.doesNotMatch(html, /data-nav-icon=/);
@@ -44,8 +48,13 @@ test("Transport navigation exposes every prepared operational submenu", () => {
 
 test("Product cards expose bulk duplicate workflow through the local pending bridge", () => {
   assert.match(app, /data-duplicate-supplier-product/);
+  assert.match(app, /data-select-supplier-product/);
+  assert.match(app, /data-select-all-supplier-products/);
+  assert.match(app, /data-duplicate-selected-products/);
+  assert.match(app, /selectedSupplierProductIds: new Set\(\)/);
   assert.match(html, /id="supplier-product-duplicate-dialog"/);
   assert.match(html, /Copy Product to Suppliers/);
+  assert.match(html, /id="supplier-copy-matrix"/);
   assert.match(html, /name="includeContracts"/);
   assert.match(html, /name="includeRates"/);
   assert.match(preload, /duplicateProduct:.*supplier-master:product-duplicate/);

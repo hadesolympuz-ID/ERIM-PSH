@@ -8,7 +8,7 @@ the packaged desktop application.
 
 ### UAT-115-001 — Supplier Master publish must be split by Type and dependency stage
 
-**Status:** `IMPLEMENTED / APPS SCRIPT DEPLOYMENT + LIVE UAT PENDING`
+**Status:** `IMPLEMENTED / LIVE MIXED-TYPE UAT PENDING`
 **Priority:** High  
 **Area:** Manager/Admin → Supplier Master → Local Pending publication
 
@@ -64,7 +64,7 @@ and an interrupted session resumes without duplicates or missing records.
 
 ### UAT-115-002 — Department dashboard click conflicts with submenu collapse
 
-**Status:** `OPEN`  
+**Status:** `IMPLEMENTED / PACKAGED UAT PENDING`
 **Priority:** High  
 **Area:** Main sidebar navigation
 
@@ -92,11 +92,19 @@ Manager/Admin. For each department, select the parent label and verify its
 dashboard opens. Separately operate the submenu control and verify it only
 changes submenu visibility.
 
+**Implemented in v1.1.6**
+
+- Every department parent label now performs dashboard navigation only.
+- A separate full-text `Show` / `Hide` control owns submenu state and exposes
+  distinct accessible labels and expanded state.
+- Sidebar and submenu preferences remain persistent across hide/show and app
+  restart.
+
 ---
 
 ### UAT-115-003 — Product duplication needs multi-select tracking
 
-**Status:** `OPEN`  
+**Status:** `IMPLEMENTED / PACKAGED UAT PENDING`
 **Priority:** High  
 **Area:** Manager/Admin → Supplier Master → Products
 
@@ -129,11 +137,21 @@ suppliers, and verify every selected Product/supplier combination is visible in
 preview and result. Existing same-name Products must be reported as conflicts
 without overwriting data.
 
+**Implemented in v1.1.6**
+
+- Product cards now have persistent selection checkboxes, selected count,
+  `Select all visible`, `Clear`, and `Duplicate selected`.
+- One dialog previews the complete Product x destination-supplier matrix.
+- SQLite accepts multiple source Products in one operation, retains the
+  no-overwrite rule, and returns created, conflict, and failed combinations.
+- Every successful Product, Contract, and Rate copy remains Local Pending until
+  the controlled Publish Session is started.
+
 ---
 
 ### UAT-115-004 — Published Supplier Master catalogue is lost in Micro Split
 
-**Status:** `IMPLEMENTED / PACKAGED UAT PENDING`
+**Status:** `DONE — USER UAT 2026-07-28`
 **Priority:** Blocker
 **Area:** Vendor Booking → New Itinerary → Daywise Micro Split
 
@@ -246,7 +264,7 @@ Product, Contract, Rate, and Micro Split authority.
 
 ### UAT-116-001 — Micro Split Supplier selection clears before Product lookup
 
-**Status:** `IMPLEMENTED / PACKAGED UAT PENDING`
+**Status:** `DONE — USER UAT 2026-07-28`
 **Priority:** Blocker
 **Area:** Vendor Booking → New Itinerary → Daywise Micro Split
 

@@ -1001,6 +1001,57 @@ class LocalDatabase {
   }
 
   duplicateSupplierProduct(details = {}) {
+    const sourceProductIds = [...new Set(
+      (details.sourceProductIds || []).map(String).filter(Boolean),
+    )];
+    if (sourceProductIds.length > 1) {
+      const created = [];
+      const conflicts = [];
+      const failed = [];
+      for (const sourceProductId of sourceProductIds) {
+        const source = this.getSupplierMasterCatalog().products.find((row) =>
+          row.productId === sourceProductId
+        );
+        try {
+          const result = this.duplicateSupplierProduct({
+            ...details,
+            sourceProductIds: [],
+            sourceProductId,
+            productName: "",
+          });
+          created.push(...result.created.map((row) => ({
+            ...row,
+            sourceProductId,
+            sourceProductName: source?.productName || sourceProductId,
+          })));
+          conflicts.push(...result.conflicts.map((row) => ({
+            ...row,
+            sourceProductId,
+            sourceProductName: source?.productName || sourceProductId,
+          })));
+        } catch (error) {
+          for (const supplierId of details.targetSupplierIds || []) {
+            const supplier = this.getSupplierMasterCatalog().suppliers.find((row) =>
+              row.supplierId === supplierId
+            );
+            failed.push({
+              sourceProductId,
+              productName: source?.productName || sourceProductId,
+              supplierId,
+              supplierName: supplier?.supplierName || supplierId,
+              reason: error.message,
+            });
+          }
+        }
+      }
+      return {
+        created,
+        conflicts,
+        failed,
+        drafts: this.listSupplierMasterDrafts(),
+        catalog: this.getSupplierMasterCatalog(),
+      };
+    }
     const sourceProductId = String(details.sourceProductId || "").trim();
     const targetSupplierIds = [...new Set((details.targetSupplierIds || []).map(String).filter(Boolean))];
     const includeContracts = details.includeContracts !== false;

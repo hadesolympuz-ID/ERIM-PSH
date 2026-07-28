@@ -34,6 +34,8 @@ const state = {
   vendorSplitSuggestionSequence: 0,
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
+  selectedSupplierProductIds: new Set(),
+  duplicateSourceProductIds: [],
   supplierArchiveTarget: null,
   transportAction: "new-itinerary-check",
   navigation: {
@@ -85,10 +87,12 @@ function applyNavigationPreferences() {
   toggle.title = state.navigation.sidebarHidden ? "Show menu" : "Hide menu";
   toggle.setAttribute("aria-label", toggle.title);
   toggle.setAttribute("aria-expanded", String(!state.navigation.sidebarHidden));
-  $$("[data-menu-group]").forEach((parent) => {
-    const group = parent.dataset.menuGroup;
+  $$("[data-menu-toggle]").forEach((control) => {
+    const group = control.dataset.menuToggle;
     const collapsed = Boolean(state.navigation.groups[group]);
-    parent.setAttribute("aria-expanded", String(!collapsed));
+    control.setAttribute("aria-expanded", String(!collapsed));
+    control.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${group} submenu`);
+    control.textContent = collapsed ? "Show" : "Hide";
     $(`[data-menu-content="${group}"]`)?.classList.toggle("collapsed", collapsed);
   });
 }
@@ -101,16 +105,6 @@ function setMenuGroupCollapsed(group, collapsed) {
 
 function toggleMenuGroup(group) {
   setMenuGroupCollapsed(group, !state.navigation.groups[group]);
-}
-
-function openMenuGroupForModule(module) {
-  const group = {
-    RESERVATION: "reservation",
-    VENDOR: "vendor",
-    TRANSPORT: "transport",
-    MANAGER_ADMIN: "manager",
-  }[module];
-  if (group && state.navigation.groups[group]) setMenuGroupCollapsed(group, false);
 }
 
 function toast(message, error = false) {
@@ -576,6 +570,9 @@ async function loadSupplierMaster({ refresh = true, initialize = false } = {}) {
     renderSupplierDraftStatus();
     state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
     renderVendorSuggestions(state.vendorSuggestions);
+    if (result?.warning) {
+      toast("Google refresh is unavailable. Supplier Master is using the last local cache.", true);
+    }
   } catch (error) {
     status.textContent = "FAILED";
     status.className = "status failed";
@@ -1059,10 +1056,19 @@ function renderSupplierProductsAndContracts() {
     .filter((row) => row.supplierId === supplier.supplierId && row.active !== false)
     .sort(newestLocalFirst);
   const rates = state.supplierMaster.rates.filter((row) => row.active !== false);
+  const activeProductIds = new Set(state.supplierMaster.products
+    .filter((row) => row.active !== false)
+    .map((row) => row.productId));
+  state.selectedSupplierProductIds = new Set(
+    [...state.selectedSupplierProductIds].filter((productId) => activeProductIds.has(productId)),
+  );
   const productCards = products.map((product) => `
     <article class="supplier-product-card">
       <div class="supplier-product-card-heading">
-        <div><strong>${escapeHtml(product.productName)}</strong><small>${escapeHtml(product.productCode || "No code")} · ${escapeHtml(product.category || supplier.typeCode)}</small></div>
+        <label class="supplier-product-selection">
+          <input data-select-supplier-product="${escapeHtml(product.productId)}" type="checkbox"${state.selectedSupplierProductIds.has(product.productId) ? " checked" : ""} />
+          <span><strong>${escapeHtml(product.productName)}</strong><small>${escapeHtml(product.productCode || "No code")} · ${escapeHtml(product.category || supplier.typeCode)}</small></span>
+        </label>
         <div class="supplier-product-card-actions">
           <button class="button ghost small" data-duplicate-supplier-product="${escapeHtml(product.productId)}" type="button">Duplicate</button>
           <button class="button ghost small" data-edit-supplier-product="${escapeHtml(product.productId)}" type="button">Edit</button>
@@ -1091,7 +1097,15 @@ function renderSupplierProductsAndContracts() {
     `;
   }).join("");
   $("#supplier-product-contract-list").innerHTML = `
-    <div class="section-heading"><div><p class="eyebrow">Catalogue</p><h3>Products (${products.length})</h3></div></div>
+    <div class="section-heading">
+      <div><p class="eyebrow">Catalogue</p><h3>Products (${products.length})</h3></div>
+      <div class="supplier-product-bulk-actions">
+        <button class="button ghost small" data-select-all-supplier-products type="button">Select all visible</button>
+        <button class="button ghost small" data-clear-supplier-products type="button">Clear</button>
+        <span class="supplier-product-selected-count">${state.selectedSupplierProductIds.size} selected</span>
+        <button class="button secondary small" data-duplicate-selected-products type="button"${state.selectedSupplierProductIds.size ? "" : " disabled"}>Duplicate selected</button>
+      </div>
+    </div>
     ${productCards || `<div class="empty-notifications">No products yet.</div>`}
     <div class="section-heading"><div><p class="eyebrow">Effective dated</p><h3>Contracts (${contracts.length})</h3></div></div>
     ${contractCards || `<div class="empty-notifications">No contracts yet. Products without a valid contract become PENDING_RATE.</div>`}
@@ -1132,23 +1146,66 @@ async function saveSupplierProductForm(event) {
   } catch (error) { toast(error.message, true); }
 }
 
-function openSupplierProductDuplicateDialog(productId) {
-  const product = state.supplierMaster.products.find((row) =>
+function selectedDuplicateProducts() {
+  return state.duplicateSourceProductIds
+    .map((productId) => state.supplierMaster.products.find((row) =>
+      row.productId === productId && row.active !== false
+    ))
+    .filter(Boolean);
+}
+
+function renderSupplierCopyMatrix() {
+  const products = selectedDuplicateProducts();
+  const targetIds = new Set(
+    $$('#supplier-copy-target-list [name="targetSupplierIds"]:checked').map((node) => node.value),
+  );
+  const targets = state.supplierMaster.suppliers.filter((row) => targetIds.has(row.supplierId));
+  const matrix = $("#supplier-copy-matrix");
+  if (!products.length || !targets.length) {
+    matrix.textContent = "Select destination suppliers to preview the Product × supplier matrix.";
+    return;
+  }
+  matrix.innerHTML = `
+    <strong>${products.length} Product × ${targets.length} supplier = ${products.length * targets.length} copy combination</strong>
+    <table><thead><tr><th>Product</th><th>Destination supplier</th></tr></thead><tbody>
+      ${products.flatMap((product) => targets.map((supplier) =>
+        `<tr><td>${escapeHtml(product.productName)}</td><td>${escapeHtml(supplier.supplierName)}</td></tr>`
+      )).join("")}
+    </tbody></table>
+  `;
+}
+
+function openSupplierProductDuplicateDialog(productIds) {
+  const requestedIds = [...new Set((Array.isArray(productIds) ? productIds : [productIds]).filter(Boolean))];
+  const products = requestedIds.map((productId) => state.supplierMaster.products.find((row) =>
     row.productId === productId && row.active !== false
-  );
-  const sourceSupplier = state.supplierMaster.suppliers.find((row) =>
-    row.supplierId === product?.supplierId && row.active !== false
-  );
-  if (!product || !sourceSupplier) return toast("Choose an active Product first.", true);
+  )).filter(Boolean);
+  const sourceSuppliers = products.map((product) => state.supplierMaster.suppliers.find((row) =>
+    row.supplierId === product.supplierId && row.active !== false
+  )).filter(Boolean);
+  const sourceTypes = new Set(sourceSuppliers.map((row) => row.typeCode));
+  if (!products.length || products.length !== sourceSuppliers.length) {
+    return toast("Choose active Products first.", true);
+  }
+  if (sourceTypes.size !== 1) {
+    return toast("Selected Products must belong to one Supplier Type.", true);
+  }
+  const sourceSupplier = sourceSuppliers[0];
+  state.duplicateSourceProductIds = products.map((row) => row.productId);
   const form = $("#supplier-product-duplicate-form");
   form.reset();
-  form.elements.sourceProductId.value = product.productId;
-  form.elements.productName.value = product.productName;
+  form.elements.sourceProductId.value = products.length === 1 ? products[0].productId : "";
+  form.elements.productName.value = products.length === 1 ? products[0].productName : "";
+  form.elements.productName.required = products.length === 1;
+  $("#supplier-copy-name-field").hidden = products.length > 1;
   form.elements.includeContracts.checked = true;
   form.elements.includeRates.checked = true;
   form.elements.includeRates.disabled = false;
-  $("#supplier-copy-product-name").textContent = product.productName;
-  $("#supplier-copy-source-name").textContent = `${sourceSupplier.supplierName} · ${sourceSupplier.typeCode}`;
+  $("#supplier-copy-product-name").textContent = products.length === 1
+    ? products[0].productName : `${products.length} Products selected`;
+  $("#supplier-copy-source-name").textContent = products.length === 1
+    ? `${sourceSupplier.supplierName} · ${sourceSupplier.typeCode}`
+    : `${sourceSupplier.typeCode} · ${[...new Set(sourceSuppliers.map((row) => row.supplierName))].join(", ")}`;
   $("#supplier-copy-select-all").checked = false;
   $("#supplier-copy-result").hidden = true;
   $("#supplier-copy-result").className = "supplier-copy-result";
@@ -1167,6 +1224,7 @@ function openSupplierProductDuplicateDialog(productId) {
       </span>
     </label>
   `).join("") : `<div class="empty-notifications">No active destination suppliers are available.</div>`;
+  renderSupplierCopyMatrix();
   $("#supplier-product-duplicate-dialog").showModal();
 }
 
@@ -1182,29 +1240,39 @@ async function duplicateSupplierProduct(event) {
   try {
     const result = await window.erim.supplierMaster.duplicateProduct({
       sourceProductId: form.elements.sourceProductId.value,
-      productName: form.elements.productName.value.trim(),
+      sourceProductIds: state.duplicateSourceProductIds,
+      productName: state.duplicateSourceProductIds.length === 1
+        ? form.elements.productName.value.trim() : "",
       targetSupplierIds,
       includeContracts: form.elements.includeContracts.checked,
       includeRates: form.elements.includeRates.checked,
     });
     applySupplierLocalResult(result);
+    state.selectedSupplierProductIds.clear();
     renderSupplierMaster();
     const createdRates = result.created.reduce((sum, row) => sum + Number(row.rateCount || 0), 0);
-    const summary = `${result.created.length} Product copy, ${createdRates} Rate copy, ${result.conflicts.length} conflict.`;
-    if (result.conflicts.length) {
-      const output = $("#supplier-copy-result");
-      output.hidden = false;
-      output.classList.add("attention");
-      output.innerHTML = `<strong>${escapeHtml(summary)}</strong><br>${result.conflicts
-        .map((row) => `${escapeHtml(row.supplierName)}: ${escapeHtml(row.reason)}`)
-        .join("<br>")}`;
-      button.textContent = "Completed";
-      $("#cancel-supplier-product-duplicate-dialog").textContent = "Close";
-      toast(summary, true);
-    } else {
-      $("#supplier-product-duplicate-dialog").close();
-      toast(`${summary} Review them in Local Pending before publishing.`);
-    }
+    const failures = result.failed || [];
+    const summary = `${result.created.length} Product copy, ${createdRates} Rate copy, ${result.conflicts.length} conflict, ${failures.length} failed.`;
+    const output = $("#supplier-copy-result");
+    output.hidden = false;
+    output.classList.toggle("attention", Boolean(result.conflicts.length || failures.length));
+    output.innerHTML = `<strong>${escapeHtml(summary)}</strong><br>${[
+      ...result.created.map((row) => ({
+        ...row,
+        reason: "Created in Local Pending",
+        productName: row.sourceProductName || row.productName,
+      })),
+      ...result.conflicts,
+      ...failures,
+    ]
+      .map((row) => `${escapeHtml(row.sourceProductName || row.productName || "Product")} → ${escapeHtml(row.supplierName || row.supplierId || "Supplier")}: ${escapeHtml(row.reason)}`)
+      .join("<br>")}`;
+    button.textContent = "Completed";
+    $("#cancel-supplier-product-duplicate-dialog").textContent = "Close";
+    toast(
+      `${summary} Review successful copies in Local Pending before publishing.`,
+      Boolean(result.conflicts.length || failures.length),
+    );
   } catch (error) {
     button.disabled = false;
     button.textContent = "Save copies locally";
@@ -1477,7 +1545,6 @@ function renderTransportOperation(action = state.transportAction) {
 function showView(view, module = null) {
   state.currentView = view;
   state.currentModule = module;
-  openMenuGroupForModule(module);
   $$(".view").forEach((node) => node.classList.toggle("active", node.id === `${view}-view`));
   $$(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.view === view && (!module || node.dataset.module === module)));
   $$("[data-vendor-action]").forEach((node) => {
@@ -2664,19 +2731,18 @@ function bindEvents() {
     saveNavigationPreferences();
   });
   $("#main-nav").addEventListener("click", (event) => {
+    const collapseControl = event.target.closest("[data-menu-toggle]");
+    if (collapseControl) {
+      toggleMenuGroup(collapseControl.dataset.menuToggle);
+      return;
+    }
     const parent = event.target.closest(".nav-parent");
     if (parent) {
-      const group = parent.dataset.menuGroup;
       const module = parent.dataset.module;
-      if (state.currentModule === module) {
-        toggleMenuGroup(group);
-      } else {
-        setMenuGroupCollapsed(group, false);
-        if (module === "TRANSPORT") {
-          renderTransportOperation(state.transportAction);
-        }
-        showView(parent.dataset.view, module);
+      if (module === "TRANSPORT") {
+        renderTransportOperation(state.transportAction);
       }
+      showView(parent.dataset.view, module);
       return;
     }
     const managerAction = event.target.closest("[data-manager-action]");
@@ -2994,6 +3060,14 @@ function bindEvents() {
     $$('#supplier-copy-target-list [name="targetSupplierIds"]').forEach((node) => {
       node.checked = event.target.checked;
     });
+    renderSupplierCopyMatrix();
+  });
+  $("#supplier-copy-target-list").addEventListener("change", (event) => {
+    if (!event.target.matches('[name="targetSupplierIds"]')) return;
+    const targets = $$('#supplier-copy-target-list [name="targetSupplierIds"]');
+    $("#supplier-copy-select-all").checked = Boolean(targets.length)
+      && targets.every((node) => node.checked);
+    renderSupplierCopyMatrix();
   });
   $("#supplier-product-duplicate-form").elements.includeContracts.addEventListener("change", (event) => {
     const rates = $("#supplier-product-duplicate-form").elements.includeRates;
@@ -3032,6 +3106,21 @@ function bindEvents() {
       state.selectedSupplierId = supplier.dataset.supplierId;
       return renderSupplierMaster();
     }
+    const selectAllProducts = event.target.closest("[data-select-all-supplier-products]");
+    if (selectAllProducts) {
+      $$("#supplier-product-contract-list [data-select-supplier-product]").forEach((node) =>
+        state.selectedSupplierProductIds.add(node.dataset.selectSupplierProduct));
+      return renderSupplierProductsAndContracts();
+    }
+    const clearProducts = event.target.closest("[data-clear-supplier-products]");
+    if (clearProducts) {
+      state.selectedSupplierProductIds.clear();
+      return renderSupplierProductsAndContracts();
+    }
+    const duplicateSelected = event.target.closest("[data-duplicate-selected-products]");
+    if (duplicateSelected) {
+      return openSupplierProductDuplicateDialog([...state.selectedSupplierProductIds]);
+    }
     const removeContact = event.target.closest("[data-remove-supplier-contact]");
     if (removeContact) return removeContact.closest(".supplier-repeatable-row").remove();
     const removeRecipient = event.target.closest("[data-remove-supplier-recipient]");
@@ -3061,6 +3150,15 @@ function bindEvents() {
     }
   });
   $("#supplier-master-view").addEventListener("change", (event) => {
+    const selectedProduct = event.target.closest("[data-select-supplier-product]");
+    if (selectedProduct) {
+      if (selectedProduct.checked) {
+        state.selectedSupplierProductIds.add(selectedProduct.dataset.selectSupplierProduct);
+      } else {
+        state.selectedSupplierProductIds.delete(selectedProduct.dataset.selectSupplierProduct);
+      }
+      return renderSupplierProductsAndContracts();
+    }
     if (!event.target.matches(
       '[data-supplier-recipient="channel"], [data-supplier-recipient="recipientType"]',
     )) return;

@@ -19,14 +19,20 @@
         </button>
         <nav id="main-nav">
           <button class="nav-item active" data-view="dashboard">Dashboard</button>
-          <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION" data-menu-group="reservation" aria-expanded="true">Reservation</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION" data-menu-group="reservation" aria-label="Open Reservation dashboard">Reservation</button>
+            <button class="nav-collapse-control" data-menu-toggle="reservation" type="button" aria-controls="reservation-submenu" aria-expanded="true">Hide</button>
+          </div>
           <div id="reservation-submenu" class="nav-submenu" data-menu-content="reservation" aria-label="Reservation actions">
             <button class="nav-subitem" data-itinerary-action="new">Add New Itinerary</button>
             <button class="nav-subitem" data-itinerary-action="revise">Revise Itinerary</button>
             <button class="nav-subitem" data-reservation-action="recheck">Re Check Itinerary</button>
             <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
           </div>
-          <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR" data-menu-group="vendor" aria-expanded="true">Vendor Booking</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR" data-menu-group="vendor" aria-label="Open Vendor Booking dashboard">Vendor Booking</button>
+            <button class="nav-collapse-control" data-menu-toggle="vendor" type="button" aria-controls="vendor-submenu" aria-expanded="true">Hide</button>
+          </div>
           <div id="vendor-submenu" class="nav-submenu" data-menu-content="vendor" aria-label="Vendor Booking actions">
             <button class="nav-subitem" data-vendor-action="inbox">Inbox</button>
             <button class="nav-subitem" data-vendor-action="generate">Generate</button>
@@ -35,7 +41,10 @@
             <button class="nav-subitem" data-vendor-action="cancel">Cancel All Service</button>
             <button class="nav-subitem" data-vendor-action="kpi">Cek KPI</button>
           </div>
-          <button class="nav-item nav-parent" data-view="transport-operation" data-module="TRANSPORT" data-menu-group="transport" aria-expanded="true">Transport</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="transport-operation" data-module="TRANSPORT" data-menu-group="transport" aria-label="Open Transport dashboard">Transport</button>
+            <button class="nav-collapse-control" data-menu-toggle="transport" type="button" aria-controls="transport-submenu" aria-expanded="true">Hide</button>
+          </div>
           <div id="transport-submenu" class="nav-submenu" data-menu-content="transport" aria-label="Transport actions">
             <button class="nav-subitem" data-transport-action="new-itinerary-check">New Itinerary Check</button>
             <button class="nav-subitem" data-transport-action="revise-itinerary-check">Revise Itinerary Check</button>
@@ -49,7 +58,10 @@
           </div>
           <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
           <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
-          <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN" data-menu-group="manager" aria-expanded="true">Manager / Admin</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN" data-menu-group="manager" aria-label="Open Manager / Admin dashboard">Manager / Admin</button>
+            <button class="nav-collapse-control" data-menu-toggle="manager" type="button" aria-controls="manager-submenu" aria-expanded="true">Hide</button>
+          </div>
           <div id="manager-submenu" class="nav-submenu" data-menu-content="manager" aria-label="Manager and Admin actions">
             <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
             <button class="nav-subitem" data-manager-action="supplier-excel">Import / Export Data</button>
@@ -891,11 +903,11 @@
         <div class="supplier-product-duplicate-body">
           <input name="sourceProductId" type="hidden" />
           <div class="supplier-copy-source">
-            <span>Source product</span>
+            <span>Selected source products</span>
             <strong id="supplier-copy-product-name">—</strong>
             <small id="supplier-copy-source-name">—</small>
           </div>
-          <label>Product/service name for the copies
+          <label id="supplier-copy-name-field">Product/service name for the copies
             <input name="productName" required />
           </label>
           <div class="supplier-copy-options">
@@ -908,6 +920,9 @@
             <label><input id="supplier-copy-select-all" type="checkbox" /> Select all</label>
           </div>
           <div id="supplier-copy-target-list" class="supplier-copy-target-list"></div>
+          <div id="supplier-copy-matrix" class="supplier-copy-matrix">
+            Select destination suppliers to preview the Product × supplier matrix.
+          </div>
           <div id="supplier-copy-result" class="supplier-copy-result" hidden></div>
         </div>
         <div class="dialog-actions">

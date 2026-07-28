@@ -740,6 +740,11 @@ test("duplicates a Product with matching contract rates to multiple same-Type su
         productId: "PROD-HIACE-C", supplierId: "SUP-TRANSPORT-C",
         productName: "Toyota Hiace Full Day", status: "ACTIVE", active: true,
       },
+      {
+        productId: "PROD-ALPHARD", supplierId: "SUP-TRANSPORT-A",
+        productCode: "ALPHARD-TRF", productName: "Toyota Alphard Transfer",
+        status: "ACTIVE", active: true,
+      },
     ],
     contracts: [{
       contractId: "CTR-TRANS-A-2026", supplierId: "SUP-TRANSPORT-A",
@@ -786,6 +791,24 @@ test("duplicates a Product with matching contract rates to multiple same-Type su
   assert.notEqual(rate.contractRateId, "RATE-HIACE-A");
   assert.equal(result.drafts.filter((row) => row.entityKind === "PRODUCT").length, 1);
   assert.equal(result.drafts.filter((row) => row.entityKind === "CONTRACT").length, 1);
+
+  const bulk = database.duplicateSupplierProduct({
+    sourceProductIds: ["PROD-HIACE", "PROD-ALPHARD"],
+    targetSupplierIds: ["SUP-TRANSPORT-B", "SUP-TRANSPORT-C"],
+    includeContracts: false,
+    includeRates: false,
+  });
+  assert.equal(bulk.created.length, 2);
+  assert.equal(bulk.conflicts.length, 2);
+  assert.equal(bulk.failed.length, 0);
+  assert.deepEqual(
+    new Set(bulk.created.map((row) => row.sourceProductId)),
+    new Set(["PROD-ALPHARD"]),
+  );
+  assert.deepEqual(
+    new Set(bulk.created.map((row) => row.supplierId)),
+    new Set(["SUP-TRANSPORT-B", "SUP-TRANSPORT-C"]),
+  );
 }));
 
 test("requires reason and source for booking-only manual rates", () => withDatabase((database) => {

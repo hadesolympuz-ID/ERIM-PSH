@@ -55,8 +55,15 @@ nav {
   background: transparent; text-align: left; font-weight: 650;
 }
 .nav-item:hover, .nav-item.active { color: #fff; background: rgba(255, 255, 255, 0.1); }
-.nav-parent::after { content: "−"; margin-left: 8px; color: #8eabc1; font-size: 13px; }
-.nav-parent[aria-expanded="false"]::after { content: "+"; }
+.nav-parent-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px; }
+.nav-parent-row .nav-item { min-width: 0; }
+.nav-collapse-control {
+  align-self: center; padding: 7px 8px; border: 1px solid rgba(255,255,255,.14);
+  border-radius: 7px; color: #9fb8cc; background: transparent; font-size: 10px; font-weight: 750;
+}
+.nav-collapse-control:hover, .nav-collapse-control:focus-visible {
+  color: #fff; background: rgba(255,255,255,.1);
+}
 .nav-submenu {
   display: grid; align-content: start; grid-auto-rows: max-content; flex: 0 0 auto; gap: 2px;
   min-height: max-content; max-height: 600px;
@@ -550,6 +557,12 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .supplier-product-card-heading, .supplier-contract-card-heading {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
 }
+.supplier-product-selection {
+  display: grid; grid-template-columns: auto minmax(0,1fr); align-items: start; gap: 9px;
+}
+.supplier-product-selection input { width: auto; margin-top: 3px; }
+.supplier-product-bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.supplier-product-selected-count { color: var(--muted); font-size: 10px; font-weight: 800; }
 .supplier-product-card strong, .supplier-product-card small,
 .supplier-contract-card strong, .supplier-contract-card small { display: block; }
 .supplier-product-card small, .supplier-contract-card small { margin-top: 3px; color: var(--muted); }
@@ -590,6 +603,14 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .supplier-copy-target-row:hover { background: var(--blue-50); }
 .supplier-copy-target-row strong, .supplier-copy-target-row small { display: block; }
 .supplier-copy-target-row small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.supplier-copy-matrix {
+  max-height: 220px; overflow: auto; padding: 12px; border: 1px solid var(--line);
+  border-radius: 9px; color: var(--muted); background: #f8fafb; font-size: 10px; line-height: 1.5;
+}
+.supplier-copy-matrix table { width: 100%; border-collapse: collapse; }
+.supplier-copy-matrix th, .supplier-copy-matrix td {
+  padding: 6px; border-bottom: 1px solid var(--line); text-align: left;
+}
 .supplier-copy-result { padding: 12px; border-radius: 9px; background: var(--green-soft); font-size: 11px; line-height: 1.5; }
 .supplier-copy-result.attention { color: #765000; background: #fff6dc; }
 .supplier-contract-dialog { width: min(1120px, calc(100vw - 50px)); }

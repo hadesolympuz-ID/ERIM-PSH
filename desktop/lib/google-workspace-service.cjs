@@ -166,14 +166,23 @@ class GoogleWorkspaceService {
         drafts: this.database.listSupplierMasterDrafts(),
       };
     }
-    const catalog = await this.callAppsScript("supplier.master.list", {});
-    const cached = this.database.replaceSupplierMasterCache(catalog);
-    return {
-      status: "SYNCED",
-      catalog: cached,
-      drafts: this.database.listSupplierMasterDrafts(),
-      checksum: catalog.checksum || "",
-    };
+    try {
+      const catalog = await this.callAppsScript("supplier.master.list", {});
+      const cached = this.database.replaceSupplierMasterCache(catalog);
+      return {
+        status: "SYNCED",
+        catalog: cached,
+        drafts: this.database.listSupplierMasterDrafts(),
+        checksum: catalog.checksum || "",
+      };
+    } catch (error) {
+      return {
+        status: "OFFLINE_CACHE",
+        catalog: this.database.getSupplierMasterCatalog(),
+        drafts: this.database.listSupplierMasterDrafts(),
+        warning: error.message,
+      };
+    }
   }
 
   async initializeSupplierMaster() {
@@ -1176,7 +1185,11 @@ class GoogleWorkspaceService {
     try {
       payload = JSON.parse(text);
     } catch {
-      throw new Error("Apps Script returned a non-JSON response. Check the deployed /exec URL and access setting.");
+      const contentType = response.headers.get("content-type") || "unknown content type";
+      throw new Error(
+        `Apps Script endpoint returned HTTP ${response.status} (${contentType}) instead of JSON. `
+        + "The local Supplier Master cache remains available; verify the active Web App deployment.",
+      );
     }
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error?.message || `Apps Script returned HTTP ${response.status}.`);
