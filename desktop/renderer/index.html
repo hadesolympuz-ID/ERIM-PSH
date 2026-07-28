@@ -10,24 +10,24 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
+        <button id="sidebar-toggle" class="brand" type="button" title="Hide menu" aria-label="Hide menu" aria-expanded="true">
           <span class="brand-mark">EP</span>
-          <div>
+          <span class="brand-text">
             <strong>ERIM-PSH</strong>
             <small>Desktop Operations</small>
-          </div>
-        </div>
+          </span>
+        </button>
         <nav id="main-nav">
           <button class="nav-item active" data-view="dashboard">Dashboard</button>
-          <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION">Reservation</button>
-          <div class="nav-submenu" aria-label="Reservation actions">
+          <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION" data-menu-group="reservation" aria-expanded="true">Reservation</button>
+          <div id="reservation-submenu" class="nav-submenu" data-menu-content="reservation" aria-label="Reservation actions">
             <button class="nav-subitem" data-itinerary-action="new">Add New Itinerary</button>
             <button class="nav-subitem" data-itinerary-action="revise">Revise Itinerary</button>
             <button class="nav-subitem" data-reservation-action="recheck">Re Check Itinerary</button>
             <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
           </div>
-          <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR">Vendor Booking</button>
-          <div class="nav-submenu" aria-label="Vendor Booking actions">
+          <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR" data-menu-group="vendor" aria-expanded="true">Vendor Booking</button>
+          <div id="vendor-submenu" class="nav-submenu" data-menu-content="vendor" aria-label="Vendor Booking actions">
             <button class="nav-subitem" data-vendor-action="inbox">Inbox</button>
             <button class="nav-subitem" data-vendor-action="generate">Generate</button>
             <button class="nav-subitem" data-vendor-action="new">New Itinerary</button>
@@ -35,11 +35,22 @@
             <button class="nav-subitem" data-vendor-action="cancel">Cancel All Service</button>
             <button class="nav-subitem" data-vendor-action="kpi">Cek KPI</button>
           </div>
-          <button class="nav-item" data-view="workspace" data-module="TRANSPORT">Transport</button>
+          <button class="nav-item nav-parent" data-view="transport-operation" data-module="TRANSPORT" data-menu-group="transport" aria-expanded="true">Transport</button>
+          <div id="transport-submenu" class="nav-submenu" data-menu-content="transport" aria-label="Transport actions">
+            <button class="nav-subitem" data-transport-action="new-itinerary-check">New Itinerary Check</button>
+            <button class="nav-subitem" data-transport-action="revise-itinerary-check">Revise Itinerary Check</button>
+            <button class="nav-subitem" data-transport-action="add-cost">Add Cost to Itinerary</button>
+            <button class="nav-subitem" data-transport-action="driver-detail">Set Driver Detail</button>
+            <button class="nav-subitem" data-transport-action="arrival-review">Review Arrival per Date</button>
+            <button class="nav-subitem" data-transport-action="toc-review">Review TOC per Itinerary</button>
+            <button class="nav-subitem" data-transport-action="kpi">Cek KPI</button>
+            <button class="nav-subitem" data-transport-action="day-tour">Review Day Tour</button>
+            <button class="nav-subitem" data-transport-action="invoicing">Invoicing</button>
+          </div>
           <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
           <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
-          <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN">Manager / Admin</button>
-          <div class="nav-submenu" aria-label="Manager and Admin actions">
+          <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN" data-menu-group="manager" aria-expanded="true">Manager / Admin</button>
+          <div id="manager-submenu" class="nav-submenu" data-menu-content="manager" aria-label="Manager and Admin actions">
             <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
             <button class="nav-subitem" data-manager-action="supplier-excel">Import / Export Data</button>
           </div>
@@ -233,6 +244,24 @@
           <section id="vendor-kpi-view" class="view vendor-placeholder-view">
             <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cek KPI</h2><p>Submenu personal KPI siap; rumus dan indikator akan mengikuti workflow final Vendor.</p></div></div>
             <div class="panel"><div class="empty-notifications">KPI Vendor belum dihitung pada sprint ini.</div></div>
+          </section>
+
+          <section id="transport-operation-view" class="view">
+            <div class="workspace-banner transport-operation-banner">
+              <div>
+                <p class="eyebrow">Transport Operations</p>
+                <h2 id="transport-operation-title">New Itinerary Check</h2>
+                <p id="transport-operation-description">Review kebutuhan kendaraan dari itinerary baru sebelum assignment dan costing.</p>
+              </div>
+              <span id="transport-operation-status" class="status">FOUNDATION</span>
+            </div>
+            <div class="panel transport-operation-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Prepared workflow</p><h2 id="transport-operation-heading">Operational foundation</h2></div>
+                <small id="transport-operation-note" class="muted-text">Detailed rules will be activated after the Transport workflow discussion.</small>
+              </div>
+              <div id="transport-operation-cards" class="transport-operation-grid"></div>
+            </div>
           </section>
 
           <section id="supplier-master-view" class="view">
@@ -850,6 +879,41 @@
           <label class="wide">Internal notes<textarea name="notes" rows="3"></textarea></label>
         </div>
         <div class="dialog-actions"><button id="archive-supplier-product" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-product-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Product locally</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-product-duplicate-dialog" class="supplier-product-duplicate-dialog">
+      <form id="supplier-product-duplicate-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Bulk local staging</p><h2>Copy Product to Suppliers</h2></div>
+          <button id="close-supplier-product-duplicate-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="supplier-product-duplicate-body">
+          <input name="sourceProductId" type="hidden" />
+          <div class="supplier-copy-source">
+            <span>Source product</span>
+            <strong id="supplier-copy-product-name">—</strong>
+            <small id="supplier-copy-source-name">—</small>
+          </div>
+          <label>Product/service name for the copies
+            <input name="productName" required />
+          </label>
+          <div class="supplier-copy-options">
+            <label><input name="includeContracts" type="checkbox" checked /> Copy contract validity, terms, and conditions</label>
+            <label><input name="includeRates" type="checkbox" checked /> Copy matching rates/prices</label>
+            <small>New Product, Contract, and Rate IDs are always generated. Contract files from Google Drive are not copied.</small>
+          </div>
+          <div class="supplier-copy-target-heading">
+            <div><strong>Destination suppliers</strong><small>Only active suppliers from the same Type are available.</small></div>
+            <label><input id="supplier-copy-select-all" type="checkbox" /> Select all</label>
+          </div>
+          <div id="supplier-copy-target-list" class="supplier-copy-target-list"></div>
+          <div id="supplier-copy-result" class="supplier-copy-result" hidden></div>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-product-duplicate-dialog" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-product-duplicate" class="button primary" type="submit">Save copies locally</button>
+        </div>
       </form>
     </dialog>
 

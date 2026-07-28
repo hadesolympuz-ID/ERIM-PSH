@@ -195,6 +195,10 @@ class GoogleWorkspaceService {
     return this.database.saveSupplierMasterDraft("PRODUCT", details);
   }
 
+  async duplicateSupplierProduct(details) {
+    return this.database.duplicateSupplierProduct(details);
+  }
+
   async saveSupplierContract(details) {
     return this.database.saveSupplierMasterDraft("CONTRACT", details);
   }

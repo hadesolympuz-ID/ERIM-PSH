@@ -105,6 +105,8 @@ function registerIpc() {
   ipcMain.handle("supplier-master:type-save", (_event, details) => googleWorkspace.saveSupplierType(details));
   ipcMain.handle("supplier-master:supplier-save", (_event, details) => googleWorkspace.saveSupplier(details));
   ipcMain.handle("supplier-master:product-save", (_event, details) => googleWorkspace.saveSupplierProduct(details));
+  ipcMain.handle("supplier-master:product-duplicate", (_event, details) =>
+    googleWorkspace.duplicateSupplierProduct(details));
   ipcMain.handle("supplier-master:contract-save", (_event, details) => googleWorkspace.saveSupplierContract(details));
   ipcMain.handle("supplier-master:archive", (_event, details) => googleWorkspace.archiveSupplierEntity(details));
   ipcMain.handle("supplier-master:drafts-list", () => googleWorkspace.listSupplierMasterDrafts());

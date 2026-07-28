@@ -589,6 +589,84 @@ test("stages a complete Supplier Master chain locally before one batch publish",
   assert.equal(database.listSupplierMasterDrafts().length, 2);
 }));
 
+test("duplicates a Product with matching contract rates to multiple same-Type suppliers", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    supplierTypes: [{
+      supplierTypeId: "STYPE-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport",
+      status: "ACTIVE", active: true,
+    }],
+    suppliers: [
+      {
+        supplierId: "SUP-TRANSPORT-A", typeCode: "TRANSPORT", supplierCode: "TRANS-A",
+        supplierName: "Transport A", status: "ACTIVE", active: true,
+      },
+      {
+        supplierId: "SUP-TRANSPORT-B", typeCode: "TRANSPORT", supplierCode: "TRANS-B",
+        supplierName: "Transport B", status: "ACTIVE", active: true,
+      },
+      {
+        supplierId: "SUP-TRANSPORT-C", typeCode: "TRANSPORT", supplierCode: "TRANS-C",
+        supplierName: "Transport C", status: "ACTIVE", active: true,
+      },
+    ],
+    products: [
+      {
+        productId: "PROD-HIACE", supplierId: "SUP-TRANSPORT-A", productCode: "HIACE-FD",
+        productName: "Toyota Hiace Full Day", inclusion: "Driver and fuel",
+        status: "ACTIVE", active: true,
+      },
+      {
+        productId: "PROD-HIACE-C", supplierId: "SUP-TRANSPORT-C",
+        productName: "Toyota Hiace Full Day", status: "ACTIVE", active: true,
+      },
+    ],
+    contracts: [{
+      contractId: "CTR-TRANS-A-2026", supplierId: "SUP-TRANSPORT-A",
+      contractNumber: "TRANS-A/2026", contractName: "Transport A 2026",
+      validFrom: "2026-01-01", validTo: "2026-12-31", currency: "IDR",
+      driveFileId: "SOURCE-DRIVE-FILE", driveFileName: "source.pdf",
+      driveFileUrl: "https://drive.google.com/source", status: "ACTIVE", active: true,
+    }],
+    rates: [{
+      contractRateId: "RATE-HIACE-A", contractId: "CTR-TRANS-A-2026",
+      productId: "PROD-HIACE", priceBasis: "PER_VEHICLE", amount: 850000,
+      currency: "IDR", status: "ACTIVE", active: true,
+    }],
+  });
+
+  const result = database.duplicateSupplierProduct({
+    sourceProductId: "PROD-HIACE",
+    targetSupplierIds: ["SUP-TRANSPORT-B", "SUP-TRANSPORT-C"],
+    includeContracts: true,
+    includeRates: true,
+  });
+
+  assert.equal(result.created.length, 1);
+  assert.equal(result.conflicts.length, 1);
+  assert.equal(result.conflicts[0].supplierId, "SUP-TRANSPORT-C");
+  const copy = result.catalog.products.find((row) =>
+    row.supplierId === "SUP-TRANSPORT-B" && row.productName === "Toyota Hiace Full Day"
+  );
+  assert.ok(copy);
+  assert.notEqual(copy.productId, "PROD-HIACE");
+  assert.equal(copy.productCode, "");
+  assert.equal(copy.inclusion, "Driver and fuel");
+  const contract = result.catalog.contracts.find((row) =>
+    row.supplierId === "SUP-TRANSPORT-B" && row.duplicatedFromContractId === "CTR-TRANS-A-2026"
+  );
+  assert.ok(contract);
+  assert.equal(contract.driveFileId, "");
+  assert.equal(contract.driveFileUrl, "");
+  const rate = result.catalog.rates.find((row) =>
+    row.contractId === contract.contractId && row.productId === copy.productId
+  );
+  assert.ok(rate);
+  assert.equal(rate.amount, 850000);
+  assert.notEqual(rate.contractRateId, "RATE-HIACE-A");
+  assert.equal(result.drafts.filter((row) => row.entityKind === "PRODUCT").length, 1);
+  assert.equal(result.drafts.filter((row) => row.entityKind === "CONTRACT").length, 1);
+}));
+
 test("requires reason and source for booking-only manual rates", () => withDatabase((database) => {
   const base = {
     customerCode: "MANUAL/RATE",

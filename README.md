@@ -18,6 +18,17 @@ Desktop v1.0 includes:
 - confirmation, quotation, email, WhatsApp, and portal references;
 - Windows installer and GitHub Releases update flow.
 
+Current desktop foundations also include:
+
+- centralized Supplier Master with local pending batch publication;
+- create-only Supplier Excel import/export and conflict reporting;
+- bulk same-Type Product, Contract, and Rate duplication for repeated supplier
+  services;
+- a full-text sidebar that can be hidden through the logo and whose menu groups
+  collapse independently;
+- prepared Transport operational areas for itinerary checking, costing, driver
+  detail, arrival, TOC, KPI, day tour, and invoicing.
+
 In `DEV`, the complete publication flow runs in local dummy mode. Google login,
 Apps Script, and Google Workspace credentials are not required. Switching to
 `STAGING` or `PROD` activates the authenticated central publication path.

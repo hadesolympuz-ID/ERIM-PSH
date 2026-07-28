@@ -32,6 +32,11 @@ const state = {
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
   supplierArchiveTarget: null,
+  transportAction: "new-itinerary-check",
+  navigation: {
+    sidebarHidden: false,
+    groups: { reservation: false, vendor: false, transport: false, manager: false },
+  },
   supplierExcel: {
     typeCode: "VENDOR",
     batch: null,
@@ -51,6 +56,59 @@ const moduleDescriptions = {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const NAVIGATION_PREFERENCE_KEY = "erim-psh-navigation-v1";
+
+function loadNavigationPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NAVIGATION_PREFERENCE_KEY) || "{}");
+    state.navigation.sidebarHidden = Boolean(saved.sidebarHidden);
+    state.navigation.groups = {
+      ...state.navigation.groups,
+      ...(saved.groups || {}),
+    };
+  } catch {
+    // Invalid local UI preferences fall back to the fully visible navigation.
+  }
+}
+
+function saveNavigationPreferences() {
+  localStorage.setItem(NAVIGATION_PREFERENCE_KEY, JSON.stringify(state.navigation));
+}
+
+function applyNavigationPreferences() {
+  const shell = $(".app-shell");
+  const toggle = $("#sidebar-toggle");
+  shell.classList.toggle("sidebar-hidden", state.navigation.sidebarHidden);
+  toggle.title = state.navigation.sidebarHidden ? "Show menu" : "Hide menu";
+  toggle.setAttribute("aria-label", toggle.title);
+  toggle.setAttribute("aria-expanded", String(!state.navigation.sidebarHidden));
+  $$("[data-menu-group]").forEach((parent) => {
+    const group = parent.dataset.menuGroup;
+    const collapsed = Boolean(state.navigation.groups[group]);
+    parent.setAttribute("aria-expanded", String(!collapsed));
+    $(`[data-menu-content="${group}"]`)?.classList.toggle("collapsed", collapsed);
+  });
+}
+
+function setMenuGroupCollapsed(group, collapsed) {
+  state.navigation.groups[group] = Boolean(collapsed);
+  applyNavigationPreferences();
+  saveNavigationPreferences();
+}
+
+function toggleMenuGroup(group) {
+  setMenuGroupCollapsed(group, !state.navigation.groups[group]);
+}
+
+function openMenuGroupForModule(module) {
+  const group = {
+    RESERVATION: "reservation",
+    VENDOR: "vendor",
+    TRANSPORT: "transport",
+    MANAGER_ADMIN: "manager",
+  }[module];
+  if (group && state.navigation.groups[group]) setMenuGroupCollapsed(group, false);
+}
 
 function toast(message, error = false) {
   const node = $("#toast");
@@ -950,7 +1008,10 @@ function renderSupplierProductsAndContracts() {
     <article class="supplier-product-card">
       <div class="supplier-product-card-heading">
         <div><strong>${escapeHtml(product.productName)}</strong><small>${escapeHtml(product.productCode || "No code")} · ${escapeHtml(product.category || supplier.typeCode)}</small></div>
-        <button class="button ghost small" data-edit-supplier-product="${escapeHtml(product.productId)}" type="button">Edit</button>
+        <div class="supplier-product-card-actions">
+          <button class="button ghost small" data-duplicate-supplier-product="${escapeHtml(product.productId)}" type="button">Duplicate</button>
+          <button class="button ghost small" data-edit-supplier-product="${escapeHtml(product.productId)}" type="button">Edit</button>
+        </div>
       </div>
       <div class="supplier-product-detail">${escapeHtml(product.description || "No description")}</div>
       ${product.localDraftStatus ? `<span class="local-change">LOCAL CHANGE</span>` : ""}
@@ -1013,6 +1074,86 @@ async function saveSupplierProductForm(event) {
     renderSupplierMaster();
     toast(`${payload.productName} saved locally.`);
   } catch (error) { toast(error.message, true); }
+}
+
+function openSupplierProductDuplicateDialog(productId) {
+  const product = state.supplierMaster.products.find((row) =>
+    row.productId === productId && row.active !== false
+  );
+  const sourceSupplier = state.supplierMaster.suppliers.find((row) =>
+    row.supplierId === product?.supplierId && row.active !== false
+  );
+  if (!product || !sourceSupplier) return toast("Choose an active Product first.", true);
+  const form = $("#supplier-product-duplicate-form");
+  form.reset();
+  form.elements.sourceProductId.value = product.productId;
+  form.elements.productName.value = product.productName;
+  form.elements.includeContracts.checked = true;
+  form.elements.includeRates.checked = true;
+  form.elements.includeRates.disabled = false;
+  $("#supplier-copy-product-name").textContent = product.productName;
+  $("#supplier-copy-source-name").textContent = `${sourceSupplier.supplierName} · ${sourceSupplier.typeCode}`;
+  $("#supplier-copy-select-all").checked = false;
+  $("#supplier-copy-result").hidden = true;
+  $("#supplier-copy-result").className = "supplier-copy-result";
+  $("#confirm-supplier-product-duplicate").disabled = false;
+  $("#confirm-supplier-product-duplicate").textContent = "Save copies locally";
+  $("#cancel-supplier-product-duplicate-dialog").textContent = "Cancel";
+  const targets = state.supplierMaster.suppliers
+    .filter((row) => row.active !== false && row.typeCode === sourceSupplier.typeCode)
+    .sort((a, b) => String(a.supplierName).localeCompare(String(b.supplierName)));
+  $("#supplier-copy-target-list").innerHTML = targets.length ? targets.map((supplier) => `
+    <label class="supplier-copy-target-row">
+      <input type="checkbox" name="targetSupplierIds" value="${escapeHtml(supplier.supplierId)}" />
+      <span>
+        <strong>${escapeHtml(supplier.supplierName)}</strong>
+        <small>${escapeHtml(supplier.supplierCode || "No code")}${supplier.supplierId === sourceSupplier.supplierId ? " · source supplier (use a different copy name)" : ""}</small>
+      </span>
+    </label>
+  `).join("") : `<div class="empty-notifications">No active destination suppliers are available.</div>`;
+  $("#supplier-product-duplicate-dialog").showModal();
+}
+
+async function duplicateSupplierProduct(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const targetSupplierIds = [...form.querySelectorAll('[name="targetSupplierIds"]:checked')]
+    .map((node) => node.value);
+  if (!targetSupplierIds.length) return toast("Choose at least one destination supplier.", true);
+  const button = $("#confirm-supplier-product-duplicate");
+  button.disabled = true;
+  button.textContent = "Saving locally...";
+  try {
+    const result = await window.erim.supplierMaster.duplicateProduct({
+      sourceProductId: form.elements.sourceProductId.value,
+      productName: form.elements.productName.value.trim(),
+      targetSupplierIds,
+      includeContracts: form.elements.includeContracts.checked,
+      includeRates: form.elements.includeRates.checked,
+    });
+    applySupplierLocalResult(result);
+    renderSupplierMaster();
+    const createdRates = result.created.reduce((sum, row) => sum + Number(row.rateCount || 0), 0);
+    const summary = `${result.created.length} Product copy, ${createdRates} Rate copy, ${result.conflicts.length} conflict.`;
+    if (result.conflicts.length) {
+      const output = $("#supplier-copy-result");
+      output.hidden = false;
+      output.classList.add("attention");
+      output.innerHTML = `<strong>${escapeHtml(summary)}</strong><br>${result.conflicts
+        .map((row) => `${escapeHtml(row.supplierName)}: ${escapeHtml(row.reason)}`)
+        .join("<br>")}`;
+      button.textContent = "Completed";
+      $("#cancel-supplier-product-duplicate-dialog").textContent = "Close";
+      toast(summary, true);
+    } else {
+      $("#supplier-product-duplicate-dialog").close();
+      toast(`${summary} Review them in Local Pending before publishing.`);
+    }
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Save copies locally";
+    toast(error.message, true);
+  }
 }
 
 function contractRateMarkup(rate = {}) {
@@ -1167,9 +1308,119 @@ function draftActions(draft) {
   return `<div class="row-actions">${buttons.join("")}</div>`;
 }
 
+const transportOperations = {
+  "new-itinerary-check": {
+    title: "New Itinerary Check",
+    description: "Review kebutuhan kendaraan dari itinerary baru sebelum assignment dan costing.",
+    note: "Read-only intake foundation; final validation rules will follow the Transport workflow discussion.",
+    cards: [
+      ["Source", "Published itinerary", "Customer, dates, pax, daywise route, pickup, and drop-off."],
+      ["Transport check", "Vehicle requirements", "Vehicle type, quantity, capacity, luggage, route, and service duration."],
+      ["Output", "Checked requirement", "Structured requirement ready for costing and driver assignment."],
+    ],
+  },
+  "revise-itinerary-check": {
+    title: "Revise Itinerary Check",
+    description: "Compare itinerary revisions and identify changes affecting vehicles, drivers, routes, and costs.",
+    note: "Historical assignments remain preserved; changes will require an explicit Transport decision.",
+    cards: [
+      ["Comparison", "Old vs new itinerary", "Highlight added, changed, removed, and unchanged transport requirements."],
+      ["Impact", "Assignment review", "Flag affected vehicle, driver, supplier, timing, and TOC."],
+      ["Output", "Revision decision", "Keep, revise, reassign, add, or cancel with an audit note."],
+    ],
+  },
+  "add-cost": {
+    title: "Add Cost to Itinerary",
+    description: "Attach centralized Transport Product and Contract Rates to daywise requirements.",
+    note: "Supplier Master remains the rate source; manual exceptions will retain reason and evidence.",
+    cards: [
+      ["Rate source", "Supplier Master", "Use valid Transport contracts and copied vehicle products."],
+      ["Costing", "Per itinerary / per day", "Assign vehicle, basis, quantity, rate, surcharge, and operational extra cost."],
+      ["Exception", "Pending or manual rate", "Allow controlled manual cost with source, reason, and reviewer trail."],
+    ],
+  },
+  "driver-detail": {
+    title: "Set Driver Detail",
+    description: "Assign driver and vehicle details per itinerary or per day, including controlled revisions.",
+    note: "Driver Master is intentionally lightweight: name, WhatsApp/phone number, and editable supplier.",
+    cards: [
+      ["Assignment", "Per itinerary", "Apply one driver and vehicle across the selected itinerary scope."],
+      ["Assignment", "Per day", "Override driver, vehicle, pickup time, or contact on individual days."],
+      ["Driver Master", "Save or revise driver", "Store name, international number, and supplier; preserve assignment history."],
+    ],
+  },
+  "arrival-review": {
+    title: "Review Arrival per Date",
+    description: "Review arrivals by operating date for dispatch preparation and driver coordination.",
+    note: "The final page will support filtered export without changing operational records.",
+    cards: [
+      ["Date board", "Arrival operations", "Arrival date/time, flight, guest, pax, vehicle, supplier, and driver."],
+      ["Control", "Assignment status", "Show missing vehicle, missing driver, revision, and confirmed assignment."],
+      ["Export", "Arrival manifest", "Export the filtered date view for operational distribution."],
+    ],
+  },
+  "toc-review": {
+    title: "Review TOC per Itinerary",
+    description: "Prepare the Transport-side TOC review foundation per itinerary.",
+    note: "Detailed TOC rules and exceptions remain reserved for the dedicated workflow discussion.",
+    cards: [
+      ["Scope", "Itinerary TOC", "Group TOC requirements by itinerary, day, location, and service."],
+      ["Review", "Transport impact", "Connect TOC timing, access, parking, route, and vehicle constraints."],
+      ["Export", "TOC review data", "Export the filtered itinerary review while preserving the source version."],
+    ],
+  },
+  kpi: {
+    title: "Cek KPI",
+    description: "Prepare Transport KPI visibility for assignment, response, revision, and completion quality.",
+    note: "Targets and scoring will only activate after the owner approves the KPI definitions.",
+    cards: [
+      ["Timeliness", "Assignment speed", "Time from published itinerary to checked and assigned transport."],
+      ["Quality", "Revision and exception rate", "Track late revisions, missing detail, and avoidable reassignment."],
+      ["Completion", "Operational closure", "Arrival/day-tour completion and invoice readiness."],
+    ],
+  },
+  "day-tour": {
+    title: "Review Day Tour",
+    description: "Review daily tour movement, vehicle readiness, driver detail, and route notes.",
+    note: "This foundation will later connect live operational status and day-tour completion evidence.",
+    cards: [
+      ["Daily board", "Day tour schedule", "Date, start time, route, pax, vehicle, supplier, and driver."],
+      ["Readiness", "Operational checklist", "Driver confirmed, vehicle confirmed, contact shared, and special notes reviewed."],
+      ["Follow-up", "Completion status", "Record exception, change, completion, and handoff for invoicing."],
+    ],
+  },
+  invoicing: {
+    title: "Invoicing",
+    description: "Prepare transporter invoice matching against assigned services and approved costs.",
+    note: "Accounting posting stays inactive until invoice, approval, and reconciliation rules are agreed.",
+    cards: [
+      ["Source", "Completed transport", "Use approved assignments, rate snapshots, extras, and completion status."],
+      ["Matching", "Supplier invoice", "Match invoice lines to itinerary, day, vehicle, and agreed cost."],
+      ["Handoff", "Accounting-ready", "Flag matched, disputed, missing, or approved lines with evidence."],
+    ],
+  },
+};
+
+function renderTransportOperation(action = state.transportAction) {
+  const operation = transportOperations[action] || transportOperations["new-itinerary-check"];
+  state.transportAction = action in transportOperations ? action : "new-itinerary-check";
+  $("#transport-operation-title").textContent = operation.title;
+  $("#transport-operation-description").textContent = operation.description;
+  $("#transport-operation-heading").textContent = operation.title;
+  $("#transport-operation-note").textContent = operation.note;
+  $("#transport-operation-cards").innerHTML = operation.cards.map(([eyebrow, title, detail], index) => `
+    <article class="transport-operation-card${index === operation.cards.length - 1 ? " ready" : ""}">
+      <span>${escapeHtml(eyebrow)}</span>
+      <strong>${escapeHtml(title)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `).join("");
+}
+
 function showView(view, module = null) {
   state.currentView = view;
   state.currentModule = module;
+  openMenuGroupForModule(module);
   $$(".view").forEach((node) => node.classList.toggle("active", node.id === `${view}-view`));
   $$(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.view === view && (!module || node.dataset.module === module)));
   $$("[data-vendor-action]").forEach((node) => {
@@ -1181,6 +1432,10 @@ function showView(view, module = null) {
   });
   $$("[data-manager-action]").forEach((node) => {
     node.classList.toggle("active", node.dataset.managerAction === view);
+  });
+  $$("[data-transport-action]").forEach((node) => {
+    node.classList.toggle("active",
+      view === "transport-operation" && node.dataset.transportAction === state.transportAction);
   });
   const titles = {
     dashboard: ["Local workspace", "Operations dashboard"],
@@ -1197,6 +1452,7 @@ function showView(view, module = null) {
     "vendor-revise-itinerary": ["Vendor Booking", "Revise Itinerary"],
     "vendor-cancel": ["Vendor Booking", "Cancel All Service"],
     "vendor-kpi": ["Vendor Booking", "Cek KPI"],
+    "transport-operation": ["Transport Operations", transportOperations[state.transportAction]?.title || "Transport"],
     "supplier-master": ["Manager / Admin", "Supplier Master & Contract Rates"],
     "supplier-excel": ["Manager / Admin", "Supplier Data Import / Export"],
   };
@@ -1205,6 +1461,7 @@ function showView(view, module = null) {
   renderWorkspace();
   renderReservationFollowups();
   renderPersonalKpi();
+  if (view === "transport-operation") renderTransportOperation();
 }
 
 function openDraftDialog(module = null) {
@@ -2252,7 +2509,27 @@ function openVendorNotification(actionUrl) {
 }
 
 function bindEvents() {
+  $("#sidebar-toggle").addEventListener("click", () => {
+    state.navigation.sidebarHidden = !state.navigation.sidebarHidden;
+    applyNavigationPreferences();
+    saveNavigationPreferences();
+  });
   $("#main-nav").addEventListener("click", (event) => {
+    const parent = event.target.closest(".nav-parent");
+    if (parent) {
+      const group = parent.dataset.menuGroup;
+      const module = parent.dataset.module;
+      if (state.currentModule === module) {
+        toggleMenuGroup(group);
+      } else {
+        setMenuGroupCollapsed(group, false);
+        if (module === "TRANSPORT") {
+          renderTransportOperation(state.transportAction);
+        }
+        showView(parent.dataset.view, module);
+      }
+      return;
+    }
     const managerAction = event.target.closest("[data-manager-action]");
     if (managerAction?.dataset.managerAction === "supplier-master") {
       showView("supplier-master", "MANAGER_ADMIN");
@@ -2262,6 +2539,13 @@ function bindEvents() {
     if (managerAction?.dataset.managerAction === "supplier-excel") {
       showView("supplier-excel", "MANAGER_ADMIN");
       loadSupplierExcel().catch((error) => toast(error.message, true));
+      return;
+    }
+    const transportAction = event.target.closest("[data-transport-action]");
+    if (transportAction) {
+      state.transportAction = transportAction.dataset.transportAction;
+      renderTransportOperation(state.transportAction);
+      showView("transport-operation", "TRANSPORT");
       return;
     }
     const vendorAction = event.target.closest("[data-vendor-action]");
@@ -2545,6 +2829,21 @@ function bindEvents() {
   $("#supplier-product-form").addEventListener("submit", saveSupplierProductForm);
   $("#close-supplier-product-dialog").addEventListener("click", () => $("#supplier-product-dialog").close());
   $("#cancel-supplier-product-dialog").addEventListener("click", () => $("#supplier-product-dialog").close());
+  $("#supplier-product-duplicate-form").addEventListener("submit", duplicateSupplierProduct);
+  $("#close-supplier-product-duplicate-dialog").addEventListener("click", () =>
+    $("#supplier-product-duplicate-dialog").close());
+  $("#cancel-supplier-product-duplicate-dialog").addEventListener("click", () =>
+    $("#supplier-product-duplicate-dialog").close());
+  $("#supplier-copy-select-all").addEventListener("change", (event) => {
+    $$('#supplier-copy-target-list [name="targetSupplierIds"]').forEach((node) => {
+      node.checked = event.target.checked;
+    });
+  });
+  $("#supplier-product-duplicate-form").elements.includeContracts.addEventListener("change", (event) => {
+    const rates = $("#supplier-product-duplicate-form").elements.includeRates;
+    rates.disabled = !event.target.checked;
+    if (!event.target.checked) rates.checked = false;
+  });
   $("#archive-supplier-product").addEventListener("click", () => {
     const id = $("#supplier-product-form").elements.productId.value;
     const product = state.supplierMaster.products.find((row) => row.productId === id);
@@ -2580,6 +2879,10 @@ function bindEvents() {
     if (removeRecipient) return removeRecipient.closest(".supplier-repeatable-row").remove();
     const editProduct = event.target.closest("[data-edit-supplier-product]");
     if (editProduct) return openSupplierProductDialog(editProduct.dataset.editSupplierProduct);
+    const duplicateProduct = event.target.closest("[data-duplicate-supplier-product]");
+    if (duplicateProduct) {
+      return openSupplierProductDuplicateDialog(duplicateProduct.dataset.duplicateSupplierProduct);
+    }
     const editContract = event.target.closest("[data-edit-supplier-contract]");
     if (editContract) return openSupplierContractDialog(editContract.dataset.editSupplierContract);
   });
@@ -2938,5 +3241,8 @@ function bindEvents() {
   });
 }
 
+loadNavigationPreferences();
+applyNavigationPreferences();
+renderTransportOperation();
 bindEvents();
 refresh().catch((error) => toast(error.message, true));

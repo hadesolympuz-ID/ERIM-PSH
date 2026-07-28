@@ -960,6 +960,156 @@ class LocalDatabase {
     };
   }
 
+  duplicateSupplierProduct(details = {}) {
+    const sourceProductId = String(details.sourceProductId || "").trim();
+    const targetSupplierIds = [...new Set((details.targetSupplierIds || []).map(String).filter(Boolean))];
+    const includeContracts = details.includeContracts !== false;
+    const includeRates = includeContracts && details.includeRates !== false;
+    const catalog = this.getSupplierMasterCatalog();
+    const sourceProduct = catalog.products.find((row) =>
+      row.productId === sourceProductId && row.active !== false
+    );
+    if (!sourceProduct) throw new Error("Source Product was not found or is archived.");
+    const sourceSupplier = catalog.suppliers.find((row) =>
+      row.supplierId === sourceProduct.supplierId && row.active !== false
+    );
+    if (!sourceSupplier) throw new Error("Source Product supplier was not found or is archived.");
+    if (!targetSupplierIds.length) throw new Error("Choose at least one destination supplier.");
+
+    const requestedName = String(details.productName || sourceProduct.productName || "").trim();
+    if (!requestedName) throw new Error("Product/service name is required.");
+    const normalizeName = (value) => String(value || "").trim().toLocaleLowerCase();
+    const targetSuppliers = targetSupplierIds.map((supplierId) => {
+      const supplier = catalog.suppliers.find((row) =>
+        row.supplierId === supplierId && row.active !== false
+      );
+      if (!supplier) throw new Error(`Destination supplier ${supplierId} was not found or is archived.`);
+      if (String(supplier.typeCode || "") !== String(sourceSupplier.typeCode || "")) {
+        throw new Error(`${supplier.supplierName} belongs to a different Supplier Type.`);
+      }
+      return supplier;
+    });
+    const sourceRates = catalog.rates.filter((row) =>
+      row.productId === sourceProduct.productId && row.active !== false
+    );
+    const sourceRateContractIds = new Set(sourceRates.map((row) => row.contractId));
+    const sourceContracts = catalog.contracts.filter((row) =>
+      row.supplierId === sourceSupplier.supplierId
+      && row.active !== false
+      && sourceRateContractIds.has(row.contractId)
+    );
+    const created = [];
+    const conflicts = [];
+    const cleanClone = (row, fields) => {
+      const clone = structuredClone(row || {});
+      fields.forEach((field) => delete clone[field]);
+      return clone;
+    };
+
+    this.db.transaction(() => {
+      for (const targetSupplier of targetSuppliers) {
+        const duplicate = this.getSupplierMasterCatalog().products.find((row) =>
+          row.supplierId === targetSupplier.supplierId
+          && row.active !== false
+          && normalizeName(row.productName) === normalizeName(requestedName)
+        );
+        if (duplicate) {
+          conflicts.push({
+            supplierId: targetSupplier.supplierId,
+            supplierName: targetSupplier.supplierName,
+            productId: duplicate.productId,
+            productName: duplicate.productName,
+            reason: "A product with the same name already exists for this supplier.",
+          });
+          continue;
+        }
+
+        const productPayload = cleanClone(sourceProduct, [
+          "productId", "productCode", "recordVersion", "localDraftStatus",
+          "createdAt", "createdBy", "updatedAt", "updatedBy",
+        ]);
+        Object.assign(productPayload, {
+          supplierId: targetSupplier.supplierId,
+          productName: requestedName,
+          productCode: "",
+          status: "ACTIVE",
+          active: true,
+          duplicatedFromProductId: sourceProduct.productId,
+          duplicatedFromSupplierId: sourceSupplier.supplierId,
+          baseRecordVersion: null,
+        });
+        const productResult = this.saveSupplierMasterDraft("PRODUCT", productPayload);
+        const newProductId = productResult.draft.entityId;
+        const contractIds = [];
+
+        if (includeContracts) {
+          for (const sourceContract of sourceContracts) {
+            const contractPayload = cleanClone(sourceContract, [
+              "contractId", "recordVersion", "localDraftStatus", "createdAt", "createdBy",
+              "updatedAt", "updatedBy", "driveFileId", "driveFileName", "driveFileUrl",
+            ]);
+            const supplierReference = targetSupplier.supplierCode || targetSupplier.supplierName;
+            Object.assign(contractPayload, {
+              supplierId: targetSupplier.supplierId,
+              contractNumber: `${sourceContract.contractNumber || "CONTRACT"} / ${supplierReference}`,
+              contractName: sourceContract.contractName
+                ? `${sourceContract.contractName} - ${targetSupplier.supplierName}`
+                : `${requestedName} - ${targetSupplier.supplierName}`,
+              driveFileId: "",
+              driveFileName: "",
+              driveFileUrl: "",
+              status: "LOCAL_DRAFT",
+              active: true,
+              duplicatedFromContractId: sourceContract.contractId,
+              baseRecordVersion: null,
+              rates: includeRates
+                ? sourceRates
+                  .filter((rate) => rate.contractId === sourceContract.contractId)
+                  .map((rate) => ({
+                    ...cleanClone(rate, [
+                      "contractRateId", "contractId", "productId", "recordVersion",
+                      "localDraftStatus", "createdAt", "createdBy", "updatedAt", "updatedBy",
+                    ]),
+                    productId: newProductId,
+                    status: "ACTIVE",
+                    active: true,
+                    duplicatedFromContractRateId: rate.contractRateId,
+                  }))
+                : [],
+            });
+            const contractResult = this.saveSupplierMasterDraft("CONTRACT", contractPayload);
+            contractIds.push(contractResult.draft.entityId);
+          }
+        }
+        created.push({
+          supplierId: targetSupplier.supplierId,
+          supplierName: targetSupplier.supplierName,
+          productId: newProductId,
+          productName: requestedName,
+          contractIds,
+          rateCount: includeRates
+            ? sourceRates.filter((rate) => sourceRateContractIds.has(rate.contractId)).length
+            : 0,
+        });
+      }
+    })();
+
+    this.log("SUPPLIER_PRODUCT_DUPLICATED", "PRODUCT", sourceProduct.productId, {
+      sourceSupplierId: sourceSupplier.supplierId,
+      requestedTargets: targetSupplierIds.length,
+      created: created.length,
+      conflicts: conflicts.length,
+      includeContracts,
+      includeRates,
+    });
+    return {
+      created,
+      conflicts,
+      drafts: this.listSupplierMasterDrafts(),
+      catalog: this.getSupplierMasterCatalog(),
+    };
+  }
+
   setSupplierMasterDraftStatus(draftId, status, error = {}) {
     const now = this.now();
     this.db.prepare(`
