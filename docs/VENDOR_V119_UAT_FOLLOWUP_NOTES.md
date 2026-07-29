@@ -343,3 +343,190 @@ send ledger.
 - Repeated clicks on that resend attempt do not create another Gmail send.
 - Original and alternate-recipient Gmail threads remain independently
   accessible from delivery history.
+
+## 11. Latest Generate workspace revision
+
+Status: `RECORDED 2026-07-30 — NOT IMPLEMENTED`
+
+This is the latest owner direction and supersedes the main three-panel
+arrangement described in Section 9. The single-channel, snapshot, Gmail ledger,
+and intentional-resend rules from Sections 9 and 10 remain applicable.
+
+The flow is separated into:
+
+1. the main Generate preparation workspace; and
+2. a full-screen communication popup after `Generate Booking`.
+
+### 11.1 Main Generate preparation workspace
+
+#### Left panel — Daywise tree
+
+- Show Client → Day → Vendor split service in source Daywise order.
+- Keep eligible service selection in the tree.
+- Selecting one service makes it the current inspection item without losing
+  the wider selected-service set.
+- Keep the clearer Day number, date, labeled Day Wise Header, supplier,
+  Product/service, booking state, and rate state.
+- Place the sticky `Generate Booking` action in the left panel.
+- The button shows the selected service count and resulting supplier-package
+  count before opening the communication popup.
+
+#### Middle panel — exact Supplier Master detail
+
+For the service currently selected in the Daywise tree, show the relevant
+Supplier Master context:
+
+- Supplier name, Type, status, and stable ID;
+- available communication channels from the active Booking SOP;
+- exactly one selected channel: Email, WhatsApp, Portal, or Other;
+- booking recipients/contact destination;
+- lead time, cut-off, confirmation, amendment, and cancellation procedures;
+- portal URL/account reference where permitted;
+- readiness notices and missing-master information.
+
+The panel exposes focused correction actions to the exact Supplier profile,
+Recipients, SOP, Portal, or other missing section. Saving in the focused popup
+returns to the unchanged tree selection and refreshes only the affected
+Supplier/service.
+
+#### Right panel — exact Product/rate detail
+
+For the same current service, show:
+
+- Product/service name and stable Product ID;
+- activity/split description;
+- Day number and service date;
+- applicable Contract and Rate validity;
+- Price Basis, Quantity, Adult/Child/Infant or unit rates;
+- `RATE_READY`, Special Rate, Manual Rate, or `PENDING_RATE`;
+- rate source, reason, and evidence reference when applicable.
+
+The panel exposes focused Product/Contract/Rate correction. A missing
+Special/Pending Rate keeps both `Isi harga` and `Skip untuk sekarang`; skipping
+does not block Generate or convert the rate to zero/Ready.
+
+### 11.2 Generate Booking transition
+
+`Generate Booking` performs no delivery. It:
+
+1. validates the selected stable Vendor service IDs;
+2. regroups them in the backend into supplier packages;
+3. snapshots source revision, services, Supplier/SOP, channel, recipients,
+   Product/rate context, Subject, body, and attachments;
+4. opens the full-screen communication popup.
+
+If 50 selected services become fewer supplier packages, the popup navigates the
+supplier packages rather than forcing the operator through 50 individual
+service rows.
+
+Example:
+
+```text
+50 selected services → 18 supplier packages
+```
+
+### 11.3 Full-screen communication popup
+
+#### Left panel — outgoing package queue
+
+Show every generated supplier package that belongs to the current preparation
+batch. Each row displays:
+
+- sequence and current/total position;
+- channel required by the selected Supplier SOP;
+- Customer Code;
+- Supplier/package name;
+- selected service count;
+- state: Not Generated, Generated/Ready, Sent, Pending Sync, or Attention.
+
+Default sort:
+
+1. Booking SOP/channel order;
+2. Supplier name;
+3. Customer Code;
+4. first Day/service date and original service order.
+
+The operator may click any package directly. Sent rows remain visible and are
+not silently regenerated.
+
+#### Middle panel — booking message
+
+Show the generated communication for the current package:
+
+- action type;
+- standardized Subject;
+- editable booking message while unsent;
+- selected Day/service summary;
+- attachment list;
+- readiness/rate notices.
+
+For Email, clearly show:
+
+- connected sender account;
+- TO;
+- CC;
+- BCC where applicable;
+- Subject and message preview.
+
+Navigation is always visible:
+
+```text
+Previous | Package X of N | Next pending
+```
+
+Recommended behavior:
+
+- `Previous` moves to the previous package in the displayed queue.
+- `Next pending` moves to the next package that still needs Generate, Send, or
+  Attention; it skips completed Sent packages.
+- Clicking a queue row may still open any specific package.
+- Navigation never sends automatically.
+- Unsaved message edits trigger `Save & Next`, `Discard & Next`, or `Cancel`.
+
+#### Right panel — channel action
+
+For Email:
+
+- show final Gmail readiness and connected account;
+- expose the explicit `Send via Gmail` button;
+- keep the final confirmation and immutable pre-send ledger;
+- show the result, Gmail message ID, thread link, sync state, and resend action.
+
+For WhatsApp, Portal, or Other, the same panel changes to the applicable
+Open/Record Evidence action. Exactly one channel remains active for the
+supplier package.
+
+After successful Send, do not auto-advance. Show:
+
+```text
+Open Gmail Thread | Next pending
+```
+
+This lets the operator verify the result before moving while still supporting
+large queues efficiently.
+
+### 11.4 Queue progress
+
+Keep a sticky batch summary in the popup:
+
+```text
+18 Packages | 5 Sent | 2 Ready to Send | 10 Not Generated | 1 Attention
+```
+
+Generation, delivery, official sync, and supplier confirmation remain separate
+states. Closing the popup preserves the generated queue and returns to the same
+main Generate tree context.
+
+### 11.5 UAT gates for the revised layout
+
+- Clicking a tree service updates both Supplier and Product panels to the same
+  stable service ID.
+- `Generate Booking` is available from the left panel and never sends.
+- Selected services are regrouped into the correct supplier packages.
+- Popup queue sorting follows SOP/channel then Supplier/package name.
+- Email package middle panel shows sender, TO, CC/BCC, Subject, and message.
+- Previous and Next pending never trigger Gmail automatically.
+- Sent success leaves the result visible until the operator chooses Next.
+- A batch with 50 selected services can be completed without returning to the
+  top of the tree between packages.
+- Closing/reopening the popup preserves package states and main-tree context.
