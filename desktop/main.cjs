@@ -156,6 +156,8 @@ function registerIpc() {
   ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
   ipcMain.handle("vendor:booking-queue", () => database.listVendorBookingQueue());
   ipcMain.handle("vendor:booking-list", () => database.listVendorBookings());
+  ipcMain.handle("vendor:booking-send-attempt-list", (_event, bookingId) =>
+    database.listVendorSendAttempts(bookingId));
   ipcMain.handle("vendor:booking-preview", (_event, details) => database.getVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-generate", (_event, details) => database.saveVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-email-send", (_event, details) =>

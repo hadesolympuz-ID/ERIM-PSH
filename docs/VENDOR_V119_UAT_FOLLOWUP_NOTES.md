@@ -1,6 +1,6 @@
 # Vendor v1.1.9 UAT Follow-up Notes
 
-Status: `RECORDED — AWAITING IMPLEMENTATION`
+Status: `IMPLEMENTED IN v1.1.10 — WINDOWS UAT BUILD READY`
 
 Recorded: 2026-07-30
 
@@ -346,7 +346,7 @@ send ledger.
 
 ## 11. Latest Generate workspace revision
 
-Status: `RECORDED 2026-07-30 — NOT IMPLEMENTED`
+Status: `IMPLEMENTED IN v1.1.10 — WINDOWS UAT BUILD READY`
 
 This is the latest owner direction and supersedes the main three-panel
 arrangement described in Section 9. The single-channel, snapshot, Gmail ledger,

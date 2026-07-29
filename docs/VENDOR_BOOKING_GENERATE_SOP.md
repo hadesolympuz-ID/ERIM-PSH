@@ -1,15 +1,14 @@
 # Vendor Booking Generate, Send, Revise, and Cancel SOP
 
-Status: `v1.1.9 RELEASED — LIVE UAT`
+Status: `v1.1.10 WINDOWS UAT BUILD READY`
 Operational owner: Vendor Booking
 
 ## 1. Queue ownership
 
 - Micro Split type `VENDOR` enters Vendor Booking.
-- `ADDITIONAL_SERVICE` also enters Vendor Booking, including a supplier with no
-  contract and a manual/dynamic rate such as Floating Breakfast.
-- `TRANSPORT`, `TOC`, and `LUGGAGE_VAN` never enter the Vendor queue. Transport
-  owns those records.
+- Every type other than `VENDOR`, including `ADDITIONAL_SERVICE`, `TRANSPORT`,
+  `TOC`, and `LUGGAGE_VAN`, stays outside Vendor Generate. Its owning workflow
+  handles that record.
 - The queue groups atomic services by Customer Code and supplier. Supplier ID
   is authoritative; a legacy name-only split remains visible as an unlinked
   temporary group so work is not lost.
@@ -22,15 +21,20 @@ Operational owner: Vendor Booking
 2. Expand the required Client and Day branches, then select the eligible
    service rows to prepare. Already sent or otherwise ineligible rows remain
    read-only.
-3. Review the supplier packages produced from the selected services, then
-   verify every service date, Day number, Product/service name, pax, quantity,
-   price basis, and rate warning.
-4. Verify the channel loaded from the active Supplier SOP.
-5. Verify all recipients. Each editable row uses `TO | address`,
+3. Click one service to inspect its exact Supplier/SOP detail in the middle
+   panel and Product/Contract/Rate detail in the right panel.
+4. Select exactly one communication channel for each supplier package.
+5. Click `Generate Booking` in the left panel. The selected services are
+   regrouped into supplier packages and opened in the full-screen communication
+   workspace; nothing is sent.
+6. Use the package queue and `Previous` / `Next pending` to review every
+   service date, Day number, Product/service name, pax, quantity, price basis,
+   and rate warning.
+7. Verify all recipients. Each editable row uses `TO | address`,
    `CC | address`, `BCC | address`, or `WHATSAPP | number`.
-6. Review and edit Subject and Booking Message.
-7. Select New Booking or Amendment.
-8. Click Generate Booking.
+8. Review and edit Subject and Booking Message.
+9. Select New Booking or Amendment, then Regenerate Snapshot if the content
+   changed.
 
 Generate creates an exact working snapshot and service links in local SQLite.
 It does not send anything. Re-generating an unsent action updates that draft
@@ -41,7 +45,7 @@ creates a new history record.
 
 1. Email requires at least one `TO` recipient.
 2. Generate the latest snapshot.
-3. Click Send Email Now.
+3. Click Send via Gmail.
 4. Read the final confirmation showing supplier, TO, subject, and the connected
    employee Gmail.
 5. Confirm only when those values are correct.
@@ -54,6 +58,15 @@ resent; prepare an Amendment instead.
 The Google Desktop connection now requires `gmail.send`. An account connected
 under an older version must Disconnect and Connect Google again before its
 first send so Google can approve the additional permission.
+
+### Intentional resend or alternate recipient
+
+Use `Kirim ulang / Ganti penerima` only when a proven earlier delivery must be
+repeated, for example because the same booking must reach another mailbox.
+Review the previous and replacement recipients, enter the operational reason,
+then pass the final confirmation. The resend creates a new linked Send Attempt
+and Gmail thread; it never edits or replaces the original evidence. Content or
+service changes must use Amendment instead of Resend.
 
 ## 4. WhatsApp, Portal, and Others
 

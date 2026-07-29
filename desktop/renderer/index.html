@@ -217,6 +217,7 @@
                   <div class="vendor-identity-fields">
                     <label>Customer Code<input name="customerCode" readonly /></label>
                     <label>Customer Name<input name="customerName" required /></label>
+                    <label>Client Tag / Occasion<input name="clientTag" placeholder="HONEYMOONERS" /></label>
                     <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
@@ -272,10 +273,10 @@
 
           <section id="vendor-generate-view" class="view">
             <div class="workspace-banner vendor-booking-banner">
-              <div><p class="eyebrow">Vendor Booking</p><h2>Generate & Send Booking</h2><p>Micro Split Vendor dan Additional Service dikelompokkan otomatis per supplier. Pending rate tetap dapat diproses.</p></div>
+              <div><p class="eyebrow">Vendor Booking</p><h2>Generate preparation</h2><p>Pilih Micro Split Vendor, periksa Supplier/SOP dan Product/Rate, lalu buka workspace komunikasi.</p></div>
               <div class="vendor-booking-summary"><strong id="vendor-booking-package-count">0</strong><span>supplier packages</span></div>
             </div>
-            <div class="panel vendor-booking-layout">
+            <div class="panel vendor-generate-prep-layout">
               <aside class="vendor-booking-queue">
                 <div class="panel-heading compact"><div><p class="eyebrow">Daywise tree</p><h2>Client → Day → service</h2></div></div>
                 <label class="vendor-booking-search">Filter<input id="vendor-booking-search" placeholder="Client, Day, supplier, or service" /></label>
@@ -283,47 +284,101 @@
                   <label><input id="vendor-tree-select-all" type="checkbox" /> Select all eligible</label>
                   <button id="vendor-tree-clear" class="button ghost small" type="button">Clear</button>
                   <span id="vendor-tree-selected-count">0 selected</span>
-                  <button id="vendor-tree-prepare" class="button primary small" type="button" disabled>Prepare selected</button>
+                  <button id="vendor-tree-prepare" class="button primary small" type="button" disabled>Generate Booking</button>
                 </div>
                 <div id="vendor-booking-queue-list" class="vendor-booking-queue-list"></div>
               </aside>
-              <section class="vendor-booking-editor">
-                <div id="vendor-booking-empty" class="empty-notifications">Choose a supplier package to prepare its booking.</div>
-                <div id="vendor-booking-preview" hidden>
-                  <div class="vendor-booking-preview-heading">
-                    <div><p class="eyebrow">Controlled communication</p><h2 id="vendor-booking-preview-title">Booking preview</h2></div>
-                    <div id="vendor-booking-preview-status"></div>
+              <section class="vendor-prep-detail-panel">
+                <div class="panel-heading compact"><div><p class="eyebrow">Supplier Master</p><h2>Supplier, SOP & channel</h2></div></div>
+                <div id="vendor-prep-supplier-detail" class="vendor-prep-detail-scroll">
+                  <div class="empty-notifications">Choose one Daywise service to inspect its Supplier Master detail.</div>
+                </div>
+              </section>
+              <section class="vendor-prep-detail-panel">
+                <div class="panel-heading compact"><div><p class="eyebrow">Product Master</p><h2>Product, contract & rate</h2></div></div>
+                <div id="vendor-prep-product-detail" class="vendor-prep-detail-scroll">
+                  <div class="empty-notifications">Choose one Daywise service to inspect its Product and Rate detail.</div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <dialog id="vendor-communication-dialog" class="vendor-communication-dialog">
+            <div class="vendor-communication-shell">
+              <header class="vendor-communication-header">
+                <div><p class="eyebrow">Controlled communication workspace</p><h2>Generate & Send Supplier Booking</h2></div>
+                <div class="vendor-communication-header-actions">
+                  <div id="vendor-communication-progress" class="vendor-communication-progress">0 Packages</div>
+                  <button id="close-vendor-communication" class="button ghost" type="button">Close</button>
+                </div>
+              </header>
+              <div class="vendor-communication-layout">
+                <aside class="vendor-communication-queue">
+                  <div class="panel-heading compact"><div><p class="eyebrow">Outgoing queue</p><h2>Supplier packages</h2></div></div>
+                  <div id="vendor-communication-queue-list" class="vendor-communication-queue-list"></div>
+                </aside>
+                <section class="vendor-communication-message">
+                  <div id="vendor-booking-empty" class="empty-notifications">No generated package is selected.</div>
+                  <div id="vendor-booking-preview" hidden>
+                    <div class="vendor-booking-preview-heading">
+                      <div><p class="eyebrow">Generated snapshot</p><h2 id="vendor-booking-preview-title">Booking preview</h2></div>
+                      <div id="vendor-booking-preview-status"></div>
+                    </div>
+                    <div class="vendor-booking-form-grid vendor-communication-form">
+                      <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
+                      <label>Channel<select id="vendor-booking-channel" disabled></select></label>
+                      <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="4"></textarea></label>
+                      <label class="wide">Subject<input id="vendor-booking-subject" /></label>
+                      <label class="wide">Booking message<textarea id="vendor-booking-body" rows="16"></textarea></label>
+                    </div>
+                    <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
+                    <div class="vendor-communication-navigation">
+                      <button id="vendor-communication-previous" class="button ghost" type="button">Previous</button>
+                      <strong id="vendor-communication-position">Package 0 of 0</strong>
+                      <button id="vendor-communication-next" class="button ghost" type="button">Next pending</button>
+                    </div>
                   </div>
-                  <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
-                  <div class="vendor-email-popup-layout">
-                    <section class="vendor-email-compose">
-                      <div class="vendor-booking-form-grid">
-                        <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
-                        <label>Channel<select id="vendor-booking-channel"></select></label>
-                        <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="3"></textarea></label>
-                        <label class="wide">Subject<input id="vendor-booking-subject" /></label>
-                        <label class="wide">Booking message<textarea id="vendor-booking-body" rows="15"></textarea></label>
-                      </div>
-                    </section>
-                    <aside class="vendor-email-context">
-                      <div><p class="eyebrow">Permitted context</p><h3>Gmail thread & final message</h3></div>
-                      <div id="vendor-email-context-content" class="vendor-email-context-content"></div>
-                    </aside>
-                  </div>
+                </section>
+                <aside class="vendor-communication-action">
+                  <div><p class="eyebrow">Selected channel</p><h2>Send & evidence</h2></div>
                   <div id="vendor-booking-sop" class="vendor-booking-sop"></div>
-                  <div class="vendor-booking-actions">
+                  <div id="vendor-email-context-content" class="vendor-email-context-content"></div>
+                  <div class="vendor-booking-actions vendor-communication-send-actions">
                     <span id="vendor-booking-send-note" class="muted-text">Generate saves a local evidence snapshot. Sending remains a separate explicit action.</span>
-                    <button id="send-vendor-booking-email" class="button danger" type="button" hidden>Send email now</button>
-                    <button id="generate-vendor-booking" class="button primary" type="button">Generate booking</button>
+                    <button id="generate-vendor-booking" class="button ghost" type="button">Regenerate snapshot</button>
+                    <button id="send-vendor-booking-email" class="button danger" type="button" hidden>Send via Gmail</button>
                   </div>
                   <div id="vendor-booking-send-panel" class="vendor-booking-send-panel" hidden>
                     <label>External reference / evidence note<input id="vendor-booking-external-reference" placeholder="WhatsApp time, portal booking ID, or evidence note" /></label>
                     <button id="record-vendor-booking-sent" class="button primary" type="button">Record as sent</button>
                   </div>
-                </div>
-              </section>
+                </aside>
+              </div>
             </div>
-          </section>
+          </dialog>
+
+          <dialog id="vendor-resend-dialog" class="compact-dialog vendor-resend-dialog">
+            <form id="vendor-resend-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Intentional delivery override</p><h2>Kirim ulang / Ganti penerima</h2></div>
+                <button id="close-vendor-resend" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-resend-content">
+                <div id="vendor-resend-notice" class="maintenance-warning"></div>
+                <div class="vendor-resend-recipient-grid">
+                  <label>Previous recipients<textarea id="vendor-resend-old-recipients" rows="4" readonly></textarea></label>
+                  <label>New recipients <small>TO, CC, or BCC | address</small><textarea id="vendor-resend-new-recipients" rows="4" required></textarea></label>
+                </div>
+                <label>Resend reason<textarea id="vendor-resend-reason" rows="3" required placeholder="Example: original supplier mailbox is unavailable"></textarea></label>
+                <small>The original email and ledger remain immutable. Continue creates one linked Send Attempt.</small>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-resend" class="button ghost" type="button">Cancel</button>
+                <button id="confirm-vendor-resend" class="button danger" type="submit">Continue</button>
+              </div>
+            </form>
+          </dialog>
+
           <section id="vendor-revise-itinerary-view" class="view vendor-placeholder-view">
             <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Revise memakai workspace itinerary dan Micro Split yang sama agar detail lama tidak perlu diketik ulang.</p></div></div>
             <div class="panel vendor-revise-launch"><div><strong>Load current itinerary, edit only the affected day/service, then save.</strong><p class="muted-text">Setelah revisi tersimpan, buka Generate dan pilih Amendment untuk supplier yang terdampak.</p></div><button id="open-vendor-revise-workspace" class="button primary" type="button">Open revise workspace</button></div>

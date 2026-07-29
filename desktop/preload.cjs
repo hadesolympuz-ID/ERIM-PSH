@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld("erim", {
     publishIntake: (details) => ipcRenderer.invoke("vendor:intake-publish", details),
     listBookingQueue: () => ipcRenderer.invoke("vendor:booking-queue"),
     listBookings: () => ipcRenderer.invoke("vendor:booking-list"),
+    listSendAttempts: (bookingId) =>
+      ipcRenderer.invoke("vendor:booking-send-attempt-list", bookingId),
     getBookingPreview: (details) => ipcRenderer.invoke("vendor:booking-preview", details),
     generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
     sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),

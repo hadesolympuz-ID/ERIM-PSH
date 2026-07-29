@@ -9,6 +9,7 @@ const app = fs.readFileSync(path.join(root, "desktop", "renderer", "app.js"), "u
 const styles = fs.readFileSync(path.join(root, "desktop", "renderer", "styles.css"), "utf8");
 const preload = fs.readFileSync(path.join(root, "desktop", "preload.cjs"), "utf8");
 const main = fs.readFileSync(path.join(root, "desktop", "main.cjs"), "utf8");
+const appsScript = fs.readFileSync(path.join(root, "apps-script", "Code.gs"), "utf8");
 
 test("sidebar supports logo show-hide and independently collapsible text menu groups", () => {
   assert.match(html, /id="sidebar-toggle"/);
@@ -101,8 +102,14 @@ test("Micro Split window shows the selected Day hotel and operating times", () =
 });
 
 test("Vendor Booking exposes a live supplier queue, controlled sending, revise reuse, and cancellation preparation", () => {
-  assert.match(html, /Generate & Send Booking/);
+  assert.match(html, /Generate preparation/);
+  assert.match(html, /Generate & Send Supplier Booking/);
   assert.match(html, /id="vendor-booking-queue-list"/);
+  assert.match(html, /id="vendor-prep-supplier-detail"/);
+  assert.match(html, /id="vendor-prep-product-detail"/);
+  assert.match(html, /id="vendor-communication-dialog"/);
+  assert.match(html, /id="vendor-communication-previous"/);
+  assert.match(html, /id="vendor-communication-next"/);
   assert.match(html, /id="send-vendor-booking-email"/);
   assert.match(html, /id="prepare-vendor-cancel"/);
   assert.match(html, /id="open-vendor-revise-workspace"/);
@@ -113,8 +120,9 @@ test("Vendor Booking exposes a live supplier queue, controlled sending, revise r
   assert.match(app, /setVendorIntakeMode\("REVISE"\)/);
   assert.match(preload, /vendor:booking-email-send/);
   assert.match(main, /vendor:booking-email-send/);
-  assert.match(styles, /\.vendor-booking-layout/);
-  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.vendor-booking-layout/);
+  assert.match(styles, /\.vendor-generate-prep-layout/);
+  assert.match(styles, /\.vendor-communication-dialog/);
+  assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.vendor-generate-prep-layout/);
 });
 
 test("Vendor milestone exposes stable dashboard, two-section Inbox, Itinerary Check, and safe sync controls", () => {
@@ -152,6 +160,29 @@ test("Manual rates use pax categories or whole quantities and Generate follows a
   assert.match(app, /vendor-tree-day/);
   assert.match(app, /serviceIds: preview\.selectedServiceIds/);
   assert.match(styles, /\.vendor-tree-client/);
+});
+
+test("Generate supports a single channel, full-screen package navigation, and intentional resend", () => {
+  assert.match(app, /name="vendor-prep-channel"/);
+  assert.match(html, /Kirim ulang \/ Ganti penerima/);
+  assert.match(html, /Previous/);
+  assert.match(html, /Next pending/);
+  assert.match(app, /function renderVendorPreparationDetails/);
+  assert.match(app, /function renderVendorCommunicationQueue/);
+  assert.match(app, /function navigateVendorCommunication/);
+  assert.match(app, /function openVendorResendDialog/);
+  assert.match(app, /resendOfAttemptId/);
+  assert.match(preload, /listSendAttempts/);
+  assert.match(main, /vendor:booking-send-attempt-list/);
+});
+
+test("Vendor follow-up keeps Day times optional and inserts a new Micro Split item at the top", () => {
+  assert.doesNotMatch(html, /Start time \*/);
+  assert.doesNotMatch(app, /missingStart/);
+  assert.match(app, /insertAdjacentHTML\("afterbegin", vendorSplitRow/);
+  assert.match(html, /name="clientTag"/);
+  assert.match(appsScript, /day\.startTime && !timePattern\.test/);
+  assert.match(appsScript, /"client_tag", "pax_adult"/);
 });
 
 test("Supplier readiness opens a focused child window and returns after a local save", () => {

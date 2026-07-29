@@ -492,7 +492,7 @@ test("keeps Additional Service bookable while its manual rate is pending", () =>
   assert.equal(split.status, "DRAFT");
 }));
 
-test("groups Vendor and Additional splits per supplier while excluding Transport and preserves booking history", () => withDatabase((database) => {
+test("groups only Vendor splits per supplier while excluding Additional and Transport", () => withDatabase((database) => {
   database.replaceSupplierMasterCache({
     sourceVersion: "VENDOR-BOOKING-TEST",
     supplierTypes: [
@@ -548,11 +548,11 @@ test("groups Vendor and Additional splits per supplier while excluding Transport
   });
 
   const queue = database.listVendorBookingQueue();
-  assert.equal(queue.length, 2);
+  assert.equal(queue.length, 1);
   const activity = queue.find((row) => row.supplierId === "SUP-VENDOR-1");
   assert.equal(activity.serviceCount, 2);
   assert.equal(activity.pendingRateCount, 1);
-  assert.ok(queue.every((row) => row.services.every((service) => service.serviceType !== "TRANSPORT")));
+  assert.ok(queue.every((row) => row.services.every((service) => service.serviceType === "VENDOR")));
 
   const selectedServiceId = activity.services[0].serviceId;
   const preview = database.getVendorBookingPreview({
@@ -624,6 +624,7 @@ test("uses a stable send ledger, preserves pending sync, and builds the shared V
   const intake = database.saveVendorIntakeDraft({
     customerCode: "TEST/SAFE-SEND",
     customerName: "Safe Send Guest",
+    clientTag: "HONEYMOONERS",
     adultPax: 2,
     childPax: 1,
     arrivalDate: "2026-08-01",
@@ -633,7 +634,7 @@ test("uses a stable send ledger, preserves pending sync, and builds the shared V
       dayNumber: 1,
       serviceDate: "2026-08-01",
       dayTitle: "Arrival and activity",
-      startTime: "09:00",
+      startTime: "",
       splits: [{
         serviceType: "VENDOR", activityText: "Cooking Class",
         supplierId: "SUP-EMAIL", vendorName: "Email Supplier",
@@ -649,6 +650,10 @@ test("uses a stable send ledger, preserves pending sync, and builds the shared V
   assert.equal(preview.templateVersion, "STANDARD_V1");
   assert.equal(preview.destinationReady, true);
   assert.match(preview.body, /Safe Send Guest/);
+  assert.equal(
+    preview.subject,
+    "Booking TEST/SAFE-SEND - Safe Send Guest - HONEYMOONERS - Email Supplier",
+  );
   const generated = database.saveVendorBookingPreview({ packageKey: packageItem.packageKey });
   const attempt = database.prepareVendorBookingSendAttempt({
     bookingId: generated.bookingId,
@@ -698,6 +703,28 @@ test("uses a stable send ledger, preserves pending sync, and builds the shared V
   assert.equal(model.dashboard.replied.length, 1);
   assert.equal(model.dashboard.replied[0].replyReviewStatus, "REVIEW_REQUIRED");
   assert.equal(model.workInbox[0].sourceRevisionId, "REV-SAFE-1");
+
+  const resend = database.prepareVendorBookingSendAttempt({
+    bookingId: generated.bookingId,
+    actorEmail: "vendor@example.test",
+    resendOfAttemptId: attempt.sendAttemptId,
+    resendReason: "Original supplier mailbox unavailable",
+    recipients: [{ recipientType: "TO", address: "alternate@example.test" }],
+  });
+  assert.equal(resend.resendOfAttemptId, attempt.sendAttemptId);
+  assert.equal(resend.resendReason, "Original supplier mailbox unavailable");
+  assert.equal(resend.snapshot.recipients[0].address, "alternate@example.test");
+  database.recordVendorSendGmailAccepted(resend.sendAttemptId, {
+    gmailMessageId: "MSG-SAFE-2",
+    gmailThreadId: "THREAD-SAFE-2",
+  });
+  database.recordVendorSendSyncResult(resend.sendAttemptId, {
+    ok: true, officialEvidenceId: "COMM-SAFE-2",
+  });
+  const attempts = database.listVendorSendAttempts(generated.bookingId);
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].gmailThreadId, "THREAD-SAFE-2");
+  assert.equal(database.getVendorBooking(generated.bookingId).communicationStatus, "SENT");
 }));
 
 test("uses dynamic Supplier Types and only exposes contract rates valid on the service date", () => withDatabase((database) => {

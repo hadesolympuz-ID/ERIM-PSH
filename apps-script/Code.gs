@@ -880,6 +880,7 @@ function saveVendorIntake_(request, actor) {
     }
     updateRecord_("TOURS", "customer_code", code, {
       client_name: intake.customerName || tour.client_name || "",
+      client_tag: intake.clientTag || tour.client_tag || "",
       pax_adult: Number(intake.adultPax || 0),
       pax_child: Number(intake.childPax || 0),
       pax_infant: Number(intake.infantPax || 0),
@@ -1064,8 +1065,8 @@ function validateVendorIntakePayload_(intake) {
     }
     dayNumbers[number] = true;
     const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
-    if (!timePattern.test(String(day.startTime || ""))) {
-      throw apiError_("VALIDATION_ERROR", `Day ${number} Start Time is required and must use HH:MM.`);
+    if (day.startTime && !timePattern.test(String(day.startTime))) {
+      throw apiError_("VALIDATION_ERROR", `Day ${number} Start Time must use HH:MM.`);
     }
     if (day.finishTime && !timePattern.test(String(day.finishTime))) {
       throw apiError_("VALIDATION_ERROR", `Day ${number} Finish Time must use HH:MM.`);
@@ -1115,7 +1116,7 @@ function validateVendorSource_(request) {
 
 function ensureVendorSchema_() {
   ensureHeaders_("TOURS", [
-    "pax_adult", "pax_child", "pax_infant",
+    "client_tag", "pax_adult", "pax_child", "pax_infant",
     "arrival_flight", "arrival_sector", "arrival_time",
     "departure_flight", "departure_sector", "departure_time",
   ]);
@@ -1343,6 +1344,7 @@ function recordVendorBookingEvidence_(request, actor) {
   ensureSheetWithHeaders_("COMMUNICATIONS", [
     "communication_id", "booking_id", "tour_id", "customer_code", "supplier_id",
     "communication_type", "channel", "direction", "status", "send_attempt_id",
+    "resend_of_attempt_id", "resend_reason",
     "snapshot_hash", "recipients_json", "subject_snapshot", "body_snapshot",
     "service_ids_json", "source_revision_id", "gmail_thread_id", "gmail_message_id",
     "sent_at", "actor_email", "created_at", "created_by",
@@ -1392,6 +1394,8 @@ function recordVendorBookingEvidence_(request, actor) {
       direction: "OUTBOUND",
       status: "SENT",
       send_attempt_id: sendAttemptId,
+      resend_of_attempt_id: evidence.resendOfAttemptId || "",
+      resend_reason: evidence.resendReason || "",
       snapshot_hash: evidence.snapshotHash || "",
       recipients_json: JSON.stringify(evidence.recipients || []),
       subject_snapshot: evidence.subject || "",

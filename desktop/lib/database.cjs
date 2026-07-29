@@ -224,6 +224,7 @@ class LocalDatabase {
         vendor_draft_id TEXT PRIMARY KEY,
         customer_code TEXT NOT NULL UNIQUE,
         customer_name TEXT NOT NULL DEFAULT '',
+        client_tag TEXT NOT NULL DEFAULT '',
         adult_pax INTEGER NOT NULL DEFAULT 0,
         child_pax INTEGER NOT NULL DEFAULT 0,
         infant_pax INTEGER NOT NULL DEFAULT 0,
@@ -367,6 +368,8 @@ class LocalDatabase {
       CREATE TABLE IF NOT EXISTS local_vendor_send_attempts (
         send_attempt_id TEXT PRIMARY KEY,
         booking_id TEXT NOT NULL,
+        resend_of_attempt_id TEXT NOT NULL DEFAULT '',
+        resend_reason TEXT NOT NULL DEFAULT '',
         snapshot_json TEXT NOT NULL,
         snapshot_hash TEXT NOT NULL,
         actor_email TEXT NOT NULL DEFAULT '',
@@ -536,6 +539,7 @@ class LocalDatabase {
     this.ensureColumn("vendor_intake_drafts", "adult_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "child_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "infant_pax", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("vendor_intake_drafts", "client_tag", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "finish_time", "TEXT NOT NULL DEFAULT ''");
@@ -545,6 +549,8 @@ class LocalDatabase {
     this.ensureColumn("local_vendor_bookings", "reply_review_status", "TEXT NOT NULL DEFAULT 'NONE'");
     this.ensureColumn("local_vendor_bookings", "latest_inbound_message_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("local_vendor_bookings", "latest_inbound_at", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_send_attempts", "resend_of_attempt_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_send_attempts", "resend_reason", "TEXT NOT NULL DEFAULT ''");
   }
 
   migrateVendorServiceSplits() {
@@ -1852,6 +1858,7 @@ class LocalDatabase {
       vendorDraftId: draft.vendor_draft_id,
       customerCode: draft.customer_code,
       customerName: draft.customer_name,
+      clientTag: draft.client_tag || "",
       adultPax: Number(draft.adult_pax || 0),
       childPax: Number(draft.child_pax || 0),
       infantPax: Number(draft.infant_pax || 0),
@@ -2022,14 +2029,16 @@ class LocalDatabase {
     this.db.transaction(() => {
       this.db.prepare(`
         INSERT INTO vendor_intake_drafts (
-          vendor_draft_id, customer_code, customer_name, adult_pax, child_pax, infant_pax, tour_id,
+          vendor_draft_id, customer_code, customer_name, client_tag,
+          adult_pax, child_pax, infant_pax, tour_id,
           source_publication_id, source_record_version, source_revision_id,
           itinerary_drive_file_id, itinerary_drive_file_name, itinerary_drive_file_url,
           document_html, arrival_date, arrival_flight, arrival_sector, arrival_time,
           departure_date, departure_flight, departure_sector, departure_time,
           extraction_status, local_status, owner_employee_id, created_at, updated_at
         ) VALUES (
-          @vendorDraftId, @customerCode, @customerName, @adultPax, @childPax, @infantPax, @tourId,
+          @vendorDraftId, @customerCode, @customerName, @clientTag,
+          @adultPax, @childPax, @infantPax, @tourId,
           @sourcePublicationId, @sourceRecordVersion, @sourceRevisionId,
           @driveFileId, @driveFileName, @driveFileUrl,
           @documentHtml, @arrivalDate, @arrivalFlight, @arrivalSector, @arrivalTime,
@@ -2037,7 +2046,8 @@ class LocalDatabase {
           @extractionStatus, @localStatus, @ownerEmployeeId, @createdAt, @updatedAt
         )
         ON CONFLICT(customer_code) DO UPDATE SET
-          customer_name=excluded.customer_name, adult_pax=excluded.adult_pax,
+          customer_name=excluded.customer_name, client_tag=excluded.client_tag,
+          adult_pax=excluded.adult_pax,
           child_pax=excluded.child_pax, infant_pax=excluded.infant_pax, tour_id=excluded.tour_id,
           source_publication_id=excluded.source_publication_id,
           source_record_version=excluded.source_record_version,
@@ -2056,6 +2066,7 @@ class LocalDatabase {
         vendorDraftId: draftId,
         customerCode: code,
         customerName: String(input.customerName || "").trim(),
+        clientTag: String(input.clientTag || "").trim().toUpperCase(),
         adultPax: pax.adultPax,
         childPax: pax.childPax,
         infantPax: pax.infantPax,
@@ -2177,7 +2188,7 @@ class LocalDatabase {
       for (const day of intake?.days || []) {
         for (const split of day.splits || []) {
           const type = normalizeVendorSplitType(split.serviceType);
-          if (!["VENDOR", "ADDITIONAL_SERVICE"].includes(type)) continue;
+          if (type !== "VENDOR") continue;
           const matchedSupplier = supplierById.get(String(split.supplierId || ""))
             || supplierByName.get(String(split.vendorName || "").trim().toUpperCase())
             || null;
@@ -2190,6 +2201,7 @@ class LocalDatabase {
               packageKey,
               customerCode: intake.customerCode,
               customerName: intake.customerName,
+              clientTag: intake.clientTag || "",
               tourId: intake.tourId || "",
               sourceRevisionId: intake.sourceRevisionId || "",
               arrivalDate: intake.arrivalDate || "",
@@ -2333,6 +2345,7 @@ class LocalDatabase {
     const values = {
       customer_code: item.customerCode,
       customer_name: item.customerName,
+      client_tag: item.clientTag,
       supplier_name: item.supplierName,
       arrival_date: item.arrivalDate,
       departure_date: item.departureDate,
@@ -2348,8 +2361,12 @@ class LocalDatabase {
       `- Day ${service.dayNumber} | ${service.serviceDate || "date pending"} | ${service.productName}`
       + `${service.quantity && Number(service.quantity) !== 1 ? ` | qty ${service.quantity}` : ""}`
     ).join("\n");
-    const subject = applyTemplate(sop.subjectTemplate)
-      || `${label} ${item.customerCode} - ${item.customerName}`;
+    const subject = [
+      `${label} ${item.customerCode}`,
+      item.customerName,
+      item.clientTag,
+      item.supplierName,
+    ].map((value) => String(value || "").trim()).filter(Boolean).join(" - ");
     const defaultBody = [
       `Dear ${item.supplierName} Team,`,
       "",
@@ -2369,10 +2386,10 @@ class LocalDatabase {
     ].join("\n");
     const destinationReady = channel === "EMAIL"
       ? selectedRecipients.some((row) => row.recipientType === "TO" && row.address)
-      : channel === "WHATSAPP"
-        ? selectedRecipients.some((row) => row.address)
+        : channel === "WHATSAPP"
+          ? selectedRecipients.some((row) => row.address)
         : channel === "PORTAL"
-          ? Boolean(sop.portalUrl)
+          ? /^https:\/\//i.test(String(sop.portalUrl || ""))
           : selectedRecipients.some((row) => row.address) || channel === "OTHERS";
     const selectedPendingRateCount = selectedServices.filter((service) =>
       service.rateStatus !== "RATE_READY"
@@ -2569,12 +2586,25 @@ class LocalDatabase {
     const booking = this.getVendorBooking(bookingId);
     if (!booking) throw new Error("Generated booking was not found.");
     if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
-    if (booking.communicationStatus !== "GENERATED") {
+    const resendOfAttemptId = String(input.resendOfAttemptId || "").trim();
+    const resendReason = String(input.resendReason || "").trim();
+    const isResend = Boolean(resendOfAttemptId);
+    if (isResend && !resendReason) {
+      throw new Error("Intentional resend requires a reason.");
+    }
+    const originalAttempt = isResend ? this.getVendorSendAttempt(resendOfAttemptId) : null;
+    if (isResend && (!originalAttempt || originalAttempt.bookingId !== bookingId)) {
+      throw new Error("Original send attempt was not found for this booking.");
+    }
+    if (!isResend && booking.communicationStatus !== "GENERATED") {
       throw new Error(
         booking.communicationStatus === "SENT"
           ? "This booking is already sent. Prepare an Amendment instead."
           : `Email cannot be sent while communication status is ${booking.communicationStatus}.`,
       );
+    }
+    if (isResend && !["SENT", "SENT_PENDING_SYNC"].includes(booking.communicationStatus)) {
+      throw new Error(`Intentional resend is not available while communication status is ${booking.communicationStatus}.`);
     }
     const active = this.db.prepare(`
       SELECT * FROM local_vendor_send_attempts
@@ -2600,12 +2630,14 @@ class LocalDatabase {
       supplierName: booking.supplierName,
       actionType: booking.actionType,
       channel: booking.channel,
-      recipients: booking.recipients,
+      recipients: Array.isArray(input.recipients) ? input.recipients : booking.recipients,
       subject: booking.subject,
       body: booking.body,
       services: booking.services,
       rateStatus: booking.rateStatus,
       actorEmail: String(input.actorEmail || "").trim().toLowerCase(),
+      resendOfAttemptId,
+      resendReason,
       preparedAt: now,
     };
     const snapshotJson = JSON.stringify(snapshot);
@@ -2613,11 +2645,12 @@ class LocalDatabase {
     this.db.transaction(() => {
       this.db.prepare(`
         INSERT INTO local_vendor_send_attempts (
-          send_attempt_id, booking_id, snapshot_json, snapshot_hash, actor_email,
+          send_attempt_id, booking_id, resend_of_attempt_id, resend_reason,
+          snapshot_json, snapshot_hash, actor_email,
           status, prepared_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'PREPARED', ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?)
       `).run(
-        sendAttemptId, bookingId, snapshotJson, snapshotHash,
+        sendAttemptId, bookingId, resendOfAttemptId, resendReason, snapshotJson, snapshotHash,
         snapshot.actorEmail, now, now,
       );
       this.db.prepare(`
@@ -2641,6 +2674,8 @@ class LocalDatabase {
     return {
       sendAttemptId: row.send_attempt_id,
       bookingId: row.booking_id,
+      resendOfAttemptId: row.resend_of_attempt_id || "",
+      resendReason: row.resend_reason || "",
       snapshot: JSON.parse(row.snapshot_json || "{}"),
       snapshotHash: row.snapshot_hash,
       actorEmail: row.actor_email,
@@ -2656,6 +2691,15 @@ class LocalDatabase {
       syncedAt: row.synced_at || "",
       updatedAt: row.updated_at,
     };
+  }
+
+  listVendorSendAttempts(bookingId) {
+    return this.db.prepare(`
+      SELECT send_attempt_id FROM local_vendor_send_attempts
+      WHERE booking_id = ? ORDER BY prepared_at DESC
+    `).all(String(bookingId || "")).map((row) =>
+      this.getVendorSendAttempt(row.send_attempt_id)
+    );
   }
 
   recordVendorSendOutcomeUnknown(sendAttemptId, error) {
@@ -2851,7 +2895,7 @@ class LocalDatabase {
     });
     const notSplit = intakes.filter((intake) => {
       const owned = (intake.days || []).flatMap((day) => day.splits || [])
-        .filter((split) => ["VENDOR", "ADDITIONAL_SERVICE"].includes(split.serviceType));
+        .filter((split) => split.serviceType === "VENDOR");
       return owned.length === 0 && intake.localStatus !== "VENDOR_COMPLETE";
     }).map((intake) => customerItem(intake, { status: "NOT_SPLIT" }));
     const byCustomer = new Map();

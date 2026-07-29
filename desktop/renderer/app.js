@@ -18,8 +18,14 @@ const state = {
   vendorBookingQueue: [],
   vendorBookings: [],
   vendorBookingPreview: null,
+  vendorSendAttempts: [],
   selectedVendorPackageKey: "",
   selectedVendorServiceIds: new Set(),
+  selectedVendorInspectionServiceId: "",
+  vendorPackageChannels: new Map(),
+  vendorCommunicationBatch: [],
+  vendorCommunicationIndex: -1,
+  vendorCommunicationBaseline: "",
   vendorExpandedClients: new Set(),
   vendorExpandedDays: new Set(),
   vendorTreeInitialized: false,
@@ -526,12 +532,12 @@ function renderVendorBookingQueue() {
                 ${eligible.length && selected.length === eligible.length ? "checked" : ""}
                 ${eligible.length ? "" : "disabled"} />
               <span class="vendor-tree-branch">├─</span>
-              <span><strong>Day ${day.dayNumber} · ${escapeHtml(day.serviceDate || "date pending")}</strong>
-                <small>${escapeHtml(day.dayTitle || "No Day Wise header")} · ${selected.length}/${eligible.length} selected</small></span>
+              <span><strong>Day ${day.dayNumber} | ${escapeHtml(day.serviceDate || "Date pending")}</strong>
+                <small><b>Day Wise Header:</b> ${escapeHtml(day.dayTitle || "No Day Wise Header")} · ${selected.length}/${eligible.length} selected</small></span>
             </summary>
             <div class="vendor-tree-services">
               ${services.map((service, index) => `
-                <div class="vendor-tree-service${service.package.packageKey === state.selectedVendorPackageKey ? " active" : ""}"
+                <div class="vendor-tree-service${service.serviceId === state.selectedVendorInspectionServiceId ? " active" : ""}"
                   data-vendor-tree-service="${escapeHtml(service.serviceId)}">
                   <input type="checkbox" data-vendor-tree-service-select="${escapeHtml(service.serviceId)}"
                     ${state.selectedVendorServiceIds.has(service.serviceId) ? "checked" : ""}
@@ -540,8 +546,8 @@ function renderVendorBookingQueue() {
                   <button type="button" class="vendor-tree-service-open"
                     data-vendor-tree-open-package="${escapeHtml(service.package.packageKey)}"
                     data-vendor-tree-open-service="${escapeHtml(service.serviceId)}">
-                    <strong>${escapeHtml(service.package.supplierName)} — ${escapeHtml(service.productName || service.activityText)}</strong>
-                    <small>${escapeHtml(service.workflowStatus.replaceAll("_", " "))} · ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · ${escapeHtml(service.supplierResult || "PENDING")}</small>
+                    <strong>${escapeHtml(service.package.supplierName)} | ${escapeHtml(service.productName || service.activityText)}</strong>
+                    <small>Booking: ${escapeHtml(service.workflowStatus.replaceAll("_", " "))} · Rate: ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · Supplier: ${escapeHtml(service.supplierResult || "PENDING")}</small>
                   </button>
                   ${service.gmailThreadId
                     ? `<button type="button" class="vendor-tree-link" data-open-gmail-thread="${escapeHtml(service.gmailThreadId)}">Gmail</button>`
@@ -574,7 +580,7 @@ function renderVendorBookingQueue() {
     `;
   }).filter(Boolean);
   list.innerHTML = markup.length ? markup.join("")
-    : `<div class="empty-notifications">No Vendor or Additional Service split matches this filter.</div>`;
+    : `<div class="empty-notifications">No Vendor split matches this filter.</div>`;
   list.querySelectorAll("[data-vendor-tree-client-select], [data-vendor-tree-day-select]").forEach((checkbox) => {
     const children = [...checkbox.closest("details")
       .querySelectorAll("[data-vendor-tree-service-select]:not(:disabled)")];
@@ -584,6 +590,10 @@ function renderVendorBookingQueue() {
   const selectedCount = state.selectedVendorServiceIds.size;
   $("#vendor-tree-selected-count").textContent = `${selectedCount} selected`;
   $("#vendor-tree-prepare").disabled = selectedCount === 0;
+  const packageCount = selectedVendorServicesByPackage().size;
+  $("#vendor-tree-prepare").textContent = selectedCount
+    ? `Generate Booking · ${packageCount} package${packageCount === 1 ? "" : "s"}`
+    : "Generate Booking";
   const visibleEligible = [...list.querySelectorAll("[data-vendor-tree-service-select]:not(:disabled)")];
   $("#vendor-tree-select-all").checked = Boolean(visibleEligible.length)
     && visibleEligible.every((node) => node.checked);
@@ -606,9 +616,58 @@ function selectedVendorServicesByPackage() {
 async function prepareSelectedVendorServices() {
   const groups = selectedVendorServicesByPackage();
   if (!groups.size) return toast("Choose at least one eligible Micro Split service.", true);
-  const [packageKey, serviceIds] = groups.entries().next().value;
-  await openVendorBookingPackage(packageKey, { serviceIds });
-  toast(`${state.selectedVendorServiceIds.size} service(s) form ${groups.size} supplier package(s). Review each package before Generate or Send.`);
+  const button = $("#vendor-tree-prepare");
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = `Generating ${groups.size} package(s)...`;
+  try {
+    const generatedBatch = [];
+    for (const [packageKey, serviceIds] of groups.entries()) {
+      const channel = state.vendorPackageChannels.get(packageKey) || "";
+      const preview = await window.erim.vendor.getBookingPreview({
+        packageKey, serviceIds, actionType: "NEW", channel,
+      });
+      const booking = await window.erim.vendor.generateBooking({
+        packageKey,
+        serviceIds,
+        bookingId: preview.latestBooking?.bookingId || "",
+        actionType: "NEW",
+        channel: preview.channel,
+        recipients: preview.recipients,
+        subject: preview.subject,
+        body: preview.body,
+      });
+      generatedBatch.push({
+        packageKey,
+        serviceIds,
+        bookingId: booking.bookingId,
+        channel: booking.channel,
+        supplierName: booking.supplierName,
+        customerCode: booking.customerCode,
+      });
+    }
+    [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.listBookingQueue(),
+      window.erim.vendor.listBookings(),
+    ]);
+    const channelOrder = { EMAIL: 0, WHATSAPP: 1, PORTAL: 2, OTHERS: 3, OTHER: 3 };
+    state.vendorCommunicationBatch = generatedBatch.sort((left, right) =>
+      (channelOrder[left.channel] ?? 9) - (channelOrder[right.channel] ?? 9)
+      || String(left.supplierName).localeCompare(String(right.supplierName))
+      || String(left.customerCode).localeCompare(String(right.customerCode))
+    );
+    state.vendorCommunicationIndex = 0;
+    renderVendorBookingQueue();
+    $("#vendor-communication-dialog").showModal();
+    await openVendorCommunicationPackage(0);
+    toast(`${state.selectedVendorServiceIds.size} service(s) generated into ${groups.size} supplier package(s). Nothing was sent.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+    renderVendorBookingQueue();
+  }
 }
 
 function recipientLines(recipients = []) {
@@ -627,6 +686,9 @@ function parseRecipientLines(value) {
 
 async function openVendorBookingPackage(packageKey, options = {}) {
   state.selectedVendorPackageKey = packageKey;
+  if (options.serviceIds?.length === 1) {
+    state.selectedVendorInspectionServiceId = options.serviceIds[0];
+  }
   try {
     const serviceIds = Array.isArray(options.serviceIds)
       ? options.serviceIds
@@ -640,11 +702,192 @@ async function openVendorBookingPackage(packageKey, options = {}) {
       cancellationReason: options.cancellationReason || "",
     });
     state.vendorBookingPreview = preview;
+    state.vendorSendAttempts = preview.latestBooking?.bookingId
+      ? await window.erim.vendor.listSendAttempts(preview.latestBooking.bookingId)
+      : [];
+    state.vendorPackageChannels.set(packageKey, preview.channel);
     renderVendorBookingQueue();
-    renderVendorBookingPreview();
+    renderVendorPreparationDetails();
+    if ($("#vendor-communication-dialog")?.open) renderVendorBookingPreview();
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+function supplierFocusButton(preview, service, section, label) {
+  return `<button class="button ghost small" type="button"
+    data-open-supplier-readiness="${escapeHtml(preview.supplierId || "")}"
+    data-open-supplier-name="${escapeHtml(preview.supplierName || "")}"
+    data-open-supplier-section="${escapeHtml(section)}"
+    data-open-supplier-product="${escapeHtml(service.productId || "")}"
+    data-open-supplier-service="${escapeHtml(service.serviceId || "")}"
+    data-open-supplier-date="${escapeHtml(service.serviceDate || "")}"
+    data-open-supplier-package="${escapeHtml(preview.packageKey || "")}">${escapeHtml(label)}</button>`;
+}
+
+function renderVendorPreparationDetails() {
+  const preview = state.vendorBookingPreview;
+  const supplierPanel = $("#vendor-prep-supplier-detail");
+  const productPanel = $("#vendor-prep-product-detail");
+  if (!preview) {
+    supplierPanel.innerHTML = `<div class="empty-notifications">Choose one Daywise service to inspect its Supplier Master detail.</div>`;
+    productPanel.innerHTML = `<div class="empty-notifications">Choose one Daywise service to inspect its Product and Rate detail.</div>`;
+    return;
+  }
+  const service = preview.services.find((row) =>
+    row.serviceId === state.selectedVendorInspectionServiceId
+  ) || preview.services[0] || {};
+  const sop = preview.sop || {};
+  const recipients = preview.recipients || [];
+  supplierPanel.innerHTML = `
+    <article class="vendor-prep-card white">
+      <span>Supplier</span><strong>${escapeHtml(preview.supplierName)}</strong>
+      <small>${escapeHtml(preview.supplierId || "Not linked")} · ${preview.masterLinked ? "ACTIVE MASTER" : "MASTER LINK REQUIRED"}</small>
+    </article>
+    <article class="vendor-prep-card">
+      <span>Booking SOP</span>
+      <strong>${escapeHtml(sop.leadTime || "No lead time")} · ${escapeHtml(sop.cutoffTime || "No cut-off")}</strong>
+      <small>${escapeHtml(sop.confirmationProcedure || "No confirmation procedure recorded.")}</small>
+    </article>
+    <article class="vendor-prep-card white">
+      <span>One delivery channel</span>
+      <div class="vendor-prep-channel-list">
+        ${preview.availableChannels.map((channel) => `<label>
+          <input type="radio" name="vendor-prep-channel" data-vendor-prep-channel="${escapeHtml(channel)}"
+            ${channel === preview.channel ? "checked" : ""} />
+          ${escapeHtml(channel)}
+        </label>`).join("")}
+      </div>
+    </article>
+    <article class="vendor-prep-card white">
+      <span>Destination</span>
+      <strong>${recipients.length ? escapeHtml(recipientLines(recipients).replaceAll("\n", " · ")) : "No destination"}</strong>
+      <small>${sop.portalUrl ? `Portal: ${escapeHtml(sop.portalUrl)}` : "No portal URL recorded."}</small>
+    </article>
+    ${preview.readinessNotices?.length ? `<article class="vendor-prep-card attention">
+      <span>Readiness</span><strong>${preview.readinessNotices.map(escapeHtml).join("<br>")}</strong>
+    </article>` : ""}
+    <div class="vendor-prep-actions">
+      ${supplierFocusButton(preview, service, !preview.masterLinked ? "PROFILE" : "RECIPIENTS", "Open Supplier / Recipients")}
+      ${supplierFocusButton(preview, service, "SOP", "Open Booking SOP")}
+      ${/^https:\/\//i.test(sop.portalUrl || "") ? `<button class="button ghost small" type="button" data-open-vendor-portal="${escapeHtml(sop.portalUrl)}">Open Portal</button>` : ""}
+    </div>
+  `;
+  productPanel.innerHTML = `
+    <article class="vendor-prep-card white">
+      <span>Daywise source</span>
+      <strong>Day ${Number(service.dayNumber || 0)} | ${escapeHtml(service.serviceDate || "Date pending")}</strong>
+      <small>Day Wise Header: ${escapeHtml(service.dayTitle || "No Day Wise Header")}</small>
+    </article>
+    <article class="vendor-prep-card">
+      <span>Product / Service</span>
+      <strong>${escapeHtml(service.productName || service.activityText || "Unnamed service")}</strong>
+      <small>Product ID: ${escapeHtml(service.productId || "Not linked")} · Service ID: ${escapeHtml(service.serviceId || "")}</small>
+    </article>
+    <article class="vendor-prep-card ${service.rateStatus === "RATE_READY" ? "" : "attention"}">
+      <span>Contract & Rate</span>
+      <strong>${escapeHtml(service.rateStatus || "PENDING_RATE")} · ${escapeHtml(service.priceBasis || "PER_SERVICE")}</strong>
+      <small>${escapeHtml(vendorServiceRateLabel(service))}<br>
+        Contract: ${escapeHtml(service.contractId || "Not linked")} · Valid to: ${escapeHtml(service.rateValidTo || "Not recorded")}</small>
+    </article>
+    <article class="vendor-prep-card white">
+      <span>Rate source</span>
+      <strong>${escapeHtml(service.priceSource || "NONE")}</strong>
+      <small>${escapeHtml(service.manualPriceReason || "No manual reason")} · ${escapeHtml(service.manualRateSource || "No source")} · ${escapeHtml(service.manualEvidenceRef || "No evidence")}</small>
+    </article>
+    <div class="vendor-prep-actions">
+      ${supplierFocusButton(preview, service, service.productId ? "PRODUCT" : "PRODUCT", "Open Product")}
+      ${supplierFocusButton(preview, service, "RATE", service.rateStatus === "RATE_READY" ? "Open Contract / Rate" : "Isi harga")}
+      ${service.rateStatus !== "RATE_READY" ? `<button class="button ghost small" type="button" data-skip-vendor-rate="${escapeHtml(service.serviceId || "")}">Skip untuk sekarang</button>` : ""}
+    </div>
+  `;
+}
+
+function vendorCommunicationBooking(entry) {
+  return state.vendorBookings.find((booking) => booking.bookingId === entry?.bookingId)
+    || state.vendorBookings.find((booking) => booking.packageKey === entry?.packageKey)
+    || null;
+}
+
+function renderVendorCommunicationQueue() {
+  const list = $("#vendor-communication-queue-list");
+  const batch = state.vendorCommunicationBatch || [];
+  const counts = { sent: 0, ready: 0, pending: 0, attention: 0 };
+  list.innerHTML = batch.length ? batch.map((entry, index) => {
+    const booking = vendorCommunicationBooking(entry);
+    const status = booking?.communicationStatus || "NOT_GENERATED";
+    if (status === "SENT") counts.sent += 1;
+    else if (status === "GENERATED") counts.ready += 1;
+    else if (["SENT_PENDING_SYNC", "SEND_OUTCOME_UNKNOWN"].includes(status)) counts.attention += 1;
+    else counts.pending += 1;
+    return `<button class="vendor-communication-queue-item${index === state.vendorCommunicationIndex ? " active" : ""}"
+      type="button" data-vendor-communication-index="${index}">
+      <span>${escapeHtml(entry.channel)} · ${index + 1} of ${batch.length}</span>
+      <strong>${escapeHtml(entry.supplierName)} · ${escapeHtml(entry.customerCode)}</strong>
+      <small>${entry.serviceIds.length} service(s) · ${escapeHtml(status.replaceAll("_", " "))}</small>
+    </button>`;
+  }).join("") : `<div class="empty-notifications">No generated package in this batch.</div>`;
+  $("#vendor-communication-progress").textContent =
+    `${batch.length} Packages | ${counts.sent} Sent | ${counts.ready} Ready | ${counts.pending} Not Generated | ${counts.attention} Attention`;
+  $("#vendor-communication-position").textContent = batch.length
+    ? `Package ${state.vendorCommunicationIndex + 1} of ${batch.length}` : "Package 0 of 0";
+  $("#vendor-communication-previous").disabled = state.vendorCommunicationIndex <= 0;
+  $("#vendor-communication-next").disabled = !batch.length;
+}
+
+async function openVendorCommunicationPackage(index) {
+  const batch = state.vendorCommunicationBatch || [];
+  if (!batch.length) return;
+  state.vendorCommunicationIndex = Math.max(0, Math.min(index, batch.length - 1));
+  const entry = batch[state.vendorCommunicationIndex];
+  await openVendorBookingPackage(entry.packageKey, {
+    serviceIds: entry.serviceIds,
+    actionType: vendorCommunicationBooking(entry)?.actionType || "NEW",
+    channel: entry.channel,
+  });
+  renderVendorCommunicationQueue();
+  renderVendorBookingPreview();
+}
+
+function vendorCommunicationCurrentValues() {
+  return JSON.stringify({
+    actionType: $("#vendor-booking-action").value,
+    recipients: $("#vendor-booking-recipients").value,
+    subject: $("#vendor-booking-subject").value,
+    body: $("#vendor-booking-body").value,
+  });
+}
+
+async function confirmVendorCommunicationNavigation() {
+  if (vendorCommunicationCurrentValues() === state.vendorCommunicationBaseline) return true;
+  const save = window.confirm(
+    "Generated message has unsaved changes.\n\nOK: Save & Next\nCancel: choose whether to discard or stay."
+  );
+  if (save) return Boolean(await generateVendorBooking());
+  return window.confirm(
+    "Discard the unsaved changes and continue?\n\nOK: Discard & Next\nCancel: Stay on this package."
+  );
+}
+
+async function navigateVendorCommunication(direction) {
+  const batch = state.vendorCommunicationBatch || [];
+  if (!batch.length) return;
+  if (!await confirmVendorCommunicationNavigation()) return;
+  if (direction === "PREVIOUS") {
+    return openVendorCommunicationPackage(Math.max(0, state.vendorCommunicationIndex - 1));
+  }
+  for (let offset = 1; offset <= batch.length; offset += 1) {
+    const index = (state.vendorCommunicationIndex + offset) % batch.length;
+    const status = vendorCommunicationBooking(batch[index])?.communicationStatus || "NOT_GENERATED";
+    if (status !== "SENT") return openVendorCommunicationPackage(index);
+  }
+  toast("All packages in this batch are already sent.");
+}
+
+async function openVendorCommunicationFromQueue(index) {
+  if (index === state.vendorCommunicationIndex) return;
+  if (!await confirmVendorCommunicationNavigation()) return;
+  return openVendorCommunicationPackage(index);
 }
 
 function renderVendorBookingPreview() {
@@ -658,9 +901,14 @@ function renderVendorBookingPreview() {
   $("#vendor-booking-channel").innerHTML = preview.availableChannels.map((channel) =>
     `<option value="${escapeHtml(channel)}"${channel === preview.channel ? " selected" : ""}>${escapeHtml(channel)}</option>`
   ).join("");
-  $("#vendor-booking-recipients").value = recipientLines(preview.recipients);
-  $("#vendor-booking-subject").value = preview.subject;
-  $("#vendor-booking-body").value = preview.body;
+  const storedSnapshot = preview.latestBooking?.actionType === preview.actionType
+    && preview.latestBooking?.channel === preview.channel ? preview.latestBooking : null;
+  const effectiveRecipients = storedSnapshot?.recipients || preview.recipients;
+  const effectiveSubject = storedSnapshot?.subject || preview.subject;
+  const effectiveBody = storedSnapshot?.body || preview.body;
+  $("#vendor-booking-recipients").value = recipientLines(effectiveRecipients);
+  $("#vendor-booking-subject").value = effectiveSubject;
+  $("#vendor-booking-body").value = effectiveBody;
   $("#vendor-booking-service-summary").innerHTML = `
     <div><strong>${preview.serviceCount} service</strong><small>${preview.adultPax} adult · ${preview.childPax} child · ${preview.infantPax} infant</small></div>
     ${preview.services.map((service) => `
@@ -699,14 +947,42 @@ function renderVendorBookingPreview() {
       data-open-supplier-date="${escapeHtml(focusService.serviceDate || "")}"
       data-open-supplier-package="${escapeHtml(preview.packageKey || "")}">Open exact Supplier Master</button>`;
   const latest = preview.latestBooking || {};
+  const emailRecipients = (effectiveRecipients || []).filter((row) =>
+    ["TO", "CC", "BCC"].includes(String(row.recipientType || "").toUpperCase())
+  );
+  const attemptHistory = (state.vendorSendAttempts || []).map((attempt) => `
+    <article class="vendor-final-message">
+      <strong>${attempt.resendOfAttemptId ? "Resend" : "Original send"} · ${escapeHtml(attempt.status.replaceAll("_", " "))}</strong>
+      <small>${escapeHtml(attempt.preparedAt || "")}${attempt.resendReason ? ` · ${escapeHtml(attempt.resendReason)}` : ""}</small>
+      ${attempt.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(attempt.gmailThreadId)}">Open Gmail thread</button>` : ""}
+    </article>
+  `).join("");
+  const whatsappNumber = (preview.recipients || []).find((row) =>
+    String(row.recipientType || "").toUpperCase() === "WHATSAPP"
+  )?.address || "";
+  const channelAction = preview.channel === "PORTAL" && /^https:\/\//i.test(sop.portalUrl || "")
+    ? `<button class="button primary" type="button" data-open-vendor-portal="${escapeHtml(sop.portalUrl)}">Open supplier portal</button>`
+    : preview.channel === "WHATSAPP" && whatsappNumber
+      ? `<button class="button primary" type="button" data-open-vendor-portal="https://wa.me/${escapeHtml(String(whatsappNumber).replace(/\D/g, ""))}">Open WhatsApp</button>`
+      : "";
   $("#vendor-email-context-content").innerHTML = `
+    ${preview.channel === "EMAIL" ? `<article class="vendor-final-message">
+      <strong>Gmail sender: ${escapeHtml(state.auth.email || "Google account not connected")}</strong>
+      <small>${emailRecipients.length
+        ? emailRecipients.map((row) => `${escapeHtml(row.recipientType)}: ${escapeHtml(row.address)}`).join("<br>")
+        : "No Email recipient is ready."}</small>
+    </article>` : ""}
     ${latest.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(latest.gmailThreadId)}">Open stored Gmail thread</button>`
       : `<div class="callout">No stored Gmail thread yet. Generating does not send or create a thread.</div>`}
     <article class="vendor-final-message">
-      <strong id="vendor-final-message-subject">${escapeHtml(preview.subject)}</strong>
+      <strong id="vendor-final-message-subject">${escapeHtml(effectiveSubject)}</strong>
       <small>Template: ${preview.templateVersion || "STANDARD_V1"} · ${escapeHtml(preview.channel)}</small>
-      <pre id="vendor-final-message-body">${escapeHtml(preview.body)}</pre>
+      <pre id="vendor-final-message-body">${escapeHtml(effectiveBody)}</pre>
     </article>
+    ${attemptHistory}
+    ${channelAction}
+    ${preview.channel === "EMAIL" && latest.communicationStatus === "SENT"
+      ? `<button id="open-vendor-resend" class="button danger" type="button">Kirim ulang / Ganti penerima</button>` : ""}
   `;
   const generated = preview.latestBooking?.communicationStatus === "GENERATED";
   $("#vendor-booking-send-panel").hidden = !generated || preview.channel === "EMAIL";
@@ -714,8 +990,17 @@ function renderVendorBookingPreview() {
   $("#vendor-booking-send-note").textContent = preview.channel === "EMAIL"
     ? generated
       ? "Generated snapshot is ready. Send uses the connected employee Gmail and requires one final confirmation."
-      : "Generate first; email sending will then require explicit final confirmation."
+      : latest.communicationStatus === "SENT"
+        ? "This package is sent. Open its Gmail thread or use the controlled resend action."
+        : "Generate first; email sending will then require explicit final confirmation."
     : "Generate first, complete the external action, then record its reference/evidence.";
+  state.vendorCommunicationBaseline = JSON.stringify({
+    actionType: $("#vendor-booking-action").value,
+    recipients: $("#vendor-booking-recipients").value,
+    subject: $("#vendor-booking-subject").value,
+    body: $("#vendor-booking-body").value,
+  });
+  renderVendorCommunicationQueue();
 }
 
 async function generateVendorBooking() {
@@ -751,8 +1036,10 @@ async function generateVendorBooking() {
     });
     $("#vendor-booking-send-panel").hidden = booking.channel === "EMAIL";
     toast(`${booking.actionType} booking generated for ${booking.supplierName}. Nothing was sent yet.`);
+    return booking;
   } catch (error) {
     toast(error.message, true);
+    return null;
   } finally {
     button.disabled = false;
   }
@@ -803,7 +1090,69 @@ async function sendVendorBookingEmail() {
     toast(error.message, true);
   } finally {
     button.disabled = false;
-    button.textContent = "Send email now";
+    button.textContent = "Send via Gmail";
+  }
+}
+
+function openVendorResendDialog() {
+  const booking = state.vendorBookingPreview?.latestBooking;
+  const originalAttempt = (state.vendorSendAttempts || []).find((attempt) =>
+    ["SYNCED", "SENT_PENDING_SYNC", "GMAIL_ACCEPTED"].includes(attempt.status)
+  );
+  if (!booking?.bookingId || !originalAttempt?.sendAttemptId) {
+    return toast("A proven original Gmail attempt is required before resend.", true);
+  }
+  const form = $("#vendor-resend-form");
+  form.dataset.bookingId = booking.bookingId;
+  form.dataset.originalAttemptId = originalAttempt.sendAttemptId;
+  $("#vendor-resend-notice").innerHTML = `
+    <strong>This booking was already sent.</strong>
+    <p>Sent ${escapeHtml(originalAttempt.gmailAcceptedAt || originalAttempt.preparedAt)}
+      by ${escapeHtml(originalAttempt.actorEmail || "connected Gmail")}. Sending again may deliver the booking more than once.</p>
+    <p><strong>Subject:</strong> ${escapeHtml(booking.subject)}</p>
+  `;
+  const oldRecipients = recipientLines(originalAttempt.snapshot?.recipients || booking.recipients);
+  $("#vendor-resend-old-recipients").value = oldRecipients;
+  $("#vendor-resend-new-recipients").value = oldRecipients;
+  $("#vendor-resend-reason").value = "";
+  $("#vendor-resend-dialog").showModal();
+}
+
+async function submitVendorResend(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const recipients = parseRecipientLines($("#vendor-resend-new-recipients").value);
+  const reason = $("#vendor-resend-reason").value.trim();
+  if (!recipients.some((row) => row.recipientType === "TO")) {
+    return toast("Resend requires at least one TO recipient.", true);
+  }
+  if (!reason) return toast("Resend reason is required.", true);
+  const confirmed = window.confirm(
+    `Continue with intentional resend?\n\nNew TO: ${recipients.filter((row) => row.recipientType === "TO").map((row) => row.address).join(", ")}\nReason: ${reason}\n\nThe original email remains in delivery history.`
+  );
+  if (!confirmed) return;
+  const button = $("#confirm-vendor-resend");
+  button.disabled = true;
+  button.textContent = "Sending...";
+  try {
+    const result = await window.erim.vendor.sendBookingEmail({
+      bookingId: form.dataset.bookingId,
+      resendOfAttemptId: form.dataset.originalAttemptId,
+      resendReason: reason,
+      recipients,
+    });
+    $("#vendor-resend-dialog").close();
+    await refresh();
+    const entry = state.vendorCommunicationBatch[state.vendorCommunicationIndex];
+    if (entry) await openVendorCommunicationPackage(state.vendorCommunicationIndex);
+    toast(result.pendingSync
+      ? "Intentional resend was accepted by Gmail; official evidence sync is pending."
+      : "Intentional resend sent once and linked to the original delivery.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Continue";
   }
 }
 
@@ -3088,8 +3437,8 @@ function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
         </div>
         <div class="vendor-day-times">
           <label class="vendor-day-time">
-            <span>Start time *</span>
-            <input data-vendor-day-field="startTime" type="time" value="${escapeHtml(day.startTime || "")}" required />
+            <span>Start time</span>
+            <input data-vendor-day-field="startTime" type="time" value="${escapeHtml(day.startTime || "")}" />
           </label>
           <label class="vendor-day-time">
             <span>Finish time</span>
@@ -3123,11 +3472,6 @@ function openVendorSplitDialog(card) {
   const dayTitle = card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim();
   const startTime = card.querySelector('[data-vendor-day-field="startTime"]').value;
   const finishTime = card.querySelector('[data-vendor-day-field="finishTime"]').value;
-  if (!startTime) {
-    const input = card.querySelector('[data-vendor-day-field="startTime"]');
-    input.focus();
-    return toast(`Day ${dayNumber} Start Time is required before split.`, true);
-  }
   const daywiseText = card.querySelector('[data-vendor-day-field="daywiseText"]').value.trim();
   const stored = collectVendorSplitRows(card.querySelector("[data-vendor-split-store]"));
   const rows = stored.length ? stored : [{
@@ -3187,6 +3531,7 @@ function collectVendorIntake() {
     vendorDraftId: form.elements.vendorDraftId.value,
     customerCode: form.elements.customerCode.value.trim().toUpperCase(),
     customerName: form.elements.customerName.value.trim(),
+    clientTag: form.elements.clientTag.value.trim().toUpperCase(),
     adultPax: Number(form.elements.adultPax.value || 0),
     childPax: Number(form.elements.childPax.value || 0),
     infantPax: Number(form.elements.infantPax.value || 0),
@@ -3238,7 +3583,7 @@ function populateVendorIntake(context) {
   state.vendorIntake = { ...context, suggestions: state.vendorSuggestions };
   const form = $("#vendor-intake-form");
   const scalarFields = [
-    "vendorDraftId", "customerCode", "customerName", "tourId", "sourcePublicationId",
+    "vendorDraftId", "customerCode", "customerName", "clientTag", "tourId", "sourcePublicationId",
     "sourceRecordVersion", "sourceRevisionId", "driveFileId", "driveFileName", "driveFileUrl",
     "adultPax", "childPax", "infantPax",
     "arrivalDate", "arrivalFlight", "arrivalSector", "arrivalTime",
@@ -3457,12 +3802,6 @@ async function saveVendorIntake(publish = false) {
     .every((value) => Number.isInteger(value) && value >= 0)) {
     return toast("Adult, Child, and Infant must be whole numbers starting from 0.", true);
   }
-  if (publish) {
-    const missingStart = payload.days.find((day) => !day.startTime);
-    if (missingStart) {
-      return toast(`Day ${missingStart.dayNumber} Start Time is required before online posting.`, true);
-    }
-  }
   const button = publish ? $("#post-vendor-intake") : $("#save-vendor-draft");
   button.disabled = true;
   const original = button.textContent;
@@ -3597,8 +3936,12 @@ function bindEvents() {
   $("#apply-vendor-split").addEventListener("click", applyVendorSplitDialog);
   $("#vendor-split-dialog-add").addEventListener("click", () => {
     const list = $("#vendor-split-dialog-list");
-    const index = list.querySelectorAll(".vendor-split-row").length;
-    list.insertAdjacentHTML("beforeend", vendorSplitRow({}, index));
+    list.insertAdjacentHTML("afterbegin", vendorSplitRow({}, 0));
+    [...list.querySelectorAll(".vendor-split-row")].forEach((row, index) => {
+      const remove = row.querySelector("[data-remove-vendor-split]");
+      if (remove) remove.dataset.removeVendorSplit = String(index);
+    });
+    list.querySelector(".vendor-split-row [data-vendor-split-suggestion='supplier']")?.focus();
   });
   $("#refresh-supplier-master").addEventListener("click", () => loadSupplierMaster({ refresh: true }));
   $("#close-supplier-archive-dialog").addEventListener("click", () => {
@@ -4060,6 +4403,31 @@ function bindEvents() {
     renderVendorBookingQueue();
   });
   $("#vendor-tree-prepare").addEventListener("click", prepareSelectedVendorServices);
+  $("#close-vendor-communication").addEventListener("click", async () => {
+    if (!await confirmVendorCommunicationNavigation()) return;
+    $("#vendor-communication-dialog").close();
+    renderVendorPreparationDetails();
+  });
+  $("#close-vendor-resend").addEventListener("click", () => $("#vendor-resend-dialog").close());
+  $("#cancel-vendor-resend").addEventListener("click", () => $("#vendor-resend-dialog").close());
+  $("#vendor-resend-form").addEventListener("submit", submitVendorResend);
+  $("#vendor-communication-previous").addEventListener("click", () =>
+    navigateVendorCommunication("PREVIOUS"));
+  $("#vendor-communication-next").addEventListener("click", () =>
+    navigateVendorCommunication("NEXT"));
+  $("#vendor-communication-queue-list").addEventListener("click", (event) => {
+    const item = event.target.closest("[data-vendor-communication-index]");
+    if (item) openVendorCommunicationFromQueue(Number(item.dataset.vendorCommunicationIndex));
+  });
+  $("#vendor-prep-supplier-detail").addEventListener("change", (event) => {
+    const channel = event.target.closest("[data-vendor-prep-channel]");
+    if (!channel) return;
+    state.vendorPackageChannels.set(state.selectedVendorPackageKey, channel.dataset.vendorPrepChannel);
+    openVendorBookingPackage(state.selectedVendorPackageKey, {
+      serviceIds: [state.selectedVendorInspectionServiceId],
+      channel: channel.dataset.vendorPrepChannel,
+    });
+  });
   $("#vendor-register-search").addEventListener("input", renderVendorInbox);
   $("#vendor-register-state").addEventListener("change", renderVendorInbox);
   $("#vendor-register-channel").addEventListener("change", renderVendorInbox);
@@ -4151,6 +4519,20 @@ function bindEvents() {
       return window.erim.external.open(
         `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(gmailThread.dataset.openGmailThread)}`,
       );
+    }
+    if (event.target.closest("#open-vendor-resend")) return openVendorResendDialog();
+    const portal = event.target.closest("[data-open-vendor-portal]");
+    if (portal) {
+      try {
+        return await window.erim.external.open(portal.dataset.openVendorPortal);
+      } catch (error) {
+        return toast(error.message, true);
+      }
+    }
+    const skipRate = event.target.closest("[data-skip-vendor-rate]");
+    if (skipRate) {
+      toast("Pending Rate retained. Generate remains available and the rate was not changed to zero or Ready.");
+      return;
     }
     const retrySync = event.target.closest("[data-retry-vendor-sync]");
     if (retrySync) {

@@ -788,6 +788,7 @@ class GoogleWorkspaceService {
     return {
       customerCode: code,
       customerName: tour.client_name || tour.customer_name || "",
+      clientTag: tour.client_tag || "",
       adultPax: Number(tour.pax_adult || 0),
       childPax: Number(tour.pax_child || 0),
       infantPax: Number(tour.pax_infant || 0),
@@ -869,6 +870,7 @@ class GoogleWorkspaceService {
       vendorDraftId: "",
       customerCode: itinerary.customerCode,
       customerName: extracted.customerName || itinerary.customerName,
+      clientTag: itinerary.clientTag || "",
       adultPax: itinerary.adultPax,
       childPax: itinerary.childPax,
       infantPax: itinerary.infantPax,
@@ -912,16 +914,21 @@ class GoogleWorkspaceService {
   async sendVendorBookingEmail(input = {}) {
     const booking = this.database.getVendorBooking(String(input.bookingId || ""));
     if (!booking) throw new Error("Generate the Vendor booking before sending.");
-    if (booking.communicationStatus === "SENT") {
+    const resendOfAttemptId = String(input.resendOfAttemptId || "").trim();
+    if (booking.communicationStatus === "SENT" && !resendOfAttemptId) {
       throw new Error("This booking is already recorded as sent. Generate an amendment instead of resending it.");
     }
     if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
     const sendAttempt = this.database.prepareVendorBookingSendAttempt({
       bookingId: booking.bookingId,
       actorEmail: this.authService.status().email || "",
+      resendOfAttemptId,
+      resendReason: input.resendReason,
+      recipients: input.recipients,
     });
     const cleanHeader = (value) => String(value || "").replace(/[\r\n]+/g, " ").trim();
-    const recipients = booking.recipients || [];
+    const snapshot = sendAttempt.snapshot || {};
+    const recipients = snapshot.recipients || [];
     const byType = (type) => recipients
       .filter((row) => String(row.recipientType || "").toUpperCase() === type)
       .map((row) => cleanHeader(row.address))
@@ -932,12 +939,12 @@ class GoogleWorkspaceService {
       `To: ${to.join(", ")}`,
       byType("CC").length ? `Cc: ${byType("CC").join(", ")}` : "",
       byType("BCC").length ? `Bcc: ${byType("BCC").join(", ")}` : "",
-      `Subject: =?UTF-8?B?${Buffer.from(cleanHeader(booking.subject), "utf8").toString("base64")}?=`,
+      `Subject: =?UTF-8?B?${Buffer.from(cleanHeader(snapshot.subject), "utf8").toString("base64")}?=`,
       "MIME-Version: 1.0",
       "Content-Type: text/plain; charset=UTF-8",
       "Content-Transfer-Encoding: 8bit",
     ].filter(Boolean);
-    const mime = `${headers.join("\r\n")}\r\n\r\n${String(booking.body || "").replace(/\r?\n/g, "\r\n")}`;
+    const mime = `${headers.join("\r\n")}\r\n\r\n${String(snapshot.body || "").replace(/\r?\n/g, "\r\n")}`;
     let payload;
     try {
       payload = await this.authorizedFetch(
@@ -996,6 +1003,8 @@ class GoogleWorkspaceService {
         supplierId: snapshot.supplierId,
         supplierName: snapshot.supplierName,
         actionType: snapshot.actionType,
+        resendOfAttemptId: attempt.resendOfAttemptId || "",
+        resendReason: attempt.resendReason || "",
         recipients: snapshot.recipients || [],
         subject: snapshot.subject || "",
         body: snapshot.body || "",
