@@ -1,6 +1,6 @@
 # Vendor Booking Generate, Send, Revise, and Cancel SOP
 
-Status: `v1.1.8 LOCAL UAT BUILD CANDIDATE`
+Status: `v1.1.9 RELEASED — LIVE UAT`
 Operational owner: Vendor Booking
 
 ## 1. Queue ownership
@@ -19,8 +19,11 @@ Operational owner: Vendor Booking
 ## 2. Generate booking
 
 1. Open Vendor Booking → Generate.
-2. Select the required Customer Code + supplier package.
-3. Verify every service date, Day number, Product/service name, pax, quantity,
+2. Expand the required Client and Day branches, then select the eligible
+   service rows to prepare. Already sent or otherwise ineligible rows remain
+   read-only.
+3. Review the supplier packages produced from the selected services, then
+   verify every service date, Day number, Product/service name, pax, quantity,
    price basis, and rate warning.
 4. Verify the channel loaded from the active Supplier SOP.
 5. Verify all recipients. Each editable row uses `TO | address`,

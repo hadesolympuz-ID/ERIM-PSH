@@ -1,6 +1,6 @@
 # Micro Split and Generate UX Revision Plan
 
-Status: `IMPLEMENTED IN v1.1.9 — LOCAL UAT`
+Status: `RELEASED IN v1.1.9 — LIVE UAT`
 
 This record covers three requested refinements after desktop v1.1.8:
 
@@ -466,5 +466,6 @@ The child window follows the current desktop security baseline:
 - Supplier readiness opens a modal child window with the exact section and
   stable supplier/product/service context. A successful local save closes it,
   refreshes the parent read model, and preserves the active Generate package.
-- Apps Script source includes the Infant rate column, but this local UAT build
-  does not deploy Apps Script or publish a GitHub release.
+- Apps Script Web App Version 20 includes the Infant rate column on the existing
+  deployment URL. GitHub Release v1.1.9 is published as Latest with installer,
+  blockmap, and updater feed.
