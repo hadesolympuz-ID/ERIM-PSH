@@ -585,6 +585,106 @@ test("groups Vendor and Additional splits per supplier while excluding Transport
   assert.equal(database.listVendorBookings().length, 2);
 }));
 
+test("uses a stable send ledger, preserves pending sync, and builds the shared Vendor read model", () => withDatabase((database) => {
+  database.replaceSupplierMasterCache({
+    sourceVersion: "SAFE-SEND-TEST",
+    supplierTypes: [
+      { supplierTypeId: "ST-VENDOR", typeCode: "VENDOR", typeName: "Vendor", status: "ACTIVE", active: true },
+      { supplierTypeId: "ST-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport", status: "ACTIVE", active: true },
+    ],
+    suppliers: [{
+      supplierId: "SUP-EMAIL", supplierTypeId: "ST-VENDOR", typeCode: "VENDOR",
+      supplierName: "Email Supplier", status: "ACTIVE", active: true,
+    }],
+    recipients: [{
+      recipientId: "REC-EMAIL", supplierId: "SUP-EMAIL", recipientType: "TO",
+      channel: "EMAIL", address: "booking@example.test", status: "ACTIVE", active: true,
+    }],
+    sops: [{
+      sopId: "SOP-EMAIL", supplierId: "SUP-EMAIL", bookingChannels: ["EMAIL"],
+      status: "ACTIVE", active: true,
+    }],
+    products: [], contacts: [], contracts: [], rates: [],
+  });
+  const intake = database.saveVendorIntakeDraft({
+    customerCode: "TEST/SAFE-SEND",
+    customerName: "Safe Send Guest",
+    adultPax: 2,
+    childPax: 1,
+    arrivalDate: "2026-08-01",
+    departureDate: "2026-08-02",
+    sourceRevisionId: "REV-SAFE-1",
+    days: [{
+      dayNumber: 1,
+      serviceDate: "2026-08-01",
+      dayTitle: "Arrival and activity",
+      startTime: "09:00",
+      splits: [{
+        serviceType: "VENDOR", activityText: "Cooking Class",
+        supplierId: "SUP-EMAIL", vendorName: "Email Supplier",
+        rateStatus: "PENDING_RATE",
+      }, {
+        serviceType: "TRANSPORT", activityText: "Airport Transfer",
+        vendorName: "Transport Partner", rateStatus: "RATE_READY", unitRateIdr: 350000,
+      }],
+    }],
+  });
+  const packageItem = database.listVendorBookingQueue()[0];
+  const preview = database.getVendorBookingPreview({ packageKey: packageItem.packageKey });
+  assert.equal(preview.templateVersion, "STANDARD_V1");
+  assert.equal(preview.destinationReady, true);
+  assert.match(preview.body, /Safe Send Guest/);
+  const generated = database.saveVendorBookingPreview({ packageKey: packageItem.packageKey });
+  const attempt = database.prepareVendorBookingSendAttempt({
+    bookingId: generated.bookingId,
+    actorEmail: "vendor@example.test",
+  });
+  assert.match(attempt.sendAttemptId, /^VSEND-/);
+  assert.equal(attempt.snapshot.sourceRevisionId, "REV-SAFE-1");
+  assert.throws(
+    () => database.prepareVendorBookingSendAttempt({ bookingId: generated.bookingId }),
+    /reconcile that attempt/i,
+  );
+
+  database.recordVendorSendGmailAccepted(attempt.sendAttemptId, {
+    gmailMessageId: "MSG-SAFE-1",
+    gmailThreadId: "THREAD-SAFE-1",
+  });
+  assert.equal(database.getVendorBooking(generated.bookingId).communicationStatus, "SENT_PENDING_SYNC");
+  database.recordVendorSendSyncResult(attempt.sendAttemptId, {
+    ok: false, error: new Error("Apps Script temporarily unavailable"),
+  });
+  assert.equal(database.getVendorBooking(generated.bookingId).communicationStatus, "SENT_PENDING_SYNC");
+  assert.equal(database.listVendorPendingSendSync().length, 1);
+  database.recordVendorSendSyncResult(attempt.sendAttemptId, {
+    ok: true, officialEvidenceId: "COMM-SAFE-1",
+  });
+  assert.equal(database.getVendorBooking(generated.bookingId).communicationStatus, "SENT");
+  assert.equal(database.listVendorPendingSendSync().length, 0);
+
+  const itinerary = database.getVendorItineraryCheck(intake.customerCode);
+  assert.equal(itinerary.readOnly, true);
+  assert.equal(itinerary.days[0].services.length, 2);
+  assert.equal(
+    itinerary.days[0].services.find((service) => service.serviceType === "TRANSPORT").ownerDepartment,
+    "TRANSPORT",
+  );
+  assert.equal(
+    itinerary.days[0].services.find((service) => service.serviceType === "VENDOR").gmailThreadId,
+    "THREAD-SAFE-1",
+  );
+  database.recordVendorReplyDetected({
+    bookingId: generated.bookingId,
+    gmailMessageId: "MSG-REPLY-1",
+    receivedAt: "2026-07-29T10:00:00.000Z",
+  });
+  const model = database.getVendorOperationalModel();
+  assert.equal(model.bookingRegister[0].communicationStatus, "SENT");
+  assert.equal(model.dashboard.replied.length, 1);
+  assert.equal(model.dashboard.replied[0].replyReviewStatus, "REVIEW_REQUIRED");
+  assert.equal(model.workInbox[0].sourceRevisionId, "REV-SAFE-1");
+}));
+
 test("uses dynamic Supplier Types and only exposes contract rates valid on the service date", () => withDatabase((database) => {
   database.replaceSupplierMasterCache({
     sourceVersion: "SUPPLIER-MASTER-TEST",

@@ -89,6 +89,17 @@ test("Micro Split suggestions preserve Supplier IDs and independently refresh Pr
   assert.doesNotMatch(app, /label="\$\{escapeHtml\(item\.productCode \|\| item\.category/);
 });
 
+test("Micro Split window shows the selected Day hotel and operating times", () => {
+  assert.match(html, /id="vendor-split-context-hotel"/);
+  assert.match(html, /id="vendor-split-context-start"/);
+  assert.match(html, /id="vendor-split-context-finish"/);
+  assert.match(app, /vendorHotelsForDate\(collectVendorHotelRows\(\), serviceDate\)/);
+  assert.match(app, /vendor-split-context-hotel/);
+  assert.match(app, /vendor-split-context-start/);
+  assert.match(app, /vendor-split-context-finish/);
+  assert.match(styles, /\.vendor-split-day-context/);
+});
+
 test("Vendor Booking exposes a live supplier queue, controlled sending, revise reuse, and cancellation preparation", () => {
   assert.match(html, /Generate & Send Booking/);
   assert.match(html, /id="vendor-booking-queue-list"/);
@@ -104,4 +115,25 @@ test("Vendor Booking exposes a live supplier queue, controlled sending, revise r
   assert.match(main, /vendor:booking-email-send/);
   assert.match(styles, /\.vendor-booking-layout/);
   assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*\.vendor-booking-layout/);
+});
+
+test("Vendor milestone exposes stable dashboard, two-section Inbox, Itinerary Check, and safe sync controls", () => {
+  [
+    "New Itinerary — Not Split",
+    "Split — Not Generated",
+    "Email Replied — Check Thread",
+    "Upcoming Arrival Recheck",
+    "Booking Register",
+    "Work Inbox",
+  ].forEach((label) => assert.match(html, new RegExp(label)));
+  assert.match(html, /data-vendor-action="itinerary-check"/);
+  assert.match(html, /id="vendor-itinerary-check-view"/);
+  assert.match(html, /id="vendor-email-context-content"/);
+  assert.match(app, /function loadVendorItineraryCheck/);
+  assert.match(app, /data-retry-vendor-sync/);
+  assert.match(app, /data-open-gmail-thread/);
+  assert.match(preload, /vendor:booking-send-sync-retry/);
+  assert.match(main, /vendor:booking-send-sync-retry/);
+  assert.match(styles, /\.vendor-inbox-layout/);
+  assert.match(styles, /\.vendor-email-popup-layout/);
 });

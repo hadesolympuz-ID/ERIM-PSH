@@ -428,6 +428,17 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
   display: grid; align-content: start; gap: 11px; height: calc(100% - 64px); padding: 14px; overflow: auto;
 }
 .vendor-split-evidence { display: grid; align-content: start; gap: 12px; height: calc(100% - 64px); padding: 14px; overflow: auto; }
+.vendor-split-day-context {
+  display: grid; grid-template-columns: minmax(0,2fr) repeat(2,minmax(90px,1fr)); gap: 9px;
+}
+.vendor-split-day-context > div {
+  min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}
+.vendor-split-day-context span, .vendor-split-day-context strong { display: block; }
+.vendor-split-day-context span {
+  color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+}
+.vendor-split-day-context strong { margin-top: 5px; overflow-wrap: anywhere; }
 .vendor-split-day-reference {
   padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--blue-50);
 }
@@ -437,6 +448,10 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 }
 .vendor-split-day-reference strong { margin-top: 5px; }
 .vendor-split-day-reference p { margin: 12px 0 0; white-space: pre-wrap; line-height: 1.55; }
+@media (max-width: 760px) {
+  .vendor-split-day-context { grid-template-columns: 1fr 1fr; }
+  .vendor-split-day-context > div:first-child { grid-column: 1 / -1; }
+}
 .vendor-document-pane { min-width: 0; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
 .vendor-document-pane .pane-heading { justify-content: space-between; gap: 12px; }
 .vendor-document-scroll { height: 670px; }
@@ -883,6 +898,73 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
 .vendor-cancel-record strong, .vendor-cancel-record small { display: block; }
 .vendor-cancel-record small { margin-top: 3px; color: var(--muted); }
 
+.vendor-inbox-layout {
+  display: grid; grid-template-columns: minmax(0,1.65fr) minmax(300px,.85fr);
+  gap: 16px; align-items: start;
+}
+.vendor-register-filters {
+  display: grid; grid-template-columns: minmax(220px,1fr) repeat(3,minmax(120px,.45fr));
+  gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line); background: var(--blue-50);
+}
+.vendor-inbox-scroll { max-height: 650px; overflow: auto; }
+.vendor-register-item { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.vendor-register-heading, .vendor-register-actions {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.vendor-register-heading strong, .vendor-register-heading small,
+.vendor-register-details span { display: block; }
+.vendor-register-heading small, .vendor-register-details {
+  margin-top: 4px; color: var(--muted); font-size: 10px;
+}
+.vendor-register-details { display: grid; gap: 3px; }
+.vendor-register-actions { justify-content: flex-start; margin-top: 10px; }
+
+.vendor-itinerary-check-panel { overflow: hidden; }
+.vendor-itinerary-check-search {
+  display: grid; grid-template-columns: minmax(240px,.7fr) auto 1fr;
+  gap: 10px; align-items: end; padding: 16px; border-bottom: 1px solid var(--line);
+}
+.vendor-itinerary-check-search label { color: var(--muted); font-size: 10px; font-weight: 800; }
+.vendor-itinerary-check-search input { margin-top: 5px; }
+.vendor-itinerary-check-search .status { justify-self: end; align-self: center; }
+.vendor-itinerary-check-result { max-height: 680px; overflow: auto; }
+.vendor-itinerary-check-summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px; background: var(--blue-50);
+}
+.vendor-itinerary-check-summary strong, .vendor-itinerary-check-summary small { display: block; }
+.vendor-itinerary-check-summary small { margin-top: 4px; color: var(--muted); }
+.vendor-itinerary-days { display: grid; gap: 10px; padding: 14px; }
+.vendor-itinerary-day { border: 1px solid var(--line); border-radius: 10px; background: #fff; overflow: hidden; }
+.vendor-itinerary-day summary { padding: 13px; cursor: pointer; background: var(--blue-50); }
+.vendor-itinerary-day > p { margin: 0; padding: 10px 13px; color: var(--muted); font-size: 11px; }
+.vendor-itinerary-service {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 13px; border-top: 1px solid var(--line);
+}
+.vendor-itinerary-service span, .vendor-itinerary-service strong, .vendor-itinerary-service small { display: block; }
+.vendor-itinerary-service span, .vendor-itinerary-service small { color: var(--muted); font-size: 10px; }
+.vendor-itinerary-service strong { margin: 3px 0; }
+
+.vendor-email-popup-layout {
+  display: grid; grid-template-columns: minmax(0,1.25fr) minmax(280px,.75fr);
+  gap: 12px; align-items: start;
+}
+.vendor-email-context {
+  min-width: 0; padding: 13px; border: 1px solid var(--line);
+  border-radius: 10px; background: #f8fafb;
+}
+.vendor-email-context h3 { margin: 3px 0 12px; }
+.vendor-email-context-content { display: grid; gap: 10px; }
+.vendor-final-message { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.vendor-final-message strong, .vendor-final-message small { display: block; }
+.vendor-final-message small { margin-top: 4px; color: var(--muted); }
+.vendor-final-message pre {
+  max-height: 360px; margin: 12px 0 0; overflow: auto; white-space: pre-wrap;
+  color: var(--ink); font: inherit; font-size: 11px; line-height: 1.5;
+}
+
 @media (max-width: 1180px) {
   .health-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .vendor-identity-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -898,6 +980,8 @@ dialog::backdrop { background: rgba(8,29,51,.54); backdrop-filter: blur(3px); }
   .vendor-booking-queue-list { max-height: 310px; }
   .vendor-cancel-panel { grid-template-columns: 1fr; }
   .vendor-cancel-form { border-right: 0; border-bottom: 1px solid var(--line); }
+  .vendor-inbox-layout, .vendor-email-popup-layout { grid-template-columns: 1fr; }
+  .vendor-register-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 
 @media (max-width: 1100px) {

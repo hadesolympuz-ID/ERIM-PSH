@@ -916,6 +916,10 @@ class GoogleWorkspaceService {
       throw new Error("This booking is already recorded as sent. Generate an amendment instead of resending it.");
     }
     if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
+    const sendAttempt = this.database.prepareVendorBookingSendAttempt({
+      bookingId: booking.bookingId,
+      actorEmail: this.authService.status().email || "",
+    });
     const cleanHeader = (value) => String(value || "").replace(/[\r\n]+/g, " ").trim();
     const recipients = booking.recipients || [];
     const byType = (type) => recipients
@@ -934,23 +938,127 @@ class GoogleWorkspaceService {
       "Content-Transfer-Encoding: 8bit",
     ].filter(Boolean);
     const mime = `${headers.join("\r\n")}\r\n\r\n${String(booking.body || "").replace(/\r?\n/g, "\r\n")}`;
-    const payload = await this.authorizedFetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url") }),
-      },
-    );
-    const saved = this.database.recordVendorBookingEmailSent({
-      bookingId: booking.bookingId,
+    let payload;
+    try {
+      payload = await this.authorizedFetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url") }),
+        },
+      );
+    } catch (error) {
+      this.database.recordVendorSendOutcomeUnknown(sendAttempt.sendAttemptId, error);
+      throw new Error(
+        `Gmail send outcome could not be proven. Attempt ${sendAttempt.sendAttemptId} is blocked from resend until reconciled.`,
+      );
+    }
+    const accepted = this.database.recordVendorSendGmailAccepted(sendAttempt.sendAttemptId, {
       gmailMessageId: payload.id,
       gmailThreadId: payload.threadId,
     });
-    return { booking: saved, gmailMessageId: payload.id, gmailThreadId: payload.threadId };
+    let synced;
+    try {
+      synced = await this.syncVendorSendAttempt(sendAttempt.sendAttemptId);
+    } catch (error) {
+      this.database.recordVendorSendSyncResult(sendAttempt.sendAttemptId, {
+        ok: false,
+        error,
+      });
+      synced = this.database.getVendorSendAttempt(sendAttempt.sendAttemptId);
+    }
+    return {
+      booking: this.database.getVendorBooking(booking.bookingId),
+      sendAttempt: synced,
+      gmailMessageId: accepted.gmailMessageId,
+      gmailThreadId: accepted.gmailThreadId,
+      pendingSync: synced.status !== "SYNCED",
+    };
+  }
+
+  async syncVendorSendAttempt(sendAttemptId) {
+    const attempt = this.database.getVendorSendAttempt(sendAttemptId);
+    if (!attempt) throw new Error("Send attempt was not found.");
+    if (attempt.status === "SYNCED") return attempt;
+    if (!["GMAIL_ACCEPTED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
+      throw new Error(`Send attempt ${attempt.sendAttemptId} cannot sync from ${attempt.status}.`);
+    }
+    const snapshot = attempt.snapshot || {};
+    const result = await this.callAppsScript("vendor.booking.evidence", {
+      evidence: {
+        sendAttemptId: attempt.sendAttemptId,
+        bookingId: attempt.bookingId,
+        snapshotHash: attempt.snapshotHash,
+        customerCode: snapshot.customerCode,
+        tourId: snapshot.tourId,
+        sourceRevisionId: snapshot.sourceRevisionId,
+        supplierId: snapshot.supplierId,
+        supplierName: snapshot.supplierName,
+        actionType: snapshot.actionType,
+        recipients: snapshot.recipients || [],
+        subject: snapshot.subject || "",
+        body: snapshot.body || "",
+        serviceIds: (snapshot.services || []).map((service) => service.serviceId).filter(Boolean),
+        rateStatus: snapshot.rateStatus,
+        gmailMessageId: attempt.gmailMessageId,
+        gmailThreadId: attempt.gmailThreadId,
+        sentAt: attempt.gmailAcceptedAt,
+      },
+    });
+    return this.database.recordVendorSendSyncResult(sendAttemptId, {
+      ok: true,
+      officialEvidenceId: result.communicationId,
+    });
+  }
+
+  async retryVendorSendSync(sendAttemptId) {
+    try {
+      return await this.syncVendorSendAttempt(sendAttemptId);
+    } catch (error) {
+      this.database.recordVendorSendSyncResult(sendAttemptId, { ok: false, error });
+      throw error;
+    }
+  }
+
+  async getVendorOperationalModel() {
+    if (this.authService?.status().connected) {
+      const connectedEmail = String(this.authService.status().email || "").toLowerCase();
+      const linked = this.database.listVendorBookings()
+        .filter((booking) => booking.gmailThreadId && booking.gmailMessageId)
+        .slice(0, 50);
+      await Promise.all(linked.map(async (booking) => {
+        try {
+          const thread = await this.getGmailThread(booking.gmailThreadId);
+          const outboundIndex = thread.messages.findIndex((message) =>
+            message.messageId === booking.gmailMessageId
+          );
+          const candidates = thread.messages.slice(Math.max(0, outboundIndex + 1));
+          const inbound = [...candidates].reverse().find((message) => {
+            const from = String(message.from || "").toLowerCase();
+            return message.messageId !== booking.gmailMessageId
+              && (!connectedEmail || !from.includes(connectedEmail));
+          });
+          if (inbound) {
+            this.database.recordVendorReplyDetected({
+              bookingId: booking.bookingId,
+              gmailMessageId: inbound.messageId,
+              receivedAt: inbound.date,
+            });
+          }
+        } catch {
+          // A temporarily unavailable Gmail thread never changes business state.
+        }
+      }));
+    }
+    return this.database.getVendorOperationalModel();
   }
 
   async getVendorDashboard() {
+    return (await this.getVendorOperationalModel()).dashboard;
+  }
+
+  async getVendorDashboardLegacy() {
     const settings = this.database.getPublicSettings();
     const now = Date.now();
     const plusSeven = now + (7 * 86_400_000);

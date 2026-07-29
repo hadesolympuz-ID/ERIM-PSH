@@ -80,6 +80,21 @@ function normalizeVendorSplitType(value) {
   return normalized;
 }
 
+function operationalDateEpoch(offsetDays = 0) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Makassar",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day) + Number(offsetDays || 0),
+  );
+}
+
 class LocalDatabase {
   constructor(filePath) {
     this.filePath = filePath;
@@ -319,6 +334,11 @@ class LocalDatabase {
         external_reference TEXT NOT NULL DEFAULT '',
         gmail_thread_id TEXT NOT NULL DEFAULT '',
         gmail_message_id TEXT NOT NULL DEFAULT '',
+        official_sync_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED',
+        last_send_attempt_id TEXT NOT NULL DEFAULT '',
+        reply_review_status TEXT NOT NULL DEFAULT 'NONE',
+        latest_inbound_message_id TEXT NOT NULL DEFAULT '',
+        latest_inbound_at TEXT NOT NULL DEFAULT '',
         generated_at TEXT,
         sent_at TEXT,
         created_at TEXT NOT NULL,
@@ -342,6 +362,32 @@ class LocalDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_local_vendor_booking_service_booking
         ON local_vendor_booking_services(booking_id, service_id);
+
+      CREATE TABLE IF NOT EXISTS local_vendor_send_attempts (
+        send_attempt_id TEXT PRIMARY KEY,
+        booking_id TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        snapshot_hash TEXT NOT NULL,
+        actor_email TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        gmail_message_id TEXT NOT NULL DEFAULT '',
+        gmail_thread_id TEXT NOT NULL DEFAULT '',
+        official_evidence_id TEXT NOT NULL DEFAULT '',
+        sync_attempts INTEGER NOT NULL DEFAULT 0,
+        last_error_code TEXT NOT NULL DEFAULT '',
+        last_error_message TEXT NOT NULL DEFAULT '',
+        prepared_at TEXT NOT NULL,
+        gmail_accepted_at TEXT,
+        synced_at TEXT,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(booking_id) REFERENCES local_vendor_bookings(booking_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_send_attempt_booking
+        ON local_vendor_send_attempts(booking_id, prepared_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_send_attempt_active
+        ON local_vendor_send_attempts(booking_id)
+        WHERE status IN ('PREPARED','SEND_OUTCOME_UNKNOWN','GMAIL_ACCEPTED','SENT_PENDING_SYNC');
 
       CREATE TABLE IF NOT EXISTS local_toc_master (
         toc_id TEXT PRIMARY KEY,
@@ -492,6 +538,11 @@ class LocalDatabase {
     this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "finish_time", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_bookings", "official_sync_status", "TEXT NOT NULL DEFAULT 'NOT_REQUIRED'");
+    this.ensureColumn("local_vendor_bookings", "last_send_attempt_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_bookings", "reply_review_status", "TEXT NOT NULL DEFAULT 'NONE'");
+    this.ensureColumn("local_vendor_bookings", "latest_inbound_message_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_bookings", "latest_inbound_at", "TEXT NOT NULL DEFAULT ''");
   }
 
   migrateVendorServiceSplits() {
@@ -2236,6 +2287,19 @@ class LocalDatabase {
       "Regards,",
       "Peak Season Holidays",
     ].join("\n");
+    const destinationReady = channel === "EMAIL"
+      ? selectedRecipients.some((row) => row.recipientType === "TO" && row.address)
+      : channel === "WHATSAPP"
+        ? selectedRecipients.some((row) => row.address)
+        : channel === "PORTAL"
+          ? Boolean(sop.portalUrl)
+          : selectedRecipients.some((row) => row.address) || channel === "OTHERS";
+    const readinessNotices = [
+      !item.masterLinked ? "Supplier is not linked to an active Supplier Master entry." : "",
+      !sops.length ? "Active Supplier Booking SOP is missing." : "",
+      !destinationReady ? `${channel} destination is missing.` : "",
+      item.pendingRateCount ? `${item.pendingRateCount} item(s) use pending or manual rates; communication remains allowed.` : "",
+    ].filter(Boolean);
     return {
       ...item,
       actionType,
@@ -2244,6 +2308,9 @@ class LocalDatabase {
       recipients: selectedRecipients,
       subject,
       body: applyTemplate(sop.bodyTemplate) || defaultBody,
+      templateVersion: sop.bodyTemplate || sop.subjectTemplate ? "SUPPLIER_SOP" : "STANDARD_V1",
+      destinationReady,
+      readinessNotices,
       sop: {
         leadTime: sop.leadTime || "",
         cutoffTime: sop.cutoffTime || "",
@@ -2273,7 +2340,9 @@ class LocalDatabase {
     const requested = requestedId ? this.getVendorBooking(requestedId) : null;
     const canReuse = requested
       && requested.actionType === preview.actionType
-      && requested.communicationStatus !== "SENT";
+      && !["SENT", "SENT_PENDING_SYNC", "SEND_OUTCOME_UNKNOWN"].includes(
+        requested.communicationStatus,
+      );
     const bookingId = canReuse ? requestedId : this.id("VBK");
     this.db.transaction(() => {
       this.db.prepare(`
@@ -2338,9 +2407,28 @@ class LocalDatabase {
   }
 
   listVendorBookings() {
+    const serviceStatement = this.db.prepare(`
+      SELECT service_snapshot_json FROM local_vendor_booking_services
+      WHERE booking_id = ? ORDER BY created_at
+    `);
     return this.db.prepare(`
-      SELECT * FROM local_vendor_bookings ORDER BY updated_at DESC
-    `).all().map((row) => this.vendorBookingRow(row));
+      SELECT b.*, i.customer_name, i.adult_pax, i.child_pax, i.infant_pax,
+        i.arrival_date, i.departure_date
+      FROM local_vendor_bookings b
+      LEFT JOIN vendor_intake_drafts i ON i.customer_code = b.customer_code
+      ORDER BY b.updated_at DESC
+    `).all().map((row) => ({
+      ...this.vendorBookingRow(row),
+      customerName: row.customer_name || "",
+      adultPax: Number(row.adult_pax || 0),
+      childPax: Number(row.child_pax || 0),
+      infantPax: Number(row.infant_pax || 0),
+      arrivalDate: row.arrival_date || "",
+      departureDate: row.departure_date || "",
+      services: serviceStatement.all(row.booking_id).map((item) =>
+        JSON.parse(item.service_snapshot_json || "{}")
+      ),
+    }));
   }
 
   recordVendorBookingExternalAction(input = {}) {
@@ -2388,6 +2476,351 @@ class LocalDatabase {
     return this.getVendorBooking(bookingId);
   }
 
+  prepareVendorBookingSendAttempt(input = {}) {
+    const bookingId = String(input.bookingId || "");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking) throw new Error("Generated booking was not found.");
+    if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
+    if (booking.communicationStatus !== "GENERATED") {
+      throw new Error(
+        booking.communicationStatus === "SENT"
+          ? "This booking is already sent. Prepare an Amendment instead."
+          : `Email cannot be sent while communication status is ${booking.communicationStatus}.`,
+      );
+    }
+    const active = this.db.prepare(`
+      SELECT * FROM local_vendor_send_attempts
+      WHERE booking_id = ?
+        AND status IN ('PREPARED','SEND_OUTCOME_UNKNOWN','GMAIL_ACCEPTED','SENT_PENDING_SYNC')
+      ORDER BY prepared_at DESC LIMIT 1
+    `).get(bookingId);
+    if (active) {
+      throw new Error(
+        `Send attempt ${active.send_attempt_id} is ${active.status}. Reconcile that attempt before any new send.`,
+      );
+    }
+    const now = this.now();
+    const sendAttemptId = this.id("VSEND");
+    const snapshot = {
+      sendAttemptId,
+      bookingId,
+      packageKey: booking.packageKey,
+      customerCode: booking.customerCode,
+      tourId: booking.tourId,
+      sourceRevisionId: booking.sourceRevisionId,
+      supplierId: booking.supplierId,
+      supplierName: booking.supplierName,
+      actionType: booking.actionType,
+      channel: booking.channel,
+      recipients: booking.recipients,
+      subject: booking.subject,
+      body: booking.body,
+      services: booking.services,
+      rateStatus: booking.rateStatus,
+      actorEmail: String(input.actorEmail || "").trim().toLowerCase(),
+      preparedAt: now,
+    };
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotHash = crypto.createHash("sha256").update(snapshotJson).digest("hex");
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_vendor_send_attempts (
+          send_attempt_id, booking_id, snapshot_json, snapshot_hash, actor_email,
+          status, prepared_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'PREPARED', ?, ?)
+      `).run(
+        sendAttemptId, bookingId, snapshotJson, snapshotHash,
+        snapshot.actorEmail, now, now,
+      );
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET last_send_attempt_id = ?, official_sync_status = 'PENDING',
+          updated_at = ?
+        WHERE booking_id = ?
+      `).run(sendAttemptId, now, bookingId);
+    })();
+    this.log("VENDOR_SEND_ATTEMPT_PREPARED", "VENDOR_SEND_ATTEMPT", sendAttemptId, {
+      bookingId, snapshotHash, actorEmail: snapshot.actorEmail,
+    });
+    return this.getVendorSendAttempt(sendAttemptId);
+  }
+
+  getVendorSendAttempt(sendAttemptId) {
+    const row = this.db.prepare(
+      "SELECT * FROM local_vendor_send_attempts WHERE send_attempt_id = ?",
+    ).get(String(sendAttemptId || ""));
+    if (!row) return null;
+    return {
+      sendAttemptId: row.send_attempt_id,
+      bookingId: row.booking_id,
+      snapshot: JSON.parse(row.snapshot_json || "{}"),
+      snapshotHash: row.snapshot_hash,
+      actorEmail: row.actor_email,
+      status: row.status,
+      gmailMessageId: row.gmail_message_id,
+      gmailThreadId: row.gmail_thread_id,
+      officialEvidenceId: row.official_evidence_id,
+      syncAttempts: Number(row.sync_attempts || 0),
+      lastErrorCode: row.last_error_code,
+      lastErrorMessage: row.last_error_message,
+      preparedAt: row.prepared_at,
+      gmailAcceptedAt: row.gmail_accepted_at || "",
+      syncedAt: row.synced_at || "",
+      updatedAt: row.updated_at,
+    };
+  }
+
+  recordVendorSendOutcomeUnknown(sendAttemptId, error) {
+    const attempt = this.getVendorSendAttempt(sendAttemptId);
+    if (!attempt) throw new Error("Send attempt was not found.");
+    const now = this.now();
+    this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE local_vendor_send_attempts
+        SET status = 'SEND_OUTCOME_UNKNOWN', last_error_code = 'GMAIL_OUTCOME_UNKNOWN',
+          last_error_message = ?, updated_at = ?
+        WHERE send_attempt_id = ?
+      `).run(String(error?.message || error || "Gmail send outcome is unknown."), now, sendAttemptId);
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET communication_status = 'SEND_OUTCOME_UNKNOWN',
+          official_sync_status = 'BLOCKED', updated_at = ?
+        WHERE booking_id = ?
+      `).run(now, attempt.bookingId);
+    })();
+    this.log("VENDOR_SEND_OUTCOME_UNKNOWN", "VENDOR_SEND_ATTEMPT", sendAttemptId, {
+      bookingId: attempt.bookingId,
+    });
+    return this.getVendorSendAttempt(sendAttemptId);
+  }
+
+  recordVendorSendGmailAccepted(sendAttemptId, input = {}) {
+    const attempt = this.getVendorSendAttempt(sendAttemptId);
+    if (!attempt) throw new Error("Send attempt was not found.");
+    if (attempt.status !== "PREPARED") {
+      if (["GMAIL_ACCEPTED", "SENT_PENDING_SYNC", "SYNCED"].includes(attempt.status)) return attempt;
+      throw new Error(`Send attempt cannot accept Gmail evidence from ${attempt.status}.`);
+    }
+    const messageId = String(input.gmailMessageId || "").trim();
+    const threadId = String(input.gmailThreadId || "").trim();
+    if (!messageId || !threadId) throw new Error("Gmail message and thread IDs are required.");
+    const now = this.now();
+    this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE local_vendor_send_attempts
+        SET status = 'GMAIL_ACCEPTED', gmail_message_id = ?, gmail_thread_id = ?,
+          gmail_accepted_at = ?, updated_at = ?
+        WHERE send_attempt_id = ?
+      `).run(messageId, threadId, now, now, sendAttemptId);
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET booking_status = ?, communication_status = 'SENT_PENDING_SYNC',
+          official_sync_status = 'PENDING', gmail_message_id = ?,
+          gmail_thread_id = ?, sent_at = ?, updated_at = ?
+        WHERE booking_id = ?
+      `).run(
+        attempt.snapshot.actionType === "CANCEL" ? "CANCELED" : "ACTIVE",
+        messageId, threadId, now, now, attempt.bookingId,
+      );
+    })();
+    this.log("VENDOR_GMAIL_ACCEPTED", "VENDOR_SEND_ATTEMPT", sendAttemptId, {
+      bookingId: attempt.bookingId, gmailMessageId: messageId, gmailThreadId: threadId,
+    });
+    return this.getVendorSendAttempt(sendAttemptId);
+  }
+
+  recordVendorSendSyncResult(sendAttemptId, input = {}) {
+    const attempt = this.getVendorSendAttempt(sendAttemptId);
+    if (!attempt) throw new Error("Send attempt was not found.");
+    if (!["GMAIL_ACCEPTED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
+      if (attempt.status === "SYNCED") return attempt;
+      throw new Error(`Send evidence cannot sync from ${attempt.status}.`);
+    }
+    const now = this.now();
+    const ok = input.ok === true;
+    const errorMessage = String(input.error?.message || input.error || "");
+    this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE local_vendor_send_attempts
+        SET status = ?, official_evidence_id = ?, sync_attempts = sync_attempts + 1,
+          last_error_code = ?, last_error_message = ?, synced_at = ?, updated_at = ?
+        WHERE send_attempt_id = ?
+      `).run(
+        ok ? "SYNCED" : "SENT_PENDING_SYNC",
+        ok ? String(input.officialEvidenceId || "") : attempt.officialEvidenceId,
+        ok ? "" : String(input.errorCode || "OFFICIAL_SYNC_FAILED"),
+        ok ? "" : errorMessage,
+        ok ? now : null,
+        now,
+        sendAttemptId,
+      );
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET communication_status = ?, official_sync_status = ?, updated_at = ?
+        WHERE booking_id = ?
+      `).run(ok ? "SENT" : "SENT_PENDING_SYNC", ok ? "SYNCED" : "FAILED", now, attempt.bookingId);
+    })();
+    this.log(
+      ok ? "VENDOR_SEND_EVIDENCE_SYNCED" : "VENDOR_SEND_EVIDENCE_SYNC_FAILED",
+      "VENDOR_SEND_ATTEMPT",
+      sendAttemptId,
+      { bookingId: attempt.bookingId, error: errorMessage },
+    );
+    return this.getVendorSendAttempt(sendAttemptId);
+  }
+
+  listVendorPendingSendSync() {
+    return this.db.prepare(`
+      SELECT send_attempt_id FROM local_vendor_send_attempts
+      WHERE status IN ('GMAIL_ACCEPTED','SENT_PENDING_SYNC')
+      ORDER BY prepared_at
+    `).all().map((row) => this.getVendorSendAttempt(row.send_attempt_id));
+  }
+
+  recordVendorReplyDetected(input = {}) {
+    const bookingId = String(input.bookingId || "");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking) throw new Error("Vendor booking was not found.");
+    const messageId = String(input.gmailMessageId || "").trim();
+    if (!messageId || messageId === booking.gmailMessageId) return booking;
+    if (
+      booking.latestInboundMessageId === messageId
+      && booking.replyReviewStatus === "REVIEW_REQUIRED"
+    ) return booking;
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE local_vendor_bookings
+      SET reply_review_status = 'REVIEW_REQUIRED',
+        latest_inbound_message_id = ?, latest_inbound_at = ?, updated_at = ?
+      WHERE booking_id = ?
+    `).run(messageId, String(input.receivedAt || now), now, bookingId);
+    this.log("VENDOR_REPLY_REVIEW_REQUIRED", "VENDOR_BOOKING", bookingId, {
+      gmailThreadId: booking.gmailThreadId,
+      gmailMessageId: messageId,
+    });
+    return this.getVendorBooking(bookingId);
+  }
+
+  getVendorItineraryCheck(customerCode) {
+    const code = String(customerCode || "").trim().toUpperCase();
+    if (!code) throw new Error("Customer Code is required.");
+    const intake = this.getVendorIntakeDraftByCode(code);
+    if (!intake) throw new Error("Customer Code was not found in the local itinerary workspace.");
+    const bookings = this.listVendorBookings().filter((row) => row.customerCode === code);
+    const bookingByService = new Map();
+    bookings.forEach((booking) => {
+      const details = this.getVendorBooking(booking.bookingId);
+      (details?.services || []).forEach((service) => {
+        if (!bookingByService.has(service.serviceId)) bookingByService.set(service.serviceId, booking);
+      });
+    });
+    return {
+      customerCode: intake.customerCode,
+      customerName: intake.customerName,
+      tourId: intake.tourId || "",
+      sourceRevisionId: intake.sourceRevisionId || "",
+      arrivalDate: intake.arrivalDate || "",
+      departureDate: intake.departureDate || "",
+      adultPax: Number(intake.adultPax || 0),
+      childPax: Number(intake.childPax || 0),
+      infantPax: Number(intake.infantPax || 0),
+      readOnly: true,
+      days: (intake.days || []).map((day) => ({
+        tourDayId: day.tourDayId,
+        dayNumber: day.dayNumber,
+        serviceDate: day.serviceDate,
+        dayTitle: day.dayTitle,
+        daywiseText: day.daywiseText,
+        services: (day.splits || []).map((service) => {
+          const booking = bookingByService.get(service.serviceId);
+          return {
+            ...service,
+            ownerDepartment: ["TRANSPORT", "TOC", "LUGGAGE_VAN"].includes(service.serviceType)
+              ? "TRANSPORT" : "VENDOR",
+            bookingId: booking?.bookingId || "",
+            bookingState: booking?.communicationStatus || "NOT_GENERATED",
+            gmailThreadId: booking?.gmailThreadId || "",
+            externalReference: booking?.externalReference || "",
+          };
+        }),
+      })),
+    };
+  }
+
+  getVendorOperationalModel() {
+    const queue = this.listVendorBookingQueue();
+    const intakes = this.listVendorIntakeDrafts().map((row) =>
+      this.getVendorIntakeDraftByCode(row.customer_code)
+    ).filter(Boolean);
+    const bookings = this.listVendorBookings();
+    const customerItem = (intake, extra = {}) => ({
+      customerCode: intake.customerCode,
+      customerName: intake.customerName,
+      tourId: intake.tourId || "",
+      sourceRevisionId: intake.sourceRevisionId || "",
+      arrivalDate: intake.arrivalDate || "",
+      ...extra,
+    });
+    const notSplit = intakes.filter((intake) => {
+      const owned = (intake.days || []).flatMap((day) => day.splits || [])
+        .filter((split) => ["VENDOR", "ADDITIONAL_SERVICE"].includes(split.serviceType));
+      return owned.length === 0 && intake.localStatus !== "VENDOR_COMPLETE";
+    }).map((intake) => customerItem(intake, { status: "NOT_SPLIT" }));
+    const byCustomer = new Map();
+    queue.forEach((item) => {
+      if (!byCustomer.has(item.customerCode)) byCustomer.set(item.customerCode, []);
+      byCustomer.get(item.customerCode).push(item);
+    });
+    const notGenerated = [...byCustomer.entries()].map(([code, packages]) => {
+      const generated = packages.filter((item) =>
+        ["GENERATED", "SENT_PENDING_SYNC", "SENT"].includes(item.workflowStatus)
+      ).length;
+      if (generated === packages.length) return null;
+      const intake = intakes.find((item) => item.customerCode === code);
+      return customerItem(intake || packages[0], {
+        packageKey: packages.find((item) => item.workflowStatus === "NOT_GENERATED")?.packageKey
+          || packages[0].packageKey,
+        generatedCount: generated,
+        totalCount: packages.length,
+        status: `${generated}/${packages.length} GENERATED`,
+      });
+    }).filter(Boolean);
+    const replied = bookings.filter((booking) =>
+      booking.replyReviewStatus === "REVIEW_REQUIRED"
+    ).map((booking) => ({
+      ...booking,
+      serviceName: booking.supplierName,
+      status: "REVIEW_REQUIRED",
+    }));
+    const start = operationalDateEpoch(1);
+    const end = operationalDateEpoch(8);
+    const upcoming = intakes.filter((intake) => {
+      const arrival = new Date(`${intake.arrivalDate || ""}T00:00:00Z`).getTime();
+      return arrival >= start && arrival < end;
+    }).map((intake) => customerItem(intake, { status: "D+1 TO D+7" }));
+    const workInbox = intakes.map((intake) => ({
+      eventId: intake.sourceRevisionId || intake.sourcePublicationId || intake.vendorDraftId,
+      eventType: intake.sourceRevisionId ? "REVISED_ITINERARY" : "NEW_ITINERARY",
+      customerCode: intake.customerCode,
+      customerName: intake.customerName,
+      sourceRevisionId: intake.sourceRevisionId || "",
+      createdAt: intake.updatedAt,
+      state: "UNREAD",
+      actionUrl: intake.sourceRevisionId
+        ? `vendor-revise-itinerary:${intake.customerCode}`
+        : `vendor-new-itinerary:${intake.customerCode}`,
+    }));
+    return {
+      dashboard: { notSplit, notGenerated, replied, upcoming, offline: false },
+      bookingRegister: bookings.filter((row) =>
+        ["GENERATED", "SENT_PENDING_SYNC", "SENT", "SEND_OUTCOME_UNKNOWN"].includes(
+          row.communicationStatus,
+        )
+      ),
+      workInbox,
+    };
+  }
+
   vendorBookingRow(row) {
     return {
       bookingId: row.booking_id,
@@ -2411,6 +2844,11 @@ class LocalDatabase {
       externalReference: row.external_reference || "",
       gmailThreadId: row.gmail_thread_id || "",
       gmailMessageId: row.gmail_message_id || "",
+      officialSyncStatus: row.official_sync_status || "NOT_REQUIRED",
+      lastSendAttemptId: row.last_send_attempt_id || "",
+      replyReviewStatus: row.reply_review_status || "NONE",
+      latestInboundMessageId: row.latest_inbound_message_id || "",
+      latestInboundAt: row.latest_inbound_at || "",
       generatedAt: row.generated_at || "",
       sentAt: row.sent_at || "",
       createdAt: row.created_at,

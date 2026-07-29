@@ -34,6 +34,7 @@
             <button class="nav-collapse-control" data-menu-toggle="vendor" type="button" aria-controls="vendor-submenu" aria-expanded="true">Hide</button>
           </div>
           <div id="vendor-submenu" class="nav-submenu" data-menu-content="vendor" aria-label="Vendor Booking actions">
+            <button class="nav-subitem" data-vendor-action="itinerary-check">Itinerary Check</button>
             <button class="nav-subitem" data-vendor-action="inbox">Inbox</button>
             <button class="nav-subitem" data-vendor-action="generate">Generate</button>
             <button class="nav-subitem" data-vendor-action="new">New Itinerary</button>
@@ -128,29 +129,57 @@
             </div>
             <div class="vendor-dashboard-grid">
               <section class="panel vendor-dashboard-card urgent">
-                <div class="panel-heading"><div><p class="eyebrow">Over 72 hours</p><h2>Urgent</h2></div><span id="vendor-urgent-count" class="inbox-count">0</span></div>
-                <div id="vendor-urgent-list" class="vendor-dashboard-scroll"></div>
+                <div class="panel-heading"><div><p class="eyebrow">Required work</p><h2>New Itinerary — Not Split</h2></div><span id="vendor-not-split-count" class="inbox-count">0</span></div>
+                <div id="vendor-not-split-list" class="vendor-dashboard-scroll"></div>
               </section>
               <section class="panel vendor-dashboard-card pending">
-                <div class="panel-heading"><div><p class="eyebrow">Split, not sent</p><h2>Pending</h2></div><span id="vendor-pending-count" class="inbox-count">0</span></div>
-                <div id="vendor-pending-list" class="vendor-dashboard-scroll"></div>
+                <div class="panel-heading"><div><p class="eyebrow">Supplier packages</p><h2>Split — Not Generated</h2></div><span id="vendor-not-generated-count" class="inbox-count">0</span></div>
+                <div id="vendor-not-generated-list" class="vendor-dashboard-scroll"></div>
               </section>
               <section class="panel vendor-dashboard-card replied">
-                <div class="panel-heading"><div><p class="eyebrow">Email linked</p><h2>Replied</h2></div><span id="vendor-replied-count" class="inbox-count">0</span></div>
+                <div class="panel-heading"><div><p class="eyebrow">Human review required</p><h2>Email Replied — Check Thread</h2></div><span id="vendor-replied-count" class="inbox-count">0</span></div>
                 <div id="vendor-replied-list" class="vendor-dashboard-scroll"></div>
               </section>
               <section class="panel vendor-dashboard-card done">
-                <div class="panel-heading"><div><p class="eyebrow">Check-in D+1 to D+7</p><h2>Done</h2></div><span id="vendor-done-count" class="inbox-count">0</span></div>
-                <div id="vendor-done-list" class="vendor-dashboard-scroll"></div>
+                <div class="panel-heading"><div><p class="eyebrow">Arrival D+1 to D+7</p><h2>Upcoming Arrival Recheck</h2></div><span id="vendor-upcoming-count" class="inbox-count">0</span></div>
+                <div id="vendor-upcoming-list" class="vendor-dashboard-scroll"></div>
               </section>
             </div>
           </section>
 
+          <section id="vendor-itinerary-check-view" class="view">
+            <div class="workspace-banner">
+              <div><p class="eyebrow">Vendor Booking · Read only</p><h2>Itinerary Check</h2><p>Inspect every Day Wise and split type without changing Transport-owned data.</p></div>
+            </div>
+            <div class="panel vendor-itinerary-check-panel">
+              <div class="vendor-itinerary-check-search">
+                <label>Customer Code<input id="vendor-itinerary-check-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-vendor-itinerary-check" class="button primary" type="button">Check itinerary</button>
+                <span id="vendor-itinerary-check-status" class="status">READ ONLY</span>
+              </div>
+              <div id="vendor-itinerary-check-result" class="vendor-itinerary-check-result">
+                <div class="empty-notifications">Enter a Customer Code to inspect the complete itinerary.</div>
+              </div>
+            </div>
+          </section>
+
           <section id="vendor-inbox-view" class="view">
-            <div class="panel">
-              <div class="panel-heading"><div><p class="eyebrow">Vendor Booking</p><h2>Inbox</h2></div><span id="vendor-inbox-count" class="inbox-count">0</span></div>
-              <div class="callout">Inbox sementara bersifat general dan hanya menampilkan informasi. Membuka notifikasi tidak mengubah data booking.</div>
-              <div id="vendor-notification-inbox" class="notification-inbox"></div>
+            <div class="vendor-inbox-layout">
+              <section class="panel vendor-booking-register">
+                <div class="panel-heading"><div><p class="eyebrow">Booking history</p><h2>Booking Register</h2></div><span id="vendor-booking-register-count" class="inbox-count">0</span></div>
+                <div class="vendor-register-filters">
+                  <input id="vendor-register-search" type="search" placeholder="Client Code, guest, supplier, or service" />
+                  <select id="vendor-register-state"><option value="">All states</option><option>GENERATED</option><option>SENT_PENDING_SYNC</option><option>SENT</option><option>SEND_OUTCOME_UNKNOWN</option></select>
+                  <select id="vendor-register-channel"><option value="">All channels</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option><option>OTHERS</option></select>
+                  <select id="vendor-register-sort"><option value="SENT">Latest sent</option><option value="GENERATED">Latest generated</option><option value="CODE">Client Code</option></select>
+                </div>
+                <div id="vendor-booking-register-list" class="vendor-inbox-scroll"></div>
+              </section>
+              <section class="panel vendor-work-inbox">
+                <div class="panel-heading"><div><p class="eyebrow">Incoming work</p><h2>Work Inbox</h2></div><span id="vendor-inbox-count" class="inbox-count">0</span></div>
+                <div class="callout">Read, acknowledged, claimed, and completed remain separate states.</div>
+                <div id="vendor-notification-inbox" class="vendor-inbox-scroll"></div>
+              </section>
             </div>
           </section>
 
@@ -260,12 +289,20 @@
                     <div id="vendor-booking-preview-status"></div>
                   </div>
                   <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
-                  <div class="vendor-booking-form-grid">
-                    <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
-                    <label>Channel<select id="vendor-booking-channel"></select></label>
-                    <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="3"></textarea></label>
-                    <label class="wide">Subject<input id="vendor-booking-subject" /></label>
-                    <label class="wide">Booking message<textarea id="vendor-booking-body" rows="15"></textarea></label>
+                  <div class="vendor-email-popup-layout">
+                    <section class="vendor-email-compose">
+                      <div class="vendor-booking-form-grid">
+                        <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
+                        <label>Channel<select id="vendor-booking-channel"></select></label>
+                        <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="3"></textarea></label>
+                        <label class="wide">Subject<input id="vendor-booking-subject" /></label>
+                        <label class="wide">Booking message<textarea id="vendor-booking-body" rows="15"></textarea></label>
+                      </div>
+                    </section>
+                    <aside class="vendor-email-context">
+                      <div><p class="eyebrow">Permitted context</p><h3>Gmail thread & final message</h3></div>
+                      <div id="vendor-email-context-content" class="vendor-email-context-content"></div>
+                    </aside>
                   </div>
                   <div id="vendor-booking-sop" class="vendor-booking-sop"></div>
                   <div class="vendor-booking-actions">
@@ -856,6 +893,20 @@
               <div><strong>Day Wise & evidence</strong><small>Email thread or other evidence will appear in this panel.</small></div>
             </div>
             <div class="vendor-split-evidence">
+              <div class="vendor-split-day-context" aria-label="Selected Day context">
+                <div>
+                  <span>Hotel hari itu</span>
+                  <strong id="vendor-split-context-hotel">Hotel not assigned</strong>
+                </div>
+                <div>
+                  <span>Start</span>
+                  <strong id="vendor-split-context-start">—</strong>
+                </div>
+                <div>
+                  <span>Finish</span>
+                  <strong id="vendor-split-context-finish">—</strong>
+                </div>
+              </div>
               <div class="vendor-split-day-reference">
                 <span>Day Wise reference</span>
                 <strong id="vendor-split-evidence-title">—</strong>

@@ -32,6 +32,12 @@ function doPost(event) {
       return json_({ ok: true, data: saveVendorIntake_(request, actor) });
     }
 
+    if (route === "vendor.booking.evidence") {
+      requireDesktop_(request, actor);
+      requireVendorBooking_(actor);
+      return json_({ ok: true, data: recordVendorBookingEvidence_(request, actor) });
+    }
+
     if (route === "supplier.master.list") {
       requireDesktop_(request, actor);
       return json_({ ok: true, data: supplierMasterCatalog_() });
@@ -165,6 +171,14 @@ function requireSupplierManager_(actor) {
   const department = String(actor.department || "").toUpperCase().replace(/[ -]+/g, "_");
   if (!["ADMIN", "MANAGER"].includes(role) && department !== "MANAGER_ADMIN") {
     throw apiError_("ACCESS_DENIED", "Only Manager or Admin may change Supplier Master data.");
+  }
+}
+
+function requireVendorBooking_(actor) {
+  const role = String(actor.role || "").toUpperCase().replace(/[ -]+/g, "_");
+  const department = String(actor.department || "").toUpperCase().replace(/[ -]+/g, "_");
+  if (department !== "VENDOR" && !["ADMIN", "MANAGER", "ALL_ROUNDER"].includes(role)) {
+    throw apiError_("ACCESS_DENIED", "Only Vendor Booking or an authorized manager may publish booking evidence.");
   }
 }
 
@@ -1297,6 +1311,122 @@ function recordItineraryEvent_(request, actor) {
       }, actor, now)
       : 0;
     return { eventId, auditId, replayed: false, notificationsCreated };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function recordVendorBookingEvidence_(request, actor) {
+  if (request.apiVersion !== API_VERSION) {
+    throw apiError_("API_VERSION_UNSUPPORTED", "Desktop application must be updated before booking evidence can sync.");
+  }
+  const evidence = request.evidence || {};
+  const sendAttemptId = String(evidence.sendAttemptId || "").trim();
+  const bookingId = String(evidence.bookingId || "").trim();
+  const customerCode = String(evidence.customerCode || "").trim().toUpperCase();
+  const gmailMessageId = String(evidence.gmailMessageId || "").trim();
+  const gmailThreadId = String(evidence.gmailThreadId || "").trim();
+  if (!sendAttemptId || !bookingId || !customerCode || !gmailMessageId || !gmailThreadId) {
+    throw apiError_(
+      "VALIDATION_ERROR",
+      "Send Attempt, Booking, Customer Code, Gmail message, and Gmail thread IDs are required.",
+    );
+  }
+
+  ensureSheetWithHeaders_("SUPPLIER_BOOKINGS", [
+    "booking_id", "tour_id", "customer_code", "supplier_id", "supplier_name",
+    "action_type", "channel", "booking_status", "communication_status",
+    "supplier_result", "rate_status", "source_revision_id", "last_send_attempt_id",
+    "sent_at", "record_version", "created_at", "created_by", "updated_at", "updated_by",
+  ]);
+  ensureSheetWithHeaders_("COMMUNICATIONS", [
+    "communication_id", "booking_id", "tour_id", "customer_code", "supplier_id",
+    "communication_type", "channel", "direction", "status", "send_attempt_id",
+    "snapshot_hash", "recipients_json", "subject_snapshot", "body_snapshot",
+    "service_ids_json", "source_revision_id", "gmail_thread_id", "gmail_message_id",
+    "sent_at", "actor_email", "created_at", "created_by",
+  ]);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const replay = findRecord_("COMMUNICATIONS", "send_attempt_id", sendAttemptId);
+    if (replay) {
+      return {
+        sendAttemptId,
+        bookingId,
+        communicationId: replay.communication_id,
+        replayed: true,
+      };
+    }
+    const now = new Date().toISOString();
+    const booking = {
+      booking_id: bookingId,
+      tour_id: evidence.tourId || "",
+      customer_code: customerCode,
+      supplier_id: evidence.supplierId || "",
+      supplier_name: evidence.supplierName || "",
+      action_type: evidence.actionType || "NEW",
+      channel: "EMAIL",
+      booking_status: evidence.actionType === "CANCEL" ? "CANCELED" : "ACTIVE",
+      communication_status: "SENT",
+      supplier_result: "PENDING",
+      rate_status: evidence.rateStatus || "PENDING_RATE",
+      source_revision_id: evidence.sourceRevisionId || "",
+      last_send_attempt_id: sendAttemptId,
+      sent_at: evidence.sentAt || now,
+    };
+    upsertVersionedRecord_(
+      "SUPPLIER_BOOKINGS", "booking_id", bookingId, booking, actor, now,
+    );
+    const communicationId = uuid_("COMM");
+    appendRecord_("COMMUNICATIONS", {
+      communication_id: communicationId,
+      booking_id: bookingId,
+      tour_id: evidence.tourId || "",
+      customer_code: customerCode,
+      supplier_id: evidence.supplierId || "",
+      communication_type: "SUPPLIER_BOOKING",
+      channel: "EMAIL",
+      direction: "OUTBOUND",
+      status: "SENT",
+      send_attempt_id: sendAttemptId,
+      snapshot_hash: evidence.snapshotHash || "",
+      recipients_json: JSON.stringify(evidence.recipients || []),
+      subject_snapshot: evidence.subject || "",
+      body_snapshot: evidence.body || "",
+      service_ids_json: JSON.stringify(evidence.serviceIds || []),
+      source_revision_id: evidence.sourceRevisionId || "",
+      gmail_thread_id: gmailThreadId,
+      gmail_message_id: gmailMessageId,
+      sent_at: evidence.sentAt || now,
+      actor_email: actor.email,
+      created_at: now,
+      created_by: actor.employeeId,
+    });
+    appendRecord_("AUDIT_LOG", {
+      audit_id: uuid_("AUD"),
+      event_timestamp: now,
+      actor_employee_id: actor.employeeId,
+      actor_email: actor.email,
+      client_mode: "DESKTOP",
+      action: "VENDOR_BOOKING_EMAIL_SENT",
+      entity_type: "SUPPLIER_BOOKING",
+      entity_id: bookingId,
+      tour_id: evidence.tourId || "",
+      request_id: sendAttemptId,
+      before_json: "",
+      after_json: JSON.stringify({
+        communicationId,
+        gmailMessageId,
+        gmailThreadId,
+        snapshotHash: evidence.snapshotHash || "",
+      }),
+      reason: "",
+      result: "SUCCESS",
+      error_code: "",
+    });
+    return { sendAttemptId, bookingId, communicationId, replayed: false };
   } finally {
     lock.releaseLock();
   }

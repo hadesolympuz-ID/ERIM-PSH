@@ -1,6 +1,6 @@
 # Vendor Booking Generate, Send, Revise, and Cancel SOP
 
-Status: `v1.1.7 UAT BASELINE`  
+Status: `v1.1.8 LOCAL UAT BUILD CANDIDATE`
 Operational owner: Vendor Booking
 
 ## 1. Queue ownership

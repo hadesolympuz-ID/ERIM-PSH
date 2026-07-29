@@ -12,7 +12,9 @@ const state = {
   recheckContext: null,
   onlineNotifications: [],
   followups: [],
-  vendorDashboard: { urgent: [], pending: [], replied: [], done: [], offline: true },
+  vendorDashboard: { notSplit: [], notGenerated: [], replied: [], upcoming: [], offline: true },
+  vendorOperational: { bookingRegister: [], workInbox: [] },
+  vendorItineraryCheck: null,
   vendorBookingQueue: [],
   vendorBookings: [],
   vendorBookingPreview: null,
@@ -143,6 +145,7 @@ function formatDate(value) {
 
 function statusClass(status) {
   const lower = String(status || "").toLowerCase();
+  if (lower.includes("pending_sync") || lower.includes("outcome_unknown")) return "conflict";
   if (lower.includes("sync") || lower.includes("healthy")) return "synced";
   if (lower.includes("fail")) return "failed";
   if (lower.includes("conflict") || lower.includes("unavailable") || lower.includes("not_configured")) return "conflict";
@@ -183,13 +186,19 @@ async function refresh() {
     state.onlineNotifications = [];
   }
   try {
-    [state.vendorDashboard, state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
-      window.erim.vendor.getDashboard(),
+    const [operational, queue] = await Promise.all([
+      window.erim.vendor.getOperationalModel(),
       window.erim.vendor.listBookingQueue(),
-      window.erim.vendor.listBookings(),
     ]);
+    state.vendorOperational = operational;
+    state.vendorDashboard = operational.dashboard;
+    state.vendorBookingQueue = queue;
+    state.vendorBookings = operational.bookingRegister;
   } catch {
-    state.vendorDashboard = { urgent: [], pending: [], replied: [], done: [], offline: true };
+    state.vendorDashboard = {
+      notSplit: [], notGenerated: [], replied: [], upcoming: [], offline: true,
+    };
+    state.vendorOperational = { bookingRegister: [], workInbox: [] };
     state.vendorBookingQueue = [];
     state.vendorBookings = [];
   }
@@ -276,10 +285,15 @@ function buildNotifications() {
 
 function renderVendorDashboard() {
   const data = state.vendorDashboard || {};
-  ["urgent", "pending", "replied", "done"].forEach((bucket) => {
-    const items = Array.isArray(data[bucket]) ? data[bucket] : [];
-    $(`#vendor-${bucket}-count`).textContent = items.length;
-    $(`#vendor-${bucket}-list`).innerHTML = items.length ? items.map((item) => `
+  [
+    ["not-split", "notSplit"],
+    ["not-generated", "notGenerated"],
+    ["replied", "replied"],
+    ["upcoming", "upcoming"],
+  ].forEach(([elementKey, dataKey]) => {
+    const items = Array.isArray(data[dataKey]) ? data[dataKey] : [];
+    $(`#vendor-${elementKey}-count`).textContent = items.length;
+    $(`#vendor-${elementKey}-list`).innerHTML = items.length ? items.map((item) => `
       <article class="vendor-dashboard-item">
         <div>
           <strong>${escapeHtml(item.customerCode || "No customer code")}</strong>
@@ -290,15 +304,16 @@ function renderVendorDashboard() {
             item.status,
           ].filter(Boolean).join(" · "))}</small>
         </div>
-        ${bucket === "done" ? "" : `<button class="button ghost small" type="button"
+        <button class="button ghost small" type="button"
           data-vendor-open-code="${escapeHtml(item.customerCode || "")}"
-          data-vendor-open-package="${escapeHtml(item.packageKey || "")}">Open</button>`}
+          data-vendor-open-package="${escapeHtml(item.packageKey || "")}"
+          data-vendor-open-target="${dataKey === "upcoming" ? "ITINERARY_CHECK" : ""}">Open</button>
       </article>
-    `).join("") : `<div class="empty-notifications">${data.offline ? "Connect Google to load online Vendor data." : `No ${bucket} item.`}</div>`;
+    `).join("") : `<div class="empty-notifications">No applicable work item.</div>`;
   });
 }
 
-function renderVendorInbox() {
+function renderVendorInboxLegacy() {
   const notifications = state.onlineNotifications;
   $("#vendor-inbox-count").textContent = notifications.length;
   $("#vendor-notification-inbox").innerHTML = notifications.length ? notifications.map((item) => `
@@ -309,6 +324,105 @@ function renderVendorInbox() {
       <time class="notification-time">${formatDate(item.createdAt)}</time>
     </article>
   `).join("") : `<div class="empty-notifications">No Vendor notifications.</div>`;
+}
+
+function renderVendorInbox() {
+  const search = String($("#vendor-register-search")?.value || "").trim().toLowerCase();
+  const stateFilter = $("#vendor-register-state")?.value || "";
+  const channelFilter = $("#vendor-register-channel")?.value || "";
+  const sort = $("#vendor-register-sort")?.value || "SENT";
+  const register = [...(state.vendorOperational.bookingRegister || [])]
+    .filter((item) => !stateFilter || item.communicationStatus === stateFilter)
+    .filter((item) => !channelFilter || item.channel === channelFilter)
+    .filter((item) => !search || [
+      item.customerCode, item.customerName, item.supplierName,
+    ].join(" ").toLowerCase().includes(search))
+    .sort((a, b) => {
+      if (sort === "CODE") return a.customerCode.localeCompare(b.customerCode);
+      const field = sort === "GENERATED" ? "generatedAt" : "sentAt";
+      return String(b[field] || b.generatedAt || "").localeCompare(
+        String(a[field] || a.generatedAt || ""),
+      );
+    });
+  $("#vendor-booking-register-count").textContent = register.length;
+  $("#vendor-booking-register-list").innerHTML = register.length ? register.map((item) => `
+    <article class="vendor-register-item">
+      <div class="vendor-register-heading">
+        <div><strong>${escapeHtml(item.customerCode)} · ${escapeHtml(item.customerName)}</strong>
+          <small>${item.adultPax} adult · ${item.childPax} child · ${item.infantPax} infant</small></div>
+        ${statusPill(item.communicationStatus)}
+      </div>
+      <div class="vendor-register-details">
+        <span>${escapeHtml(item.supplierName)} · ${escapeHtml(item.actionType)} · ${escapeHtml(item.channel)}</span>
+        <span>Generated ${formatDate(item.generatedAt)} · Sent ${formatDate(item.sentAt)}</span>
+        <span>${escapeHtml(item.rateStatus)} · Supplier ${escapeHtml(item.supplierResult)}</span>
+      </div>
+      <div class="vendor-register-actions">
+        <button class="button ghost small" type="button" data-open-vendor-register="${escapeHtml(item.packageKey)}">Open booking</button>
+        ${item.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(item.gmailThreadId)}">Open Gmail thread</button>` : ""}
+        ${item.externalReference ? `<small>Evidence: ${escapeHtml(item.externalReference)}</small>` : ""}
+        ${item.communicationStatus === "SENT_PENDING_SYNC" && item.lastSendAttemptId
+          ? `<button class="button danger small" type="button" data-retry-vendor-sync="${escapeHtml(item.lastSendAttemptId)}">Retry evidence sync</button>` : ""}
+      </div>
+    </article>
+  `).join("") : `<div class="empty-notifications">No booking record matches the current filters.</div>`;
+
+  const notifications = state.vendorOperational.workInbox || [];
+  $("#vendor-inbox-count").textContent = notifications.length;
+  $("#vendor-notification-inbox").innerHTML = notifications.length ? notifications.map((item) => `
+    <article class="notification-item ${item.state === "UNREAD" ? "success" : ""} ${item.actionUrl ? "actionable" : ""}"
+      ${item.actionUrl ? `data-notification-action="${escapeHtml(item.actionUrl)}"` : ""}>
+      <span class="notification-dot" aria-hidden="true"></span>
+      <div class="notification-copy"><strong>${escapeHtml(item.customerCode)} · ${escapeHtml(item.eventType.replaceAll("_", " "))}</strong><p>${escapeHtml(item.customerName || "Open the exact itinerary revision workspace.")}</p><small>${escapeHtml(item.state)}</small></div>
+      <time class="notification-time">${formatDate(item.createdAt)}</time>
+    </article>
+  `).join("") : `<div class="empty-notifications">No Vendor notifications.</div>`;
+}
+
+async function loadVendorItineraryCheck(customerCode = "") {
+  const code = String(customerCode || $("#vendor-itinerary-check-code").value || "").trim().toUpperCase();
+  if (!code) return toast("Input Customer Code first.", true);
+  const button = $("#load-vendor-itinerary-check");
+  button.disabled = true;
+  try {
+    state.vendorItineraryCheck = await window.erim.vendor.getItineraryCheck(code);
+    $("#vendor-itinerary-check-code").value = state.vendorItineraryCheck.customerCode;
+    renderVendorItineraryCheck();
+  } catch (error) {
+    state.vendorItineraryCheck = null;
+    $("#vendor-itinerary-check-result").innerHTML =
+      `<div class="empty-notifications">${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderVendorItineraryCheck() {
+  const itinerary = state.vendorItineraryCheck;
+  if (!itinerary) return;
+  $("#vendor-itinerary-check-result").innerHTML = `
+    <section class="vendor-itinerary-check-summary">
+      <div><strong>${escapeHtml(itinerary.customerCode)} · ${escapeHtml(itinerary.customerName)}</strong>
+        <small>${escapeHtml(itinerary.arrivalDate)} — ${escapeHtml(itinerary.departureDate)} · ${itinerary.adultPax} adult · ${itinerary.childPax} child · ${itinerary.infantPax} infant</small></div>
+      <span class="status">READ ONLY</span>
+    </section>
+    <div class="vendor-itinerary-days">${itinerary.days.map((day) => `
+      <details class="vendor-itinerary-day" open>
+        <summary><strong>Day ${day.dayNumber} · ${escapeHtml(day.serviceDate)} · ${escapeHtml(day.dayTitle || "Untitled day")}</strong></summary>
+        <p>${escapeHtml(day.daywiseText || "No Day Wise description.")}</p>
+        <div>${day.services.length ? day.services.map((service) => `
+          <article class="vendor-itinerary-service">
+            <div><span>${escapeHtml(service.serviceType.replaceAll("_", " "))} · Owner ${escapeHtml(service.ownerDepartment)}</span>
+              <strong>${escapeHtml(service.activityText || "Unnamed service")}</strong>
+              <small>${escapeHtml(service.vendorName || "Supplier not assigned")} · ${escapeHtml(service.rateStatus)} · ${escapeHtml(service.bookingState)}</small></div>
+            ${service.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(service.gmailThreadId)}">Gmail thread</button>`
+              : service.externalReference ? `<small>Evidence: ${escapeHtml(service.externalReference)}</small>`
+              : `<span class="status conflict">NO EVIDENCE</span>`}
+          </article>
+        `).join("") : `<div class="empty-notifications">No Micro Split item for this day.</div>`}</div>
+      </details>
+    `).join("")}</div>
+  `;
 }
 
 function formatIdr(value) {
@@ -409,7 +523,20 @@ function renderVendorBookingPreview() {
     sop.confirmationProcedure && `Confirmation: ${sop.confirmationProcedure}`,
     preview.pendingRateCount ? `${preview.pendingRateCount} rate belum final; booking tetap boleh dikirim.` : "",
     !preview.masterLinked ? "Supplier belum terhubung ke Supplier Master; recipient/channel perlu dicek manual." : "",
-  ].filter(Boolean).map((line) => `<span>${escapeHtml(line)}</span>`).join("");
+  ].filter(Boolean).map((line) => `<span>${escapeHtml(line)}</span>`).join("")
+    + `<button class="button ghost small" type="button"
+      data-open-supplier-readiness="${escapeHtml(preview.supplierId || "")}"
+      data-open-supplier-name="${escapeHtml(preview.supplierName || "")}">Open exact Supplier Master</button>`;
+  const latest = preview.latestBooking || {};
+  $("#vendor-email-context-content").innerHTML = `
+    ${latest.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(latest.gmailThreadId)}">Open stored Gmail thread</button>`
+      : `<div class="callout">No stored Gmail thread yet. Generating does not send or create a thread.</div>`}
+    <article class="vendor-final-message">
+      <strong id="vendor-final-message-subject">${escapeHtml(preview.subject)}</strong>
+      <small>Template: ${preview.templateVersion || "STANDARD_V1"} · ${escapeHtml(preview.channel)}</small>
+      <pre id="vendor-final-message-body">${escapeHtml(preview.body)}</pre>
+    </article>
+  `;
   const generated = preview.latestBooking?.communicationStatus === "GENERATED";
   $("#vendor-booking-send-panel").hidden = !generated || preview.channel === "EMAIL";
   $("#send-vendor-booking-email").hidden = !generated || preview.channel !== "EMAIL";
@@ -497,7 +624,9 @@ async function sendVendorBookingEmail() {
     await openVendorBookingPackage(state.selectedVendorPackageKey, {
       actionType: booking.actionType, channel: "EMAIL",
     });
-    toast(`Email sent and recorded. Gmail message: ${result.gmailMessageId}`);
+    toast(result.pendingSync
+      ? `Email sent once. Official evidence is pending sync; Gmail message ${result.gmailMessageId}.`
+      : `Email sent and synced. Gmail message: ${result.gmailMessageId}`);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -1824,6 +1953,7 @@ function showView(view, module = null) {
   $$(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.view === view && (!module || node.dataset.module === module)));
   $$("[data-vendor-action]").forEach((node) => {
     const map = {
+      "itinerary-check": "vendor-itinerary-check",
       inbox: "vendor-inbox", generate: "vendor-generate", new: "vendor-new-itinerary",
       revise: "vendor-revise-itinerary", cancel: "vendor-cancel", kpi: "vendor-kpi",
     };
@@ -1845,6 +1975,7 @@ function showView(view, module = null) {
     "reservation-recheck": ["Reservation final checking", "Re Check Itinerary"],
     "reservation-kpi": ["Reservation personal performance", "KPI Saya"],
     "vendor-dashboard": ["Vendor Booking", "Daily control dashboard"],
+    "vendor-itinerary-check": ["Vendor Booking", "Itinerary Check"],
     "vendor-inbox": ["Vendor Booking", "Inbox"],
     "vendor-generate": ["Vendor Booking", "Generate"],
     "vendor-new-itinerary": ["Vendor Booking intake", "New Itinerary"],
@@ -2664,9 +2795,17 @@ function openVendorSplitDialog(card) {
   const dialog = $("#vendor-split-dialog");
   dialog.dataset.dayNumber = String(dayNumber);
   dialog.dataset.serviceDate = serviceDate || "";
+  const hotelNames = [...new Set(
+    vendorHotelsForDate(collectVendorHotelRows(), serviceDate)
+      .map((hotel) => String(hotel.hotelName || "").trim())
+      .filter(Boolean),
+  )];
   $("#vendor-split-dialog-title").textContent = `Day ${dayNumber} micro split`;
   const timeRange = finishTime ? `${startTime}–${finishTime}` : `Start ${startTime}`;
   $("#vendor-split-dialog-meta").textContent = [serviceDate, timeRange, dayTitle].filter(Boolean).join(" · ") || "Date and tour header not filled";
+  $("#vendor-split-context-hotel").textContent = hotelNames.join(" → ") || "Hotel not assigned";
+  $("#vendor-split-context-start").textContent = startTime || "Not set";
+  $("#vendor-split-context-finish").textContent = finishTime || "Not set";
   $("#vendor-split-evidence-title").textContent = dayTitle || `Day ${dayNumber}`;
   $("#vendor-split-evidence-detail").textContent = daywiseText || "No Day Wise detail has been pasted.";
   $("#vendor-split-dialog-list").innerHTML = rows.map(vendorSplitRow).join("");
@@ -3056,6 +3195,7 @@ function bindEvents() {
     const vendorAction = event.target.closest("[data-vendor-action]");
     if (vendorAction) {
       const views = {
+        "itinerary-check": "vendor-itinerary-check",
         inbox: "vendor-inbox", generate: "vendor-generate", new: "vendor-new-itinerary",
         revise: "vendor-revise-itinerary", cancel: "vendor-cancel", kpi: "vendor-kpi",
       };
@@ -3517,6 +3657,12 @@ function bindEvents() {
   $("#save-vendor-draft").addEventListener("click", () => saveVendorIntake(false));
   $("#post-vendor-intake").addEventListener("click", () => saveVendorIntake(true));
   $("#vendor-booking-search").addEventListener("input", renderVendorBookingQueue);
+  $("#vendor-register-search").addEventListener("input", renderVendorInbox);
+  $("#vendor-register-state").addEventListener("change", renderVendorInbox);
+  $("#vendor-register-channel").addEventListener("change", renderVendorInbox);
+  $("#vendor-register-sort").addEventListener("change", renderVendorInbox);
+  $("#load-vendor-itinerary-check").addEventListener("click", () => loadVendorItineraryCheck());
+  $("#vendor-itinerary-check-code").addEventListener("change", () => loadVendorItineraryCheck());
   $("#vendor-booking-action").addEventListener("change", () =>
     openVendorBookingPackage(state.selectedVendorPackageKey, {
       actionType: $("#vendor-booking-action").value,
@@ -3527,6 +3673,16 @@ function bindEvents() {
       actionType: $("#vendor-booking-action").value,
       channel: $("#vendor-booking-channel").value,
     }));
+  $("#vendor-booking-subject").addEventListener("input", (event) => {
+    if ($("#vendor-final-message-subject")) {
+      $("#vendor-final-message-subject").textContent = event.target.value;
+    }
+  });
+  $("#vendor-booking-body").addEventListener("input", (event) => {
+    if ($("#vendor-final-message-body")) {
+      $("#vendor-final-message-body").textContent = event.target.value;
+    }
+  });
   $("#generate-vendor-booking").addEventListener("click", generateVendorBooking);
   $("#send-vendor-booking-email").addEventListener("click", sendVendorBookingEmail);
   $("#record-vendor-booking-sent").addEventListener("click", recordVendorBookingSent);
@@ -3551,7 +3707,7 @@ function bindEvents() {
     toast(`${payload.days.length} Day Wise rows prepared.`);
   });
 
-  document.body.addEventListener("click", (event) => {
+  document.body.addEventListener("click", async (event) => {
     const notification = event.target.closest("[data-notification-action]");
     if (notification) return openVendorNotification(notification.dataset.notificationAction);
     const vendorPackage = event.target.closest("[data-vendor-package-key]");
@@ -3563,6 +3719,11 @@ function bindEvents() {
     }
     const vendorOpen = event.target.closest("[data-vendor-open-code]");
     if (vendorOpen) {
+      if (vendorOpen.dataset.vendorOpenTarget === "ITINERARY_CHECK") {
+        showView("vendor-itinerary-check", "VENDOR");
+        $("#vendor-itinerary-check-code").value = vendorOpen.dataset.vendorOpenCode;
+        return loadVendorItineraryCheck(vendorOpen.dataset.vendorOpenCode);
+      }
       const matchingPackage = state.vendorBookingQueue.find((item) =>
         item.packageKey === vendorOpen.dataset.vendorOpenPackage
       ) || state.vendorBookingQueue.find((item) =>
@@ -3576,6 +3737,46 @@ function bindEvents() {
       showView("vendor-new-itinerary", "VENDOR");
       $("#vendor-customer-code").value = vendorOpen.dataset.vendorOpenCode;
       return loadVendorItinerary(vendorOpen.dataset.vendorOpenCode);
+    }
+    const registerBooking = event.target.closest("[data-open-vendor-register]");
+    if (registerBooking) {
+      showView("vendor-generate", "VENDOR");
+      return openVendorBookingPackage(registerBooking.dataset.openVendorRegister);
+    }
+    const gmailThread = event.target.closest("[data-open-gmail-thread]");
+    if (gmailThread) {
+      return window.erim.external.open(
+        `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(gmailThread.dataset.openGmailThread)}`,
+      );
+    }
+    const retrySync = event.target.closest("[data-retry-vendor-sync]");
+    if (retrySync) {
+      retrySync.disabled = true;
+      window.erim.vendor.retrySendSync(retrySync.dataset.retryVendorSync)
+        .then(async () => {
+          await refresh();
+          toast("Official booking evidence synced. The email was not resent.");
+        })
+        .catch((error) => toast(error.message, true))
+        .finally(() => { retrySync.disabled = false; });
+      return;
+    }
+    const supplierReadiness = event.target.closest("[data-open-supplier-readiness]");
+    if (supplierReadiness) {
+      showView("supplier-master", "MANAGER_ADMIN");
+      if (!state.supplierMasterLoaded) await loadSupplierMaster({ refresh: true });
+      const supplierId = supplierReadiness.dataset.openSupplierReadiness;
+      const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === supplierId);
+      if (supplier) {
+        state.selectedSupplierTypeCode = supplier.typeCode;
+        state.selectedSupplierId = supplier.supplierId;
+        $("#supplier-master-search").value = supplier.supplierName;
+        renderSupplierMaster();
+      } else {
+        $("#supplier-master-search").value = supplierReadiness.dataset.openSupplierName || "";
+        renderSupplierList();
+      }
+      return;
     }
     const removeHotel = event.target.closest("[data-remove-vendor-hotel]");
     if (removeHotel) {

@@ -94,6 +94,9 @@ function registerIpc() {
   ipcMain.handle("reservation:followup-resolve", (_event, id) => database.resolveReservationFollowup(id));
   ipcMain.handle("workspace:gmail-thread", (_event, threadId) => googleWorkspace.getGmailThread(threadId));
   ipcMain.handle("vendor:dashboard", () => googleWorkspace.getVendorDashboard());
+  ipcMain.handle("vendor:operational-model", () => googleWorkspace.getVendorOperationalModel());
+  ipcMain.handle("vendor:itinerary-check", (_event, customerCode) =>
+    database.getVendorItineraryCheck(customerCode));
   ipcMain.handle("vendor:intake-context", (_event, customerCode) => googleWorkspace.getVendorIntakeContext(customerCode));
   ipcMain.handle("vendor:intake-draft-get", (_event, customerCode) => database.getVendorIntakeDraftByCode(customerCode));
   ipcMain.handle("vendor:intake-draft-list", () => database.listVendorIntakeDrafts());
@@ -107,6 +110,8 @@ function registerIpc() {
     googleWorkspace.sendVendorBookingEmail(details || {}));
   ipcMain.handle("vendor:booking-external-sent", (_event, details) =>
     database.recordVendorBookingExternalAction(details || {}));
+  ipcMain.handle("vendor:booking-send-sync-retry", (_event, sendAttemptId) =>
+    googleWorkspace.retryVendorSendSync(sendAttemptId));
   ipcMain.handle("master-data:sync", () => googleWorkspace.syncMasterDataCache());
   ipcMain.handle("supplier-master:list", (_event, options) => googleWorkspace.listSupplierMaster(options || {}));
   ipcMain.handle("supplier-master:initialize", () => googleWorkspace.initializeSupplierMaster());

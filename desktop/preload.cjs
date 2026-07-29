@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld("erim", {
   },
   vendor: {
     getDashboard: () => ipcRenderer.invoke("vendor:dashboard"),
+    getOperationalModel: () => ipcRenderer.invoke("vendor:operational-model"),
+    getItineraryCheck: (customerCode) => ipcRenderer.invoke("vendor:itinerary-check", customerCode),
     getIntakeContext: (customerCode) => ipcRenderer.invoke("vendor:intake-context", customerCode),
     getIntakeDraft: (customerCode) => ipcRenderer.invoke("vendor:intake-draft-get", customerCode),
     listIntakeDrafts: () => ipcRenderer.invoke("vendor:intake-draft-list"),
@@ -54,6 +56,8 @@ contextBridge.exposeInMainWorld("erim", {
     generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
     sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),
     recordExternalSent: (details) => ipcRenderer.invoke("vendor:booking-external-sent", details),
+    retrySendSync: (sendAttemptId) =>
+      ipcRenderer.invoke("vendor:booking-send-sync-retry", sendAttemptId),
   },
   masterData: {
     sync: () => ipcRenderer.invoke("master-data:sync"),
