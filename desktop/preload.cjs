@@ -86,6 +86,14 @@ contextBridge.exposeInMainWorld("erim", {
     },
     discardDraft: (draftId) => ipcRenderer.invoke("supplier-master:draft-discard", draftId),
     uploadContract: (details) => ipcRenderer.invoke("supplier-master:contract-upload", details),
+    openFocused: (details) => ipcRenderer.invoke("supplier-master:focused-open", details),
+    getFocusedContext: () => ipcRenderer.invoke("supplier-master:focused-context"),
+    completeFocused: (result) => ipcRenderer.invoke("supplier-master:focused-complete", result),
+    onFocusedUpdated: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("supplier-master:focused-updated", listener);
+      return () => ipcRenderer.removeListener("supplier-master:focused-updated", listener);
+    },
   },
   supplierExcel: {
     downloadTemplate: (details) => ipcRenderer.invoke("supplier-excel:template", details),

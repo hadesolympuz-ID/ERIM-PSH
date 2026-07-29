@@ -277,8 +277,14 @@
             </div>
             <div class="panel vendor-booking-layout">
               <aside class="vendor-booking-queue">
-                <div class="panel-heading compact"><div><p class="eyebrow">Live queue</p><h2>Supplier packages</h2></div></div>
-                <label class="vendor-booking-search">Filter<input id="vendor-booking-search" placeholder="Customer code or supplier" /></label>
+                <div class="panel-heading compact"><div><p class="eyebrow">Daywise tree</p><h2>Client → Day → service</h2></div></div>
+                <label class="vendor-booking-search">Filter<input id="vendor-booking-search" placeholder="Client, Day, supplier, or service" /></label>
+                <div class="vendor-tree-selection-bar">
+                  <label><input id="vendor-tree-select-all" type="checkbox" /> Select all eligible</label>
+                  <button id="vendor-tree-clear" class="button ghost small" type="button">Clear</button>
+                  <span id="vendor-tree-selected-count">0 selected</span>
+                  <button id="vendor-tree-prepare" class="button primary small" type="button" disabled>Prepare selected</button>
+                </div>
                 <div id="vendor-booking-queue-list" class="vendor-booking-queue-list"></div>
               </aside>
               <section class="vendor-booking-editor">
@@ -361,7 +367,7 @@
               <div>
                 <p class="eyebrow">Manager / Admin</p>
                 <h2>Supplier Master & Contract Rates</h2>
-                <p>One authoritative source for supplier identity, contacts, booking SOP, products, contracts, rates, and future supplier types.</p>
+                <p id="supplier-master-banner-note">One authoritative source for supplier identity, contacts, booking SOP, products, contracts, rates, and future supplier types.</p>
               </div>
               <div class="supplier-master-banner-actions">
                 <span id="supplier-master-sync-status" class="status">Not loaded</span>
@@ -369,6 +375,7 @@
                 <button id="publish-supplier-drafts" class="button primary small" type="button" disabled>Publish to Google</button>
                 <button id="refresh-supplier-master" class="button ghost small" type="button">Refresh</button>
                 <button id="open-supplier-maintenance" class="icon-button supplier-maintenance-button" type="button" title="System Maintenance" aria-label="System Maintenance">⚙</button>
+                <button id="focused-supplier-close" class="button ghost small" type="button" hidden>Close</button>
               </div>
             </div>
             <div class="panel supplier-master-panel">
@@ -402,11 +409,11 @@
                         <label>Internal PIC employee ID<input name="internalPicEmployeeId" /></label>
                         <label class="wide">Operational notes<textarea name="operationalNotes" rows="3"></textarea></label>
                       </div>
-                      <div class="supplier-form-section">
+                      <div class="supplier-form-section supplier-contact-section">
                         <div class="section-heading"><div><p class="eyebrow">Repeatable</p><h3>Contact persons</h3></div><button id="add-supplier-contact" class="button ghost small" type="button">+ Contact</button></div>
                         <div id="supplier-contact-list" class="supplier-repeatable-list"></div>
                       </div>
-                      <div class="supplier-form-section">
+                      <div class="supplier-form-section supplier-recipient-section">
                         <div class="section-heading"><div><p class="eyebrow">To / CC / BCC / WhatsApp</p><h3>Booking recipients</h3></div><button id="add-supplier-recipient" class="button ghost small" type="button">+ Recipient</button></div>
                         <div id="supplier-recipient-list" class="supplier-repeatable-list"></div>
                       </div>
@@ -435,7 +442,7 @@
                       </div>
                       <div class="supplier-master-form-actions">
                         <button id="archive-supplier" class="button danger" type="button" hidden>Archive supplier</button>
-                        <button class="button primary" type="submit">Save supplier locally</button>
+                        <button id="save-supplier-master" class="button primary" type="submit">Save supplier locally</button>
                       </div>
                     </form>
                   </div>

@@ -295,6 +295,7 @@ class LocalDatabase {
         price_source TEXT NOT NULL DEFAULT 'NONE',
         adult_rate_idr REAL,
         child_rate_idr REAL,
+        infant_rate_idr REAL,
         unit_rate_idr REAL,
         price_basis TEXT NOT NULL DEFAULT 'PER_SERVICE',
         quantity REAL NOT NULL DEFAULT 1,
@@ -538,6 +539,7 @@ class LocalDatabase {
     this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "finish_time", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("vendor_service_splits", "infant_rate_idr", "REAL");
     this.ensureColumn("local_vendor_bookings", "official_sync_status", "TEXT NOT NULL DEFAULT 'NOT_REQUIRED'");
     this.ensureColumn("local_vendor_bookings", "last_send_attempt_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("local_vendor_bookings", "reply_review_status", "TEXT NOT NULL DEFAULT 'NONE'");
@@ -582,6 +584,7 @@ class LocalDatabase {
             price_source TEXT NOT NULL DEFAULT 'NONE',
             adult_rate_idr REAL,
             child_rate_idr REAL,
+            infant_rate_idr REAL,
             unit_rate_idr REAL,
             price_basis TEXT NOT NULL DEFAULT 'PER_SERVICE',
             quantity REAL NOT NULL DEFAULT 1,
@@ -601,7 +604,7 @@ class LocalDatabase {
             service_id, tour_day_id, split_sequence, service_type, activity_text,
             vendor_id, vendor_name, service_master_id, supplier_id, product_id,
             contract_id, contract_rate_id, price_source,
-            adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+            adult_rate_idr, child_rate_idr, infant_rate_idr, unit_rate_idr, price_basis, quantity,
             currency, rate_status, manual_price_reason, manual_rate_source,
             manual_evidence_ref, rate_valid_to,
             rate_snapshot_at, status
@@ -622,6 +625,7 @@ class LocalDatabase {
             ${expression("price_source", "'NONE'")},
             ${expression("adult_rate_idr", "NULL")},
             ${expression("child_rate_idr", "NULL")},
+            ${expression("infant_rate_idr", "NULL")},
             ${expression("unit_rate_idr", "NULL")},
             ${expression("price_basis", "'PER_SERVICE'")},
             ${expression("quantity", "1")},
@@ -1627,7 +1631,8 @@ class LocalDatabase {
           serviceName: product.productName || "",
           adultRateIdr: basis === "PER_ADULT" ? amount : null,
           childRateIdr: basis === "PER_CHILD" ? amount : null,
-          unitRateIdr: !["PER_ADULT", "PER_CHILD"].includes(basis) ? amount : null,
+          infantRateIdr: basis === "PER_INFANT" ? amount : null,
+          unitRateIdr: !["PER_ADULT", "PER_CHILD", "PER_INFANT"].includes(basis) ? amount : null,
           priceBasis: basis,
           currency: rate.currency || contract.currency || "IDR",
           validFrom: rate.validFrom || contract.validFrom || "",
@@ -1837,7 +1842,7 @@ class LocalDatabase {
       SELECT service_id, split_sequence, service_type, activity_text,
         vendor_id, vendor_name, service_master_id, supplier_id, product_id,
         contract_id, contract_rate_id, price_source,
-        adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+        adult_rate_idr, child_rate_idr, infant_rate_idr, unit_rate_idr, price_basis, quantity,
         currency, rate_status, manual_price_reason, manual_rate_source,
         manual_evidence_ref, rate_valid_to,
         rate_snapshot_at, status
@@ -1902,6 +1907,7 @@ class LocalDatabase {
           priceSource: split.price_source || "NONE",
           adultRateIdr: split.adult_rate_idr,
           childRateIdr: split.child_rate_idr,
+          infantRateIdr: split.infant_rate_idr,
           unitRateIdr: split.unit_rate_idr,
           priceBasis: split.price_basis || "PER_SERVICE",
           quantity: Number(split.quantity ?? 1),
@@ -1976,6 +1982,28 @@ class LocalDatabase {
         const quantity = Number(split.quantity ?? 1);
         if (!Number.isFinite(quantity) || quantity <= 0) {
           throw new Error(`Day ${dayNumber} split quantity must be greater than 0.`);
+        }
+        if (["PER_ITEM", "PER_UNIT", "PER_VEHICLE", "PER_TRIP", "PER_SERVICE"].includes(
+          String(split.priceBasis || "PER_SERVICE").toUpperCase(),
+        ) && !Number.isInteger(quantity)) {
+          throw new Error(`Day ${dayNumber} split quantity must be a whole number for this Price Basis.`);
+        }
+        const priceBasis = String(split.priceBasis || "PER_SERVICE").toUpperCase();
+        if (["PER_PAX", "PER_SERVICE"].includes(priceBasis) && quantity !== 1) {
+          throw new Error(`Day ${dayNumber} ${priceBasis} quantity is fixed at 1.`);
+        }
+        if (split.priceSource === "MANUAL" && split.rateStatus === "RATE_READY") {
+          const nonNegativeRate = (value) =>
+            value !== "" && value !== null && value !== undefined
+            && Number.isFinite(Number(value)) && Number(value) >= 0;
+          const manualReady = priceBasis === "PER_PAX"
+            ? (!pax.adultPax || nonNegativeRate(split.adultRateIdr))
+              && (!pax.childPax || nonNegativeRate(split.childRateIdr))
+              && (!pax.infantPax || nonNegativeRate(split.infantRateIdr))
+            : nonNegativeRate(split.unitRateIdr);
+          if (!manualReady) {
+            throw new Error(`Day ${dayNumber} manual ${priceBasis} rate is incomplete for RATE_READY.`);
+          }
         }
         if (!["RATE_READY", "PENDING_RATE"].includes(String(split.rateStatus || "PENDING_RATE"))) {
           throw new Error(`Day ${dayNumber} split rate status is invalid.`);
@@ -2080,11 +2108,11 @@ class LocalDatabase {
           service_id, tour_day_id, split_sequence, service_type,
           activity_text, vendor_id, vendor_name, service_master_id,
           supplier_id, product_id, contract_id, contract_rate_id, price_source,
-          adult_rate_idr, child_rate_idr, unit_rate_idr, price_basis, quantity,
+          adult_rate_idr, child_rate_idr, infant_rate_idr, unit_rate_idr, price_basis, quantity,
           currency, rate_status, manual_price_reason, manual_rate_source,
           manual_evidence_ref, rate_valid_to,
           rate_snapshot_at, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       days.forEach((day) => {
         const dayId = day.tourDayId || this.id("TDAY");
@@ -2103,6 +2131,7 @@ class LocalDatabase {
           split.priceSource || "NONE",
           split.adultRateIdr === "" ? null : (split.adultRateIdr ?? null),
           split.childRateIdr === "" ? null : (split.childRateIdr ?? null),
+          split.infantRateIdr === "" ? null : (split.infantRateIdr ?? null),
           split.unitRateIdr === "" ? null : (split.unitRateIdr ?? null),
           split.priceBasis || "PER_SERVICE", Number(split.quantity ?? 1),
           split.currency || "IDR", split.rateStatus || "PENDING_RATE",
@@ -2193,16 +2222,55 @@ class LocalDatabase {
       WHERE package_key = ?
       ORDER BY updated_at DESC LIMIT 1
     `);
+    const serviceStateStatement = this.db.prepare(`
+      SELECT s.service_id, b.booking_id, b.action_type, b.communication_status,
+        b.supplier_result, b.official_sync_status, b.gmail_thread_id,
+        b.external_reference, b.generated_at, b.sent_at, b.updated_at
+      FROM local_vendor_booking_services s
+      JOIN local_vendor_bookings b ON b.booking_id = s.booking_id
+      WHERE b.package_key = ?
+      ORDER BY b.updated_at DESC, s.created_at DESC
+    `);
     return [...packages.values()].map((item) => {
       const latest = latestStatement.get(item.packageKey);
+      const serviceStateById = new Map();
+      serviceStateStatement.all(item.packageKey).forEach((row) => {
+        if (!serviceStateById.has(row.service_id)) serviceStateById.set(row.service_id, row);
+      });
+      const services = item.services.map((service) => {
+        const bookingState = serviceStateById.get(service.serviceId);
+        return {
+          ...service,
+          bookingId: bookingState?.booking_id || "",
+          actionType: bookingState?.action_type || "NEW",
+          workflowStatus: bookingState?.communication_status || "NOT_GENERATED",
+          supplierResult: bookingState?.supplier_result || "PENDING",
+          officialSyncStatus: bookingState?.official_sync_status || "NOT_REQUIRED",
+          gmailThreadId: bookingState?.gmail_thread_id || "",
+          externalReference: bookingState?.external_reference || "",
+          generatedAt: bookingState?.generated_at || "",
+          sentAt: bookingState?.sent_at || "",
+        };
+      });
+      const generatedCount = services.filter((service) =>
+        service.workflowStatus !== "NOT_GENERATED"
+      ).length;
       const pendingRates = item.services.filter((service) => service.rateStatus !== "RATE_READY").length;
       return {
         ...item,
+        services,
         serviceCount: item.services.length,
+        generatedCount,
+        eligibleCount: services.filter((service) =>
+          service.workflowStatus === "NOT_GENERATED"
+        ).length,
         pendingRateCount: pendingRates,
         rateStatus: pendingRates ? "PENDING_RATE" : "RATE_READY",
         latestBooking: latest ? this.vendorBookingRow(latest) : null,
-        workflowStatus: latest?.communication_status || "NOT_GENERATED",
+        workflowStatus: generatedCount === 0
+          ? "NOT_GENERATED"
+          : generatedCount < services.length ? "PARTIALLY_GENERATED"
+            : latest?.communication_status || "GENERATED",
         updatedAt: latest?.updated_at || item.updatedAt,
       };
     }).sort((a, b) =>
@@ -2216,6 +2284,18 @@ class LocalDatabase {
     const packageKey = String(input.packageKey || "");
     const item = this.listVendorBookingQueue().find((row) => row.packageKey === packageKey);
     if (!item) throw new Error("Vendor booking package was not found. Save the Micro Split first.");
+    const requestedServiceIds = [...new Set(
+      (Array.isArray(input.serviceIds) ? input.serviceIds : [])
+        .map((value) => String(value || "").trim()).filter(Boolean),
+    )];
+    const availableServiceIds = new Set(item.services.map((service) => service.serviceId));
+    if (requestedServiceIds.some((serviceId) => !availableServiceIds.has(serviceId))) {
+      throw new Error("One or more selected Micro Split services no longer belong to this package.");
+    }
+    const selectedServices = requestedServiceIds.length
+      ? item.services.filter((service) => requestedServiceIds.includes(service.serviceId))
+      : item.services;
+    if (!selectedServices.length) throw new Error("Choose at least one Micro Split service.");
     const catalog = this.getSupplierMasterCatalog();
     const active = (row) => String(row.status || "ACTIVE").toUpperCase() !== "ARCHIVED"
       && row.active !== false;
@@ -2264,7 +2344,7 @@ class LocalDatabase {
       /\{\{\s*([a-z_]+)\s*\}\}/gi,
       (_match, key) => String(values[String(key).toLowerCase()] ?? ""),
     );
-    const serviceLines = item.services.map((service) =>
+    const serviceLines = selectedServices.map((service) =>
       `- Day ${service.dayNumber} | ${service.serviceDate || "date pending"} | ${service.productName}`
       + `${service.quantity && Number(service.quantity) !== 1 ? ` | qty ${service.quantity}` : ""}`
     ).join("\n");
@@ -2294,14 +2374,22 @@ class LocalDatabase {
         : channel === "PORTAL"
           ? Boolean(sop.portalUrl)
           : selectedRecipients.some((row) => row.address) || channel === "OTHERS";
+    const selectedPendingRateCount = selectedServices.filter((service) =>
+      service.rateStatus !== "RATE_READY"
+    ).length;
     const readinessNotices = [
       !item.masterLinked ? "Supplier is not linked to an active Supplier Master entry." : "",
       !sops.length ? "Active Supplier Booking SOP is missing." : "",
       !destinationReady ? `${channel} destination is missing.` : "",
-      item.pendingRateCount ? `${item.pendingRateCount} item(s) use pending or manual rates; communication remains allowed.` : "",
+      selectedPendingRateCount ? `${selectedPendingRateCount} item(s) use pending or manual rates; communication remains allowed.` : "",
     ].filter(Boolean);
     return {
       ...item,
+      services: selectedServices,
+      selectedServiceIds: selectedServices.map((service) => service.serviceId),
+      serviceCount: selectedServices.length,
+      pendingRateCount: selectedPendingRateCount,
+      rateStatus: selectedPendingRateCount ? "PENDING_RATE" : "RATE_READY",
       actionType,
       availableChannels,
       channel,

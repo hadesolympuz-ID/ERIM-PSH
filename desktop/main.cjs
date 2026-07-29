@@ -16,6 +16,8 @@ let googleAuth;
 let backendHealth;
 let googleWorkspace;
 let supplierExcel;
+let supplierFocusWindow;
+const supplierFocusContexts = new Map();
 
 const isDev = !app.isPackaged;
 
@@ -46,6 +48,56 @@ function createWindow() {
   if (isDev && process.env.ERIM_OPEN_DEVTOOLS === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
+}
+
+function openFocusedSupplierWindow(sender, input = {}) {
+  const section = String(input.section || "PROFILE").toUpperCase();
+  if (!["PROFILE", "RECIPIENTS", "SOP", "PRODUCT", "RATE"].includes(section)) {
+    throw new Error("Focused Supplier Master section is invalid.");
+  }
+  if (supplierFocusWindow && !supplierFocusWindow.isDestroyed()) {
+    supplierFocusWindow.close();
+  }
+  const parent = BrowserWindow.fromWebContents(sender) || mainWindow;
+  const focusedWindow = new BrowserWindow({
+    parent,
+    modal: true,
+    width: 1040,
+    height: 820,
+    minWidth: 760,
+    minHeight: 620,
+    backgroundColor: "#f3f6f8",
+    show: false,
+    title: "Supplier Master correction",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  supplierFocusWindow = focusedWindow;
+  focusedWindow.removeMenu();
+  const context = {
+    requestId: database.id("SFR"),
+    supplierId: String(input.supplierId || ""),
+    supplierName: String(input.supplierName || ""),
+    productId: String(input.productId || ""),
+    serviceId: String(input.serviceId || ""),
+    serviceDate: String(input.serviceDate || ""),
+    packageKey: String(input.packageKey || ""),
+    section,
+    parentWindowId: parent.id,
+  };
+  const webContentsId = focusedWindow.webContents.id;
+  supplierFocusContexts.set(webContentsId, context);
+  focusedWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  focusedWindow.once("ready-to-show", () => focusedWindow.show());
+  focusedWindow.on("closed", () => {
+    supplierFocusContexts.delete(webContentsId);
+    if (supplierFocusWindow === focusedWindow) supplierFocusWindow = null;
+  });
+  return { requestId: context.requestId };
 }
 
 function registerIpc() {
@@ -131,6 +183,20 @@ function registerIpc() {
     googleWorkspace.discardSupplierMasterDraft(draftId));
   ipcMain.handle("supplier-master:contract-upload", (_event, details) =>
     googleWorkspace.selectAndUploadSupplierContract(details));
+  ipcMain.handle("supplier-master:focused-open", (event, details) =>
+    openFocusedSupplierWindow(event.sender, details || {}));
+  ipcMain.handle("supplier-master:focused-context", (event) =>
+    supplierFocusContexts.get(event.sender.id) || null);
+  ipcMain.handle("supplier-master:focused-complete", (event, result = {}) => {
+    const context = supplierFocusContexts.get(event.sender.id);
+    if (!context) throw new Error("Focused Supplier Master context is no longer active.");
+    BrowserWindow.fromId(context.parentWindowId)?.webContents.send(
+      "supplier-master:focused-updated",
+      { ...context, result },
+    );
+    BrowserWindow.fromWebContents(event.sender)?.close();
+    return { ok: true };
+  });
   ipcMain.handle("supplier-excel:template", (_event, details) =>
     supplierExcel.downloadTemplate(details || {}));
   ipcMain.handle("supplier-excel:import-analyze", (_event, details) =>

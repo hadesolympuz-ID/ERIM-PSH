@@ -554,22 +554,37 @@ test("groups Vendor and Additional splits per supplier while excluding Transport
   assert.equal(activity.pendingRateCount, 1);
   assert.ok(queue.every((row) => row.services.every((service) => service.serviceType !== "TRANSPORT")));
 
+  const selectedServiceId = activity.services[0].serviceId;
   const preview = database.getVendorBookingPreview({
-    packageKey: activity.packageKey, actionType: "NEW",
+    packageKey: activity.packageKey, serviceIds: [selectedServiceId], actionType: "NEW",
   });
+  assert.equal(preview.serviceCount, 1);
+  assert.deepEqual(preview.selectedServiceIds, [selectedServiceId]);
   assert.equal(preview.channel, "WHATSAPP");
   assert.equal(preview.recipients[0].address, "+62 812-0000-0000");
   assert.match(preview.body, /TEST\/VENDOR-BOOKING/);
 
   const generated = database.saveVendorBookingPreview({
-    packageKey: activity.packageKey, actionType: "NEW",
+    packageKey: activity.packageKey, serviceIds: [selectedServiceId], actionType: "NEW",
   });
   assert.equal(generated.communicationStatus, "GENERATED");
   assert.equal(generated.rateStatus, "PENDING_RATE");
+  assert.equal(generated.services.length, 1);
   const sent = database.recordVendorBookingExternalAction({
     bookingId: generated.bookingId, externalReference: "WA 09:15 confirmed delivered",
   });
   assert.equal(sent.communicationStatus, "SENT");
+  const partialQueue = database.listVendorBookingQueue()
+    .find((row) => row.packageKey === activity.packageKey);
+  assert.equal(partialQueue.workflowStatus, "PARTIALLY_GENERATED");
+  assert.equal(
+    partialQueue.services.find((row) => row.serviceId === selectedServiceId).workflowStatus,
+    "SENT",
+  );
+  assert.equal(
+    partialQueue.services.find((row) => row.serviceId !== selectedServiceId).workflowStatus,
+    "NOT_GENERATED",
+  );
 
   const canceled = database.saveVendorBookingPreview({
     packageKey: activity.packageKey, actionType: "CANCEL",
@@ -1028,4 +1043,60 @@ test("requires reason and source for booking-only manual rates", () => withDatab
   const saved = database.saveVendorIntakeDraft(base);
   assert.equal(saved.days[0].splits[0].manualPriceReason, "Contract expired");
   assert.equal(saved.days[0].splits[0].manualRateSource, "EMAIL");
+}));
+
+test("stores manual PER_PAX rates by pax category and enforces fixed or whole quantities", () => withDatabase((database) => {
+  const manualPax = {
+    customerCode: "MANUAL/PAX",
+    customerName: "Manual Pax Test",
+    adultPax: 2,
+    childPax: 1,
+    infantPax: 1,
+    days: [{
+      dayNumber: 1,
+      startTime: "09:00",
+      splits: [{
+        serviceType: "VENDOR",
+        activityText: "Category rate service",
+        vendorName: "Manual Supplier",
+        priceBasis: "PER_PAX",
+        quantity: 1,
+        adultRateIdr: 200000,
+        childRateIdr: 100000,
+        infantRateIdr: 0,
+        priceSource: "MANUAL",
+        rateStatus: "RATE_READY",
+        manualPriceReason: "Direct quotation",
+        manualRateSource: "EMAIL",
+      }],
+    }],
+  };
+  const saved = database.saveVendorIntakeDraft(manualPax);
+  assert.equal(saved.days[0].splits[0].adultRateIdr, 200000);
+  assert.equal(saved.days[0].splits[0].childRateIdr, 100000);
+  assert.equal(saved.days[0].splits[0].infantRateIdr, 0);
+  assert.ok(database.db.prepare("PRAGMA table_info(vendor_service_splits)").all()
+    .some((column) => column.name === "infant_rate_idr"));
+
+  const missingInfant = structuredClone(manualPax);
+  missingInfant.days[0].splits[0].infantRateIdr = null;
+  assert.throws(() => database.saveVendorIntakeDraft(missingInfant), /manual PER_PAX rate is incomplete/i);
+
+  const perService = structuredClone(manualPax);
+  perService.customerCode = "MANUAL/PER-SERVICE";
+  Object.assign(perService.days[0].splits[0], {
+    priceBasis: "PER_SERVICE",
+    quantity: 2,
+    unitRateIdr: 500000,
+  });
+  assert.throws(() => database.saveVendorIntakeDraft(perService), /PER_SERVICE quantity is fixed at 1/i);
+
+  const perItem = structuredClone(manualPax);
+  perItem.customerCode = "MANUAL/PER-ITEM";
+  Object.assign(perItem.days[0].splits[0], {
+    priceBasis: "PER_ITEM",
+    quantity: 1.5,
+    unitRateIdr: 500000,
+  });
+  assert.throws(() => database.saveVendorIntakeDraft(perItem), /quantity must be a whole number/i);
 }));

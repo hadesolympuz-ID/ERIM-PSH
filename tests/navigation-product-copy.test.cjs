@@ -137,3 +137,33 @@ test("Vendor milestone exposes stable dashboard, two-section Inbox, Itinerary Ch
   assert.match(styles, /\.vendor-inbox-layout/);
   assert.match(styles, /\.vendor-email-popup-layout/);
 });
+
+test("Manual rates use pax categories or whole quantities and Generate follows a selectable client tree", () => {
+  assert.match(app, /"Adult", "adultRateIdr"/);
+  assert.match(app, /"Child", "childRateIdr"/);
+  assert.match(app, /"Infant", "infantRateIdr"/);
+  assert.match(app, /manualPerPaxReady/);
+  assert.match(app, /Math\.round\(Number\(manualDraft\.quantity/);
+  assert.match(html, /id="vendor-tree-select-all"/);
+  assert.match(html, /id="vendor-tree-clear"/);
+  assert.match(html, /id="vendor-tree-prepare"/);
+  assert.match(app, /selectedVendorServiceIds: new Set\(\)/);
+  assert.match(app, /vendor-tree-client/);
+  assert.match(app, /vendor-tree-day/);
+  assert.match(app, /serviceIds: preview\.selectedServiceIds/);
+  assert.match(styles, /\.vendor-tree-client/);
+});
+
+test("Supplier readiness opens a focused child window and returns after a local save", () => {
+  assert.match(html, /id="focused-supplier-close"/);
+  assert.match(app, /supplierFocusContext: null/);
+  assert.match(app, /initializeSupplierFocusMode/);
+  assert.match(app, /openFocused/);
+  assert.match(app, /completeFocused/);
+  assert.match(preload, /supplier-master:focused-open/);
+  assert.match(preload, /supplier-master:focused-complete/);
+  assert.match(main, /openFocusedSupplierWindow/);
+  assert.match(main, /supplier-master:focused-updated/);
+  assert.match(styles, /\.supplier-focus-mode/);
+  assert.match(styles, /\.supplier-focus-section-recipients/);
+});

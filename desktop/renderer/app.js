@@ -19,6 +19,10 @@ const state = {
   vendorBookings: [],
   vendorBookingPreview: null,
   selectedVendorPackageKey: "",
+  selectedVendorServiceIds: new Set(),
+  vendorExpandedClients: new Set(),
+  vendorExpandedDays: new Set(),
+  vendorTreeInitialized: false,
   vendorIntakeMode: "NEW",
   vendorIntake: null,
   vendorSuggestions: {
@@ -39,6 +43,7 @@ const state = {
   supplierPublishSession: null,
   supplierPublishSessions: [],
   supplierPublishActive: false,
+  supplierFocusContext: null,
   vendorSplitSuggestionSequence: 0,
   selectedSupplierTypeCode: "VENDOR",
   selectedSupplierId: "",
@@ -436,6 +441,8 @@ function vendorServiceRateLabel(service) {
       ? `Adult ${formatIdr(service.adultRateIdr)}` : "",
     service.childRateIdr !== null && service.childRateIdr !== undefined
       ? `Child ${formatIdr(service.childRateIdr)}` : "",
+    service.infantRateIdr !== null && service.infantRateIdr !== undefined
+      ? `Infant ${formatIdr(service.infantRateIdr)}` : "",
     service.unitRateIdr !== null && service.unitRateIdr !== undefined
       ? `Unit ${formatIdr(service.unitRateIdr)}` : "",
   ].filter(Boolean);
@@ -446,18 +453,162 @@ function renderVendorBookingQueue() {
   const list = $("#vendor-booking-queue-list");
   if (!list) return;
   const search = String($("#vendor-booking-search")?.value || "").trim().toLowerCase();
-  const rows = (state.vendorBookingQueue || []).filter((item) =>
-    !search || `${item.customerCode} ${item.customerName} ${item.supplierName}`.toLowerCase().includes(search)
+  const clients = new Map();
+  (state.vendorBookingQueue || []).forEach((item) => {
+    if (!clients.has(item.customerCode)) {
+      clients.set(item.customerCode, {
+        customerCode: item.customerCode,
+        customerName: item.customerName,
+        arrivalDate: item.arrivalDate,
+        days: new Map(),
+      });
+    }
+    const client = clients.get(item.customerCode);
+    item.services.forEach((service) => {
+      const dayKey = `${item.customerCode}|${service.dayNumber}|${service.serviceDate}`;
+      if (!client.days.has(dayKey)) {
+        client.days.set(dayKey, {
+          dayKey,
+          dayNumber: service.dayNumber,
+          serviceDate: service.serviceDate,
+          dayTitle: service.dayTitle,
+          services: [],
+        });
+      }
+      client.days.get(dayKey).services.push({ ...service, package: item });
+    });
+  });
+  const eligibleIds = new Set(
+    [...clients.values()].flatMap((client) => [...client.days.values()])
+      .flatMap((day) => day.services)
+      .filter((service) => service.workflowStatus === "NOT_GENERATED")
+      .map((service) => service.serviceId),
   );
+  state.selectedVendorServiceIds = new Set(
+    [...state.selectedVendorServiceIds].filter((serviceId) => eligibleIds.has(serviceId)),
+  );
+  if (!state.vendorTreeInitialized) {
+    clients.forEach((client) => {
+      const eligible = [...client.days.values()].some((day) =>
+        day.services.some((service) => service.workflowStatus === "NOT_GENERATED")
+      );
+      if (eligible) state.vendorExpandedClients.add(client.customerCode);
+      client.days.forEach((day) => {
+        if (day.services.some((service) => service.workflowStatus === "NOT_GENERATED")) {
+          state.vendorExpandedDays.add(day.dayKey);
+        }
+      });
+    });
+    state.vendorTreeInitialized = true;
+  }
   $("#vendor-booking-package-count").textContent = state.vendorBookingQueue.length;
-  list.innerHTML = rows.length ? rows.map((item) => `
-    <button class="vendor-booking-queue-item${item.packageKey === state.selectedVendorPackageKey ? " selected" : ""}"
-      type="button" data-vendor-package-key="${escapeHtml(item.packageKey)}">
-      <span><strong>${escapeHtml(item.customerCode)}</strong><small>${escapeHtml(item.customerName)}</small></span>
-      <span><strong>${escapeHtml(item.supplierName)}</strong><small>${item.serviceCount} service · ${escapeHtml(item.workflowStatus.replaceAll("_", " "))}</small></span>
-      <span class="status ${item.pendingRateCount ? "conflict" : "synced"}">${item.pendingRateCount ? `${item.pendingRateCount} pending rate` : "Rate ready"}</span>
-    </button>
-  `).join("") : `<div class="empty-notifications">No Vendor or Additional Service split matches this filter.</div>`;
+  const markup = [...clients.values()].map((client) => {
+    const clientMatch = `${client.customerCode} ${client.customerName}`.toLowerCase().includes(search);
+    const dayMarkup = [...client.days.values()]
+      .sort((a, b) => a.dayNumber - b.dayNumber)
+      .map((day) => {
+        const dayMatch = `${day.dayNumber} ${day.serviceDate} ${day.dayTitle}`.toLowerCase().includes(search);
+        const services = day.services.filter((service) =>
+          !search || clientMatch || dayMatch
+          || `${service.package.supplierName} ${service.productName || service.activityText} ${service.workflowStatus}`
+            .toLowerCase().includes(search)
+        );
+        if (!services.length) return "";
+        const eligible = services.filter((service) => service.workflowStatus === "NOT_GENERATED");
+        const selected = eligible.filter((service) =>
+          state.selectedVendorServiceIds.has(service.serviceId)
+        );
+        return `
+          <details class="vendor-tree-day" data-vendor-tree-day="${escapeHtml(day.dayKey)}"
+            ${search || state.vendorExpandedDays.has(day.dayKey) ? "open" : ""}>
+            <summary>
+              <input type="checkbox" data-vendor-tree-day-select
+                ${eligible.length && selected.length === eligible.length ? "checked" : ""}
+                ${eligible.length ? "" : "disabled"} />
+              <span class="vendor-tree-branch">├─</span>
+              <span><strong>Day ${day.dayNumber} · ${escapeHtml(day.serviceDate || "date pending")}</strong>
+                <small>${escapeHtml(day.dayTitle || "No Day Wise header")} · ${selected.length}/${eligible.length} selected</small></span>
+            </summary>
+            <div class="vendor-tree-services">
+              ${services.map((service, index) => `
+                <div class="vendor-tree-service${service.package.packageKey === state.selectedVendorPackageKey ? " active" : ""}"
+                  data-vendor-tree-service="${escapeHtml(service.serviceId)}">
+                  <input type="checkbox" data-vendor-tree-service-select="${escapeHtml(service.serviceId)}"
+                    ${state.selectedVendorServiceIds.has(service.serviceId) ? "checked" : ""}
+                    ${service.workflowStatus === "NOT_GENERATED" ? "" : "disabled"} />
+                  <span class="vendor-tree-branch">${index === services.length - 1 ? "└─" : "├─"}</span>
+                  <button type="button" class="vendor-tree-service-open"
+                    data-vendor-tree-open-package="${escapeHtml(service.package.packageKey)}"
+                    data-vendor-tree-open-service="${escapeHtml(service.serviceId)}">
+                    <strong>${escapeHtml(service.package.supplierName)} — ${escapeHtml(service.productName || service.activityText)}</strong>
+                    <small>${escapeHtml(service.workflowStatus.replaceAll("_", " "))} · ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · ${escapeHtml(service.supplierResult || "PENDING")}</small>
+                  </button>
+                  ${service.gmailThreadId
+                    ? `<button type="button" class="vendor-tree-link" data-open-gmail-thread="${escapeHtml(service.gmailThreadId)}">Gmail</button>`
+                    : `<span class="vendor-tree-state">${service.workflowStatus === "GENERATED" ? "Open draft" : service.workflowStatus === "SENT_PENDING_SYNC" ? "Retry sync" : "Open"}</span>`}
+                </div>
+              `).join("")}
+            </div>
+          </details>
+        `;
+      }).filter(Boolean);
+    if (!dayMarkup.length) return "";
+    const visibleServices = [...client.days.values()].flatMap((day) => day.services).filter((service) =>
+      !search || clientMatch
+      || `${service.package.supplierName} ${service.productName || service.activityText}`.toLowerCase().includes(search)
+    );
+    const eligible = visibleServices.filter((service) => service.workflowStatus === "NOT_GENERATED");
+    const selected = eligible.filter((service) => state.selectedVendorServiceIds.has(service.serviceId));
+    return `
+      <details class="vendor-tree-client" data-vendor-tree-client="${escapeHtml(client.customerCode)}"
+        ${search || state.vendorExpandedClients.has(client.customerCode) ? "open" : ""}>
+        <summary>
+          <input type="checkbox" data-vendor-tree-client-select
+            ${eligible.length && selected.length === eligible.length ? "checked" : ""}
+            ${eligible.length ? "" : "disabled"} />
+          <span><strong>${escapeHtml(client.customerCode)} — ${escapeHtml(client.customerName)}</strong>
+            <small>${selected.length}/${eligible.length} eligible selected · Arrival ${escapeHtml(client.arrivalDate || "pending")}</small></span>
+        </summary>
+        <div class="vendor-tree-days">${dayMarkup.join("")}</div>
+      </details>
+    `;
+  }).filter(Boolean);
+  list.innerHTML = markup.length ? markup.join("")
+    : `<div class="empty-notifications">No Vendor or Additional Service split matches this filter.</div>`;
+  list.querySelectorAll("[data-vendor-tree-client-select], [data-vendor-tree-day-select]").forEach((checkbox) => {
+    const children = [...checkbox.closest("details")
+      .querySelectorAll("[data-vendor-tree-service-select]:not(:disabled)")];
+    const selected = children.filter((node) => node.checked);
+    checkbox.indeterminate = selected.length > 0 && selected.length < children.length;
+  });
+  const selectedCount = state.selectedVendorServiceIds.size;
+  $("#vendor-tree-selected-count").textContent = `${selectedCount} selected`;
+  $("#vendor-tree-prepare").disabled = selectedCount === 0;
+  const visibleEligible = [...list.querySelectorAll("[data-vendor-tree-service-select]:not(:disabled)")];
+  $("#vendor-tree-select-all").checked = Boolean(visibleEligible.length)
+    && visibleEligible.every((node) => node.checked);
+  $("#vendor-tree-select-all").indeterminate = visibleEligible.some((node) => node.checked)
+    && !visibleEligible.every((node) => node.checked);
+}
+
+function selectedVendorServicesByPackage() {
+  const groups = new Map();
+  state.vendorBookingQueue.forEach((item) => {
+    const serviceIds = item.services
+      .filter((service) => state.selectedVendorServiceIds.has(service.serviceId)
+        && service.workflowStatus === "NOT_GENERATED")
+      .map((service) => service.serviceId);
+    if (serviceIds.length) groups.set(item.packageKey, serviceIds);
+  });
+  return groups;
+}
+
+async function prepareSelectedVendorServices() {
+  const groups = selectedVendorServicesByPackage();
+  if (!groups.size) return toast("Choose at least one eligible Micro Split service.", true);
+  const [packageKey, serviceIds] = groups.entries().next().value;
+  await openVendorBookingPackage(packageKey, { serviceIds });
+  toast(`${state.selectedVendorServiceIds.size} service(s) form ${groups.size} supplier package(s). Review each package before Generate or Send.`);
 }
 
 function recipientLines(recipients = []) {
@@ -477,8 +628,13 @@ function parseRecipientLines(value) {
 async function openVendorBookingPackage(packageKey, options = {}) {
   state.selectedVendorPackageKey = packageKey;
   try {
+    const serviceIds = Array.isArray(options.serviceIds)
+      ? options.serviceIds
+      : state.vendorBookingPreview?.packageKey === packageKey
+        ? state.vendorBookingPreview.selectedServiceIds || [] : [];
     const preview = await window.erim.vendor.getBookingPreview({
       packageKey,
+      serviceIds,
       actionType: options.actionType || $("#vendor-booking-action")?.value || "NEW",
       channel: options.channel || "",
       cancellationReason: options.cancellationReason || "",
@@ -516,6 +672,16 @@ function renderVendorBookingPreview() {
     `).join("")}
   `;
   const sop = preview.sop || {};
+  const focusService = preview.services.find((service) => service.rateStatus !== "RATE_READY")
+    || preview.services[0] || {};
+  const focusSection = !preview.masterLinked
+    ? "PROFILE"
+    : preview.readinessNotices?.some((notice) => String(notice).toUpperCase().includes("SOP"))
+      ? "SOP"
+      : preview.readinessNotices?.some((notice) =>
+        /RECIPIENT|DESTINATION|EMAIL|WHATSAPP/i.test(String(notice)))
+        ? "RECIPIENTS"
+        : preview.pendingRateCount ? (focusService.productId ? "RATE" : "PRODUCT") : "PROFILE";
   $("#vendor-booking-sop").innerHTML = [
     sop.leadTime && `Lead time: ${sop.leadTime}`,
     sop.cutoffTime && `Cut-off: ${sop.cutoffTime}`,
@@ -526,7 +692,12 @@ function renderVendorBookingPreview() {
   ].filter(Boolean).map((line) => `<span>${escapeHtml(line)}</span>`).join("")
     + `<button class="button ghost small" type="button"
       data-open-supplier-readiness="${escapeHtml(preview.supplierId || "")}"
-      data-open-supplier-name="${escapeHtml(preview.supplierName || "")}">Open exact Supplier Master</button>`;
+      data-open-supplier-name="${escapeHtml(preview.supplierName || "")}"
+      data-open-supplier-section="${escapeHtml(focusSection)}"
+      data-open-supplier-product="${escapeHtml(focusService.productId || "")}"
+      data-open-supplier-service="${escapeHtml(focusService.serviceId || "")}"
+      data-open-supplier-date="${escapeHtml(focusService.serviceDate || "")}"
+      data-open-supplier-package="${escapeHtml(preview.packageKey || "")}">Open exact Supplier Master</button>`;
   const latest = preview.latestBooking || {};
   $("#vendor-email-context-content").innerHTML = `
     ${latest.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(latest.gmailThreadId)}">Open stored Gmail thread</button>`
@@ -560,6 +731,7 @@ async function generateVendorBooking() {
   try {
     const booking = await window.erim.vendor.generateBooking({
       packageKey: preview.packageKey,
+      serviceIds: preview.selectedServiceIds,
       bookingId: preview.latestBooking?.bookingId || "",
       actionType: $("#vendor-booking-action").value,
       channel,
@@ -1179,7 +1351,8 @@ function supplierSuggestionsFromCatalog(catalog, serviceDate = new Date().toISOS
       serviceName: product.productName || "",
       adultRateIdr: basis === "PER_ADULT" ? amount : null,
       childRateIdr: basis === "PER_CHILD" ? amount : null,
-      unitRateIdr: !["PER_ADULT", "PER_CHILD"].includes(basis) ? amount : null,
+      infantRateIdr: basis === "PER_INFANT" ? amount : null,
+      unitRateIdr: !["PER_ADULT", "PER_CHILD", "PER_INFANT"].includes(basis) ? amount : null,
       priceBasis: basis,
       currency: rate.currency || contract.currency || "IDR",
       validFrom: rate.validFrom || contract.validFrom || "",
@@ -1438,6 +1611,14 @@ async function saveSupplierMasterForm(event) {
     state.selectedSupplierId = draft?.entityId || payload.supplierId;
     renderSupplierMaster();
     toast(`${payload.supplierName} saved locally. Continue editing or publish the batch when ready.`);
+    if (state.supplierFocusContext
+      && ["PROFILE", "RECIPIENTS", "SOP"].includes(state.supplierFocusContext.section)) {
+      await window.erim.supplierMaster.completeFocused({
+        kind: state.supplierFocusContext.section,
+        entityId: state.selectedSupplierId,
+        localStatus: "LOCAL_PENDING",
+      });
+    }
   } catch (error) {
     toast(error.message, true);
   }
@@ -1543,10 +1724,17 @@ async function saveSupplierProductForm(event) {
   const existing = state.supplierMaster.products.find((row) => row.productId === payload.productId);
   payload.baseRecordVersion = existing?.recordVersion ?? null;
   try {
-    applySupplierLocalResult(await window.erim.supplierMaster.saveProduct(payload));
+    const draft = applySupplierLocalResult(await window.erim.supplierMaster.saveProduct(payload));
     $("#supplier-product-dialog").close();
     renderSupplierMaster();
     toast(`${payload.productName} saved locally.`);
+    if (state.supplierFocusContext?.section === "PRODUCT") {
+      await window.erim.supplierMaster.completeFocused({
+        kind: "PRODUCT",
+        entityId: draft?.entityId || payload.productId,
+        localStatus: "LOCAL_PENDING",
+      });
+    }
   } catch (error) { toast(error.message, true); }
 }
 
@@ -1745,12 +1933,19 @@ async function saveSupplierContractForm(event) {
   const existing = state.supplierMaster.contracts.find((row) => row.contractId === payload.contractId);
   payload.baseRecordVersion = existing?.recordVersion ?? null;
   try {
-    applySupplierLocalResult(await window.erim.supplierMaster.saveContract(payload));
+    const draft = applySupplierLocalResult(await window.erim.supplierMaster.saveContract(payload));
     $("#supplier-contract-dialog").close();
     renderSupplierMaster();
     state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
     renderVendorSuggestions(state.vendorSuggestions);
     toast(`${payload.contractNumber} and its rates saved locally.`);
+    if (state.supplierFocusContext?.section === "RATE") {
+      await window.erim.supplierMaster.completeFocused({
+        kind: "RATE",
+        entityId: draft?.entityId || payload.contractId,
+        localStatus: "LOCAL_PENDING",
+      });
+    }
   } catch (error) { toast(error.message, true); }
 }
 
@@ -2480,12 +2675,14 @@ function vendorSplitRate(serviceType, supplierId, productId, serviceDate = "") {
     ...combined,
     adultRateIdr: hasKnownRate(rate.adultRateIdr) ? rate.adultRateIdr : combined.adultRateIdr,
     childRateIdr: hasKnownRate(rate.childRateIdr) ? rate.childRateIdr : combined.childRateIdr,
+    infantRateIdr: hasKnownRate(rate.infantRateIdr) ? rate.infantRateIdr : combined.infantRateIdr,
     unitRateIdr: hasKnownRate(rate.unitRateIdr) ? rate.unitRateIdr : combined.unitRateIdr,
     contractRateId: combined.contractRateId || rate.contractRateId || "",
   }), {
     ...first,
     adultRateIdr: null,
     childRateIdr: null,
+    infantRateIdr: null,
     unitRateIdr: null,
   });
 }
@@ -2510,10 +2707,105 @@ function vendorSplitProductPriceLabel(product, serviceType, supplierId, serviceD
   const parts = [
     hasKnownRate(rate.adultRateIdr) ? `Adult ${idr(rate.adultRateIdr)}` : "",
     hasKnownRate(rate.childRateIdr) ? `Child ${idr(rate.childRateIdr)}` : "",
+    hasKnownRate(rate.infantRateIdr) ? `Infant ${idr(rate.infantRateIdr)}` : "",
     hasKnownRate(rate.unitRateIdr) ? idr(rate.unitRateIdr) : "",
     rate.priceBasis ? rate.priceBasis.replaceAll("_", " ") : "",
   ].filter(Boolean);
   return parts.join(" · ") || "Pending rate";
+}
+
+function vendorSplitPaxCounts() {
+  const form = $("#vendor-intake-form");
+  return {
+    adult: Number(form?.elements.adultPax?.value || state.vendorIntake?.adultPax || 0),
+    child: Number(form?.elements.childPax?.value || state.vendorIntake?.childPax || 0),
+    infant: Number(form?.elements.infantPax?.value || state.vendorIntake?.infantPax || 0),
+  };
+}
+
+function manualPerPaxReady(pax, rates) {
+  const categories = [
+    [pax.adult, rates.adultRateIdr],
+    [pax.child, rates.childRateIdr],
+    [pax.infant, rates.infantRateIdr],
+  ];
+  return categories.some(([count]) => count > 0)
+    && categories.every(([count, rate]) => count <= 0 || hasKnownRate(rate));
+}
+
+function vendorManualRateDraft(row) {
+  const value = (field) => row.querySelector(`[data-vendor-split-field="${field}"]`)?.value ?? "";
+  return {
+    priceSource: "MANUAL",
+    priceBasis: value("priceBasis") || "PER_SERVICE",
+    adultRateIdr: value("adultRateIdr"),
+    childRateIdr: value("childRateIdr"),
+    infantRateIdr: value("infantRateIdr"),
+    unitRateIdr: value("unitRateIdr"),
+    quantity: value("quantity") || 1,
+    manualPriceReason: value("manualPriceReason"),
+    manualRateSource: value("manualRateSource"),
+    manualEvidenceRef: value("manualEvidenceRef"),
+  };
+}
+
+function updateVendorManualRatePreview(row) {
+  if (!row) return;
+  const basis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";
+  const perPax = basis === "PER_PAX";
+  const flat = basis === "PER_SERVICE";
+  const paxPanel = row.querySelector("[data-manual-rate-per-pax]");
+  const unitPanel = row.querySelector("[data-manual-rate-unit]");
+  const quantityLabel = row.querySelector("[data-manual-quantity-field]");
+  if (paxPanel) paxPanel.hidden = !perPax;
+  if (unitPanel) unitPanel.hidden = perPax;
+  if (quantityLabel) {
+    quantityLabel.hidden = flat || perPax;
+    const labels = {
+      PER_ITEM: "Items",
+      PER_UNIT: "Units",
+      PER_VEHICLE: "Vehicles",
+      PER_TRIP: "Trips",
+    };
+    const caption = quantityLabel.querySelector("span");
+    if (caption) caption.textContent = labels[basis] || "Quantity";
+  }
+  const quantityInput = row.querySelector('[data-vendor-split-field="quantity"]');
+  if (quantityInput && (flat || perPax)) quantityInput.value = "1";
+
+  const draft = vendorManualRateDraft(row);
+  const pax = vendorSplitPaxCounts();
+  let ready;
+  let total = 0;
+  const missing = [];
+  if (perPax) {
+    ready = manualPerPaxReady(pax, draft);
+    [
+      ["Adult", pax.adult, draft.adultRateIdr],
+      ["Child", pax.child, draft.childRateIdr],
+      ["Infant", pax.infant, draft.infantRateIdr],
+    ].forEach(([label, count, rate]) => {
+      if (count <= 0) return;
+      if (hasKnownRate(rate)) total += count * Number(rate);
+      else missing.push(label);
+    });
+  } else {
+    ready = hasKnownRate(draft.unitRateIdr);
+    const quantity = flat ? 1 : Math.max(1, Number(draft.quantity || 1));
+    if (ready) total = Number(draft.unitRateIdr) * quantity;
+  }
+  const badge = row.querySelector("[data-vendor-rate-status]");
+  if (badge) {
+    badge.textContent = ready ? "Manual rate ready" : "Pending rate";
+    badge.className = `vendor-rate-status ${ready ? "ready" : "pending"}`;
+  }
+  const preview = row.querySelector("[data-manual-rate-total]");
+  if (preview) {
+    preview.innerHTML = `<strong>Estimated total ${ready || total ? escapeHtml(idr(total)) : "—"}</strong>`
+      + `<small>${missing.length ? `Missing ${escapeHtml(missing.join(", "))} rate` : perPax
+        ? `${pax.adult} Adult · ${pax.child} Child · ${pax.infant} Infant`
+        : `${flat ? 1 : Math.max(1, Number(draft.quantity || 1))} × ${escapeHtml(idr(draft.unitRateIdr) || "rate pending")}`}</small>`;
+  }
 }
 
 function vendorSplitRateMarkup(split = {}) {
@@ -2521,9 +2813,25 @@ function vendorSplitRateMarkup(split = {}) {
   const rate = vendorSplitRate(type, split.supplierId, split.productId || split.serviceMasterId, split.serviceDate);
   if (!rate) {
     const unitRate = split.priceSource === "MANUAL" ? (split.unitRateIdr ?? "") : "";
-    const ready = hasKnownRate(unitRate);
+    const adultRate = split.priceSource === "MANUAL" ? (split.adultRateIdr ?? "") : "";
+    const childRate = split.priceSource === "MANUAL" ? (split.childRateIdr ?? "") : "";
+    const infantRate = split.priceSource === "MANUAL" ? (split.infantRateIdr ?? "") : "";
     const basis = split.priceBasis || "PER_SERVICE";
-    const quantity = Number(split.quantity ?? 1) || 1;
+    const quantity = Math.max(1, Math.round(Number(split.quantity ?? 1) || 1));
+    const pax = vendorSplitPaxCounts();
+    const perPax = basis === "PER_PAX";
+    const ready = perPax
+      ? manualPerPaxReady(pax, {
+        adultRateIdr: adultRate,
+        childRateIdr: childRate,
+        infantRateIdr: infantRate,
+      })
+      : hasKnownRate(unitRate);
+    const estimatedTotal = perPax
+      ? (hasKnownRate(adultRate) ? pax.adult * Number(adultRate) : 0)
+        + (hasKnownRate(childRate) ? pax.child * Number(childRate) : 0)
+        + (hasKnownRate(infantRate) ? pax.infant * Number(infantRate) : 0)
+      : (hasKnownRate(unitRate) ? Number(unitRate) * (basis === "PER_SERVICE" ? 1 : quantity) : 0);
     return `
       <div class="vendor-split-rate-heading">
         <span class="vendor-rate-status ${ready ? "ready" : "pending"}" data-vendor-rate-status>
@@ -2533,11 +2841,6 @@ function vendorSplitRateMarkup(split = {}) {
       </div>
       <div class="vendor-split-manual-rate">
         <label class="vendor-split-field">
-          <span>Manual rate</span>
-          <input data-vendor-split-field="unitRateIdr" type="number" min="0" step="1"
-            value="${escapeHtml(unitRate)}" placeholder="Can be filled later" />
-        </label>
-        <label class="vendor-split-field">
           <span>Price basis</span>
           <select data-vendor-split-field="priceBasis">
             ${["PER_SERVICE", "PER_PAX", "PER_ITEM", "PER_UNIT", "PER_TRIP", "PER_VEHICLE"].map((value) =>
@@ -2545,11 +2848,37 @@ function vendorSplitRateMarkup(split = {}) {
             ).join("")}
           </select>
         </label>
-        <label class="vendor-split-field">
-          <span>Quantity</span>
-          <input data-vendor-split-field="quantity" type="number" min="0.01" step="0.01"
-            value="${escapeHtml(quantity)}" />
-        </label>
+        <div class="vendor-manual-pax-rates" data-manual-rate-per-pax ${perPax ? "" : "hidden"}>
+          ${[
+            ["Adult", "adultRateIdr", pax.adult, adultRate],
+            ["Child", "childRateIdr", pax.child, childRate],
+            ["Infant", "infantRateIdr", pax.infant, infantRate],
+          ].map(([label, field, count, value]) => `
+            <label class="vendor-split-field">
+              <span>${label} rate · ${count} pax</span>
+              <input data-vendor-split-field="${field}" type="number" min="0" step="1"
+                value="${escapeHtml(value)}" placeholder="${count ? "Required or 0 if free" : "No pax"}"
+                ${count ? "" : "disabled"} />
+            </label>
+          `).join("")}
+        </div>
+        <div class="vendor-manual-unit-rate" data-manual-rate-unit ${perPax ? "hidden" : ""}>
+          <label class="vendor-split-field">
+            <span>Unit rate</span>
+            <input data-vendor-split-field="unitRateIdr" type="number" min="0" step="1"
+              value="${escapeHtml(unitRate)}" placeholder="Can be filled later" />
+          </label>
+          <label class="vendor-split-field" data-manual-quantity-field ${basis === "PER_SERVICE" ? "hidden" : ""}>
+            <span>Quantity</span>
+            <input data-vendor-split-field="quantity" type="number" min="1" step="1"
+              value="${escapeHtml(quantity)}" />
+          </label>
+        </div>
+        <div class="vendor-manual-rate-total" data-manual-rate-total>
+          <strong>Estimated total ${ready || estimatedTotal ? escapeHtml(idr(estimatedTotal)) : "—"}</strong>
+          <small>${perPax ? `${pax.adult} Adult · ${pax.child} Child · ${pax.infant} Infant`
+            : `${basis === "PER_SERVICE" ? 1 : quantity} × ${escapeHtml(idr(unitRate) || "rate pending")}`}</small>
+        </div>
         <label class="vendor-split-field">
           <span>Reason *</span>
           <input data-vendor-split-field="manualPriceReason" value="${escapeHtml(split.manualPriceReason || "")}"
@@ -2573,11 +2902,13 @@ function vendorSplitRateMarkup(split = {}) {
   }
   const adult = rate?.adultRateIdr ?? split.adultRateIdr;
   const child = rate?.childRateIdr ?? split.childRateIdr;
+  const infant = rate?.infantRateIdr ?? split.infantRateIdr;
   const unit = rate?.unitRateIdr ?? split.unitRateIdr;
-  const ready = hasKnownRate(adult) || hasKnownRate(child) || hasKnownRate(unit);
+  const ready = hasKnownRate(adult) || hasKnownRate(child) || hasKnownRate(infant) || hasKnownRate(unit);
   const parts = [
     hasKnownRate(adult) ? `Adult ${idr(adult)}` : "",
     hasKnownRate(child) ? `Child ${idr(child)}` : "",
+    hasKnownRate(infant) ? `Infant ${idr(infant)}` : "",
     hasKnownRate(unit) ? `Unit ${idr(unit)}` : "",
     rate?.priceBasis ? rate.priceBasis.replaceAll("_", " ") : "",
     rate?.contractNumber ? `Contract ${rate.contractNumber}` : "",
@@ -2688,15 +3019,24 @@ function collectVendorSplitRows(container) {
       .find((item) => item.productId === productId)?.productName
       || row.querySelector('[data-vendor-split-suggestion="product"]')?.value.trim() || "";
     const matchedRate = vendorSplitRate(serviceType, supplierId, productId);
-    const manualRateInput = row.querySelector('[data-vendor-split-field="unitRateIdr"]');
-    const manualRate = manualRateInput?.value === "" || manualRateInput === null
-      ? null : Number(manualRateInput.value);
+    const manualDraft = vendorManualRateDraft(row);
+    const manualRate = manualDraft.unitRateIdr === "" ? null : Number(manualDraft.unitRateIdr);
+    const manualAdultRate = manualDraft.adultRateIdr === "" ? null : Number(manualDraft.adultRateIdr);
+    const manualChildRate = manualDraft.childRateIdr === "" ? null : Number(manualDraft.childRateIdr);
+    const manualInfantRate = manualDraft.infantRateIdr === "" ? null : Number(manualDraft.infantRateIdr);
+    const basis = matchedRate?.priceBasis || manualDraft.priceBasis || "PER_SERVICE";
+    const pax = vendorSplitPaxCounts();
     const unitRateIdr = matchedRate?.unitRateIdr ?? manualRate;
-    const adultRateIdr = matchedRate?.adultRateIdr ?? null;
-    const childRateIdr = matchedRate?.childRateIdr ?? null;
-    const rateReady = hasKnownRate(adultRateIdr)
-      || hasKnownRate(childRateIdr)
-      || hasKnownRate(unitRateIdr);
+    const adultRateIdr = matchedRate?.adultRateIdr ?? (basis === "PER_PAX" ? manualAdultRate : null);
+    const childRateIdr = matchedRate?.childRateIdr ?? (basis === "PER_PAX" ? manualChildRate : null);
+    const infantRateIdr = matchedRate?.infantRateIdr ?? (basis === "PER_PAX" ? manualInfantRate : null);
+    const rateReady = basis === "PER_PAX"
+      ? manualPerPaxReady(pax, { adultRateIdr, childRateIdr, infantRateIdr })
+      : hasKnownRate(adultRateIdr) || hasKnownRate(childRateIdr)
+        || hasKnownRate(infantRateIdr) || hasKnownRate(unitRateIdr);
+    const manualFilled = [
+      manualRate, manualAdultRate, manualChildRate, manualInfantRate,
+    ].some(hasKnownRate);
     return {
       serviceId: row.dataset.serviceId || "",
       splitSequence: index + 1,
@@ -2709,18 +3049,19 @@ function collectVendorSplitRows(container) {
       serviceMasterId: productId,
       contractId: matchedRate?.contractId || "",
       contractRateId: matchedRate?.contractRateId || "",
-      priceSource: matchedRate ? "CONTRACT" : (hasKnownRate(manualRate) ? "MANUAL" : "NONE"),
       adultRateIdr,
       childRateIdr,
+      infantRateIdr,
       unitRateIdr,
-      priceBasis: matchedRate?.priceBasis
-        || row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE",
-      quantity: Number(row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1),
+      priceBasis: basis,
+      quantity: basis === "PER_PAX" || basis === "PER_SERVICE"
+        ? 1 : Math.max(1, Math.round(Number(manualDraft.quantity || 1))),
       currency: matchedRate?.currency || "IDR",
       rateStatus: rateReady ? "RATE_READY" : "PENDING_RATE",
-      manualPriceReason: row.querySelector('[data-vendor-split-field="manualPriceReason"]')?.value.trim() || "",
-      manualRateSource: row.querySelector('[data-vendor-split-field="manualRateSource"]')?.value || "",
-      manualEvidenceRef: row.querySelector('[data-vendor-split-field="manualEvidenceRef"]')?.value.trim() || "",
+      priceSource: matchedRate ? "CONTRACT" : (manualFilled ? "MANUAL" : "NONE"),
+      manualPriceReason: manualDraft.manualPriceReason.trim(),
+      manualRateSource: manualDraft.manualRateSource,
+      manualEvidenceRef: manualDraft.manualEvidenceRef.trim(),
       rateValidTo: matchedRate?.validTo || "",
       rateSnapshotAt: row.dataset.rateSnapshotAt || new Date().toISOString(),
       status: "DRAFT",
@@ -2998,6 +3339,9 @@ function refreshVendorSplitRow(row, { resetSupplier = false, resetProduct = fals
     )}"></option>`
   ).join("");
   const existingUnit = row.querySelector('[data-vendor-split-field="unitRateIdr"]')?.value ?? "";
+  const existingAdult = row.querySelector('[data-vendor-split-field="adultRateIdr"]')?.value ?? "";
+  const existingChild = row.querySelector('[data-vendor-split-field="childRateIdr"]')?.value ?? "";
+  const existingInfant = row.querySelector('[data-vendor-split-field="infantRateIdr"]')?.value ?? "";
   const existingBasis = row.querySelector('[data-vendor-split-field="priceBasis"]')?.value || "PER_SERVICE";
   const existingQuantity = row.querySelector('[data-vendor-split-field="quantity"]')?.value || 1;
   const existingReason = row.querySelector('[data-vendor-split-field="manualPriceReason"]')?.value || "";
@@ -3007,6 +3351,10 @@ function refreshVendorSplitRow(row, { resetSupplier = false, resetProduct = fals
     serviceType: type,
     supplierId: supplierInput.value,
     productId: productInput.value,
+    priceSource: "MANUAL",
+    adultRateIdr: existingAdult,
+    childRateIdr: existingChild,
+    infantRateIdr: existingInfant,
     unitRateIdr: existingUnit,
     priceBasis: existingBasis,
     quantity: existingQuantity,
@@ -3657,6 +4005,61 @@ function bindEvents() {
   $("#save-vendor-draft").addEventListener("click", () => saveVendorIntake(false));
   $("#post-vendor-intake").addEventListener("click", () => saveVendorIntake(true));
   $("#vendor-booking-search").addEventListener("input", renderVendorBookingQueue);
+  $("#vendor-booking-queue-list").addEventListener("click", (event) => {
+    if (event.target.matches("input[type='checkbox']")) {
+      event.stopPropagation();
+      return;
+    }
+    const open = event.target.closest("[data-vendor-tree-open-package]");
+    if (open) {
+      return openVendorBookingPackage(open.dataset.vendorTreeOpenPackage, {
+        serviceIds: [open.dataset.vendorTreeOpenService],
+      });
+    }
+  });
+  $("#vendor-booking-queue-list").addEventListener("change", (event) => {
+    const service = event.target.closest("[data-vendor-tree-service-select]");
+    if (service) {
+      if (service.checked) state.selectedVendorServiceIds.add(service.dataset.vendorTreeServiceSelect);
+      else state.selectedVendorServiceIds.delete(service.dataset.vendorTreeServiceSelect);
+      return renderVendorBookingQueue();
+    }
+    const parent = event.target.closest(
+      "[data-vendor-tree-client-select], [data-vendor-tree-day-select]",
+    );
+    if (!parent) return;
+    parent.closest("details").querySelectorAll(
+      "[data-vendor-tree-service-select]:not(:disabled)",
+    ).forEach((node) => {
+      if (parent.checked) state.selectedVendorServiceIds.add(node.dataset.vendorTreeServiceSelect);
+      else state.selectedVendorServiceIds.delete(node.dataset.vendorTreeServiceSelect);
+    });
+    renderVendorBookingQueue();
+  });
+  $("#vendor-booking-queue-list").addEventListener("toggle", (event) => {
+    const client = event.target.closest("[data-vendor-tree-client]");
+    const day = event.target.closest("[data-vendor-tree-day]");
+    if (day) {
+      if (day.open) state.vendorExpandedDays.add(day.dataset.vendorTreeDay);
+      else state.vendorExpandedDays.delete(day.dataset.vendorTreeDay);
+    } else if (client) {
+      if (client.open) state.vendorExpandedClients.add(client.dataset.vendorTreeClient);
+      else state.vendorExpandedClients.delete(client.dataset.vendorTreeClient);
+    }
+  }, true);
+  $("#vendor-tree-select-all").addEventListener("change", (event) => {
+    $$("#vendor-booking-queue-list [data-vendor-tree-service-select]:not(:disabled)")
+      .forEach((node) => {
+        if (event.target.checked) state.selectedVendorServiceIds.add(node.dataset.vendorTreeServiceSelect);
+        else state.selectedVendorServiceIds.delete(node.dataset.vendorTreeServiceSelect);
+      });
+    renderVendorBookingQueue();
+  });
+  $("#vendor-tree-clear").addEventListener("click", () => {
+    state.selectedVendorServiceIds.clear();
+    renderVendorBookingQueue();
+  });
+  $("#vendor-tree-prepare").addEventListener("click", prepareSelectedVendorServices);
   $("#vendor-register-search").addEventListener("input", renderVendorInbox);
   $("#vendor-register-state").addEventListener("change", renderVendorInbox);
   $("#vendor-register-channel").addEventListener("change", renderVendorInbox);
@@ -3763,19 +4166,15 @@ function bindEvents() {
     }
     const supplierReadiness = event.target.closest("[data-open-supplier-readiness]");
     if (supplierReadiness) {
-      showView("supplier-master", "MANAGER_ADMIN");
-      if (!state.supplierMasterLoaded) await loadSupplierMaster({ refresh: true });
-      const supplierId = supplierReadiness.dataset.openSupplierReadiness;
-      const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === supplierId);
-      if (supplier) {
-        state.selectedSupplierTypeCode = supplier.typeCode;
-        state.selectedSupplierId = supplier.supplierId;
-        $("#supplier-master-search").value = supplier.supplierName;
-        renderSupplierMaster();
-      } else {
-        $("#supplier-master-search").value = supplierReadiness.dataset.openSupplierName || "";
-        renderSupplierList();
-      }
+      await window.erim.supplierMaster.openFocused({
+        supplierId: supplierReadiness.dataset.openSupplierReadiness,
+        supplierName: supplierReadiness.dataset.openSupplierName,
+        section: supplierReadiness.dataset.openSupplierSection,
+        productId: supplierReadiness.dataset.openSupplierProduct,
+        serviceId: supplierReadiness.dataset.openSupplierService,
+        serviceDate: supplierReadiness.dataset.openSupplierDate,
+        packageKey: supplierReadiness.dataset.openSupplierPackage,
+      });
       return;
     }
     const removeHotel = event.target.closest("[data-remove-vendor-hotel]");
@@ -3823,21 +4222,23 @@ function bindEvents() {
     }
     if (event.target.matches("[data-vendor-split-suggestion]")) {
       resolveVendorSplitSuggestion(event.target);
-    } else if (event.target.matches('[data-vendor-split-field="unitRateIdr"]')) {
-      const badge = event.target.closest(".vendor-split-row")?.querySelector("[data-vendor-rate-status]");
-      const ready = hasKnownRate(event.target.value);
-      if (badge) {
-        badge.textContent = ready ? "Rate ready" : "Pending rate";
-        badge.className = `vendor-rate-status ${ready ? "ready" : "pending"}`;
-        badge.dataset.vendorRateStatus = "";
-      }
+    } else if (event.target.matches(
+      '[data-vendor-split-field="unitRateIdr"],'
+      + '[data-vendor-split-field="adultRateIdr"],'
+      + '[data-vendor-split-field="childRateIdr"],'
+      + '[data-vendor-split-field="infantRateIdr"],'
+      + '[data-vendor-split-field="quantity"]',
+    )) {
+      updateVendorManualRatePreview(event.target.closest(".vendor-split-row"));
     }
   });
   document.body.addEventListener("change", (event) => {
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
       updateVendorDayHotels();
     }
-    if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
+    if (event.target.matches('[data-vendor-split-field="priceBasis"]')) {
+      updateVendorManualRatePreview(event.target.closest(".vendor-split-row"));
+    } else if (event.target.matches('[data-vendor-split-field="serviceType"]')) {
       const row = event.target.closest(".vendor-split-row");
       const type = normalizeVendorSplitType(event.target.value);
       if (type) {
@@ -3974,6 +4375,8 @@ function bindEvents() {
     }
   });
 
+  $("#focused-supplier-close").addEventListener("click", () => window.close());
+
   $("#run-sync").addEventListener("click", async () => {
     const result = await window.erim.sync.run();
     await refresh();
@@ -4033,6 +4436,75 @@ function bindEvents() {
   });
 }
 
+async function initializeSupplierFocusMode() {
+  const context = await window.erim.supplierMaster.getFocusedContext();
+  if (!context) return false;
+  state.bootstrap = await window.erim.bootstrap();
+  state.supplierFocusContext = context;
+  document.body.classList.add(
+    "supplier-focus-mode",
+    `supplier-focus-section-${context.section.toLowerCase()}`,
+  );
+  $("#supplier-master-banner-note").textContent =
+    `${context.section} correction for ${context.supplierName || "this supplier"}. Save locally to return to Generate.`;
+  $("#focused-supplier-close").hidden = false;
+  $("#save-supplier-master").textContent = "Save & return";
+  await loadSupplierMaster({ refresh: false });
+  const supplier = state.supplierMaster.suppliers.find((row) => row.supplierId === context.supplierId)
+    || state.supplierMaster.suppliers.find((row) =>
+      String(row.supplierName || "").toLowerCase() === String(context.supplierName || "").toLowerCase());
+  if (supplier) {
+    state.selectedSupplierTypeCode = supplier.typeCode;
+    state.selectedSupplierId = supplier.supplierId;
+    $("#supplier-master-search").value = supplier.supplierName;
+  } else {
+    state.selectedSupplierId = "";
+    $("#supplier-master-search").value = context.supplierName || "";
+  }
+  showView("supplier-master", "MANAGER_ADMIN");
+  renderSupplierMaster();
+  if (context.section === "PRODUCT") {
+    openSupplierProductDialog(context.productId || "");
+  } else if (context.section === "RATE") {
+    const validOnServiceDate = (row) => !context.serviceDate
+      || (!row.validFrom || row.validFrom <= context.serviceDate)
+      && (!row.validTo || row.validTo >= context.serviceDate);
+    const matchingRate = state.supplierMaster.rates.find((row) =>
+      row.productId === context.productId && row.active !== false && validOnServiceDate(row));
+    const contract = state.supplierMaster.contracts.find((row) =>
+      row.contractId === matchingRate?.contractId && row.active !== false)
+      || state.supplierMaster.contracts.find((row) =>
+        row.supplierId === state.selectedSupplierId && row.active !== false && validOnServiceDate(row));
+    if (contract) openSupplierContractDialog(contract.contractId);
+    else {
+      openSupplierContractDialog();
+      const productSelect = $("#supplier-contract-rate-list [data-contract-rate='productId']");
+      if (productSelect && context.productId) productSelect.value = context.productId;
+    }
+  }
+  return true;
+}
+
+window.erim.supplierMaster.onFocusedUpdated(async (payload) => {
+  if (state.supplierFocusContext) return;
+  await loadSupplierMaster({ refresh: false });
+  [state.vendorBookingQueue, state.vendorBookings, state.vendorOperational] = await Promise.all([
+    window.erim.vendor.listBookingQueue(),
+    window.erim.vendor.listBookings(),
+    window.erim.vendor.getOperationalModel(),
+  ]);
+  state.vendorDashboard = state.vendorOperational.dashboard || state.vendorDashboard;
+  renderVendorBookingQueue();
+  renderVendorDashboard();
+  renderVendorInbox();
+  if (state.selectedVendorPackageKey) {
+    await openVendorBookingPackage(state.selectedVendorPackageKey, {
+      serviceIds: state.vendorBookingPreview?.selectedServiceIds || [],
+    });
+  }
+  toast(`${payload.supplierName || "Supplier"} saved locally; Generate readiness refreshed.`);
+});
+
 loadNavigationPreferences();
 applyNavigationPreferences();
 renderTransportOperation();
@@ -4050,4 +4522,6 @@ window.erim.masterData.onStatus((payload) => {
   renderVendorSuggestions(state.vendorSuggestions);
   if (state.currentView === "supplier-master") renderSupplierMaster();
 });
-refresh().catch((error) => toast(error.message, true));
+initializeSupplierFocusMode()
+  .then((focused) => focused || refresh())
+  .catch((error) => toast(error.message, true));

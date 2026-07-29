@@ -973,6 +973,7 @@ function saveVendorIntake_(request, actor) {
           price_source: split.priceSource || "NONE",
           adult_rate_idr: split.adultRateIdr ?? "",
           child_rate_idr: split.childRateIdr ?? "",
+          infant_rate_idr: split.infantRateIdr ?? "",
           unit_rate_idr: split.unitRateIdr ?? "",
           currency: split.currency || "IDR",
           rate_status: split.rateStatus || "PENDING_RATE",
@@ -1127,7 +1128,7 @@ function ensureVendorSchema_() {
   ensureHeaders_("SERVICES", [
     "suggested_vendor_id", "suggested_vendor_name", "service_master_id",
     "supplier_id", "product_id", "contract_id", "contract_rate_id",
-    "price_source", "adult_rate_idr", "child_rate_idr", "unit_rate_idr",
+    "price_source", "adult_rate_idr", "child_rate_idr", "infant_rate_idr", "unit_rate_idr",
     "currency", "rate_status", "manual_price_reason", "manual_rate_source",
     "manual_evidence_ref", "rate_valid_to", "rate_snapshot_at",
   ]);
