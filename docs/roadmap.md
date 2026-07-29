@@ -20,6 +20,15 @@
 
 ## Phase 2 - Mobile monitoring MVP
 
+- Target first installable-web UAT: week of 2026-08-03.
+- Delivery form: Hostinger-hosted PWA installed from the browser on Android and
+  through Add to Home Screen on iPhone; no native Android package.
+- First operational slice:
+  - Google Workspace sign-in and role-filtered access
+  - dashboard and notification/work Inbox
+  - read-only Itinerary Check
+  - booking communication/status tracking
+  - Gmail thread deep links
 - Customer Code search
 - Tour overview
 - Today/on-ground services
@@ -27,6 +36,12 @@
 - Pending confirmations
 - Current itinerary and email links
 - Role-filtered fields and timeline
+- Keep Supplier Master bulk maintenance, document editing, and the full booking
+  mail composer on desktop during the first mobile milestone.
+- Cache only the application shell and non-sensitive preferences. OAuth tokens
+  and operational records must not become a long-lived offline data store.
+- Mobile mutation rejection remains enforced by Apps Script, not only by hidden
+  interface controls.
 
 ## Phase 3 - Desktop reservation foundation
 
