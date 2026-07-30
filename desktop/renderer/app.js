@@ -26,7 +26,6 @@ const state = {
   vendorCommunicationBatch: [],
   vendorCommunicationIndex: -1,
   vendorCommunicationBaseline: "",
-  vendorGeneratedCancelTarget: null,
   vendorGmailReadiness: null,
   vendorExpandedClients: new Set(),
   vendorExpandedDays: new Set(),
@@ -1087,7 +1086,12 @@ function showVendorCommunicationBatchList() {
   $("#vendor-communication-work-view").hidden = true;
   state.vendorCommunicationIndex = -1;
   state.vendorBookingPreview = null;
-  state.vendorCommunicationBaseline = "";
+  $("#vendor-booking-recipients").value = "";
+  $("#vendor-booking-subject").value = "";
+  $("#vendor-booking-body").value = "";
+  $("#vendor-booking-empty").hidden = false;
+  $("#vendor-booking-preview").hidden = true;
+  state.vendorCommunicationBaseline = vendorCommunicationCurrentValues();
   renderVendorCommunicationQueue();
   renderVendorCommunicationBatchGrid();
 }
@@ -1142,7 +1146,7 @@ function renderVendorCommunicationBatchGrid() {
             <span>${escapeHtml(service.rateStatus || "")}</span>
             <button class="button ghost small" type="button"
               data-cancel-generated-service="${escapeHtml(service.serviceId)}"
-              data-cancel-generated-booking="${escapeHtml(booking?.bookingId || entry.bookingId)}">Cancel Generate</button>
+              data-cancel-generated-booking="${escapeHtml(booking?.bookingId || entry.bookingId)}">Cancel sending item</button>
           </div>`).join("") || `<div class="empty-notifications">No active generated service remains.</div>`}
         </div>
       </details>`;
@@ -1151,38 +1155,28 @@ function renderVendorCommunicationBatchGrid() {
 }
 
 async function cancelVendorGeneratedService(bookingId, serviceId) {
-  state.vendorGeneratedCancelTarget = { bookingId, serviceId };
-  $("#vendor-generated-cancel-form").elements.reason.value = "";
-  $("#vendor-generated-cancel-dialog").showModal();
-}
-
-async function submitVendorGeneratedServiceCancel(event) {
-  event.preventDefault();
-  const target = state.vendorGeneratedCancelTarget;
-  const reason = event.currentTarget.elements.reason.value.trim();
-  if (!target || !reason) return;
-  const button = event.currentTarget.querySelector('button[type="submit"]');
-  button.disabled = true;
+  const confirmed = window.confirm(
+    "Cancel sending for this item?\n\nOK: return this item to NOT GENERATED.\nCancel: keep it in the sending queue."
+  );
+  if (!confirmed) return;
   try {
     const result = await window.erim.vendor.cancelGeneratedService({
-      ...target, reason,
+      bookingId,
+      serviceId,
+      reason: "STAFF_CANCELED_BEFORE_SEND",
     });
     [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
       window.erim.vendor.listBookingQueue(),
       window.erim.vendor.listBookings(),
     ]);
     refreshVendorCommunicationBatch();
-    state.vendorGeneratedCancelTarget = null;
-    $("#vendor-generated-cancel-dialog").close();
     renderVendorBookingQueue();
     showVendorCommunicationBatchList();
     toast(result.remainingServiceCount
-      ? "One item returned to NOT GENERATED. The remaining package snapshot was rebuilt."
-      : "Final item returned to NOT GENERATED. The package is no longer generated.");
+      ? "Sending canceled for this item. It returned to NOT GENERATED."
+      : "Sending canceled. The final item returned to NOT GENERATED.");
   } catch (error) {
     toast(error.message, true);
-  } finally {
-    button.disabled = false;
   }
 }
 
@@ -1206,10 +1200,10 @@ function renderVendorCommunicationQueue() {
   }).join("") : `<div class="empty-notifications">No generated package in this batch.</div>`;
   $("#vendor-communication-progress").textContent =
     `${batch.length} Packages | ${counts.sent} Sent | ${counts.ready} Ready | ${counts.pending} Not Generated | ${counts.attention} Attention`;
-  $("#vendor-communication-position").textContent = batch.length
-    ? `Package ${state.vendorCommunicationIndex + 1} of ${batch.length}` : "Package 0 of 0";
+  $("#vendor-communication-position").textContent = state.vendorCommunicationIndex >= 0
+    ? `Package ${state.vendorCommunicationIndex + 1} of ${batch.length}` : "No package selected";
   $("#vendor-communication-previous").disabled = state.vendorCommunicationIndex <= 0;
-  $("#vendor-communication-next").disabled = !batch.length;
+  $("#vendor-communication-next").disabled = !batch.length || state.vendorCommunicationIndex < 0;
 }
 
 async function openVendorCommunicationPackage(index) {
@@ -1237,6 +1231,9 @@ function vendorCommunicationCurrentValues() {
 }
 
 async function confirmVendorCommunicationNavigation() {
+  if ($("#vendor-communication-work-view").hidden
+    || state.vendorCommunicationIndex < 0
+    || !state.vendorBookingPreview) return true;
   if (vendorCommunicationCurrentValues() === state.vendorCommunicationBaseline) return true;
   const save = window.confirm(
     "Generated message has unsaved changes.\n\nOK: Save & Next\nCancel: choose whether to discard or stay."
@@ -1306,7 +1303,7 @@ function renderVendorBookingPreview() {
         ${storedSnapshot?.communicationStatus === "GENERATED"
           ? `<button class="button danger small" type="button"
               data-cancel-generated-service="${escapeHtml(service.serviceId)}"
-              data-cancel-generated-booking="${escapeHtml(storedSnapshot.bookingId)}">Cancel Generate item</button>`
+              data-cancel-generated-booking="${escapeHtml(storedSnapshot.bookingId)}">Cancel sending item</button>`
           : ""}
       </article>
     `).join("")}
@@ -5193,15 +5190,6 @@ function bindEvents() {
       button.disabled = false;
     }
   });
-  $("#close-vendor-generated-cancel").addEventListener("click", () => {
-    state.vendorGeneratedCancelTarget = null;
-    $("#vendor-generated-cancel-dialog").close();
-  });
-  $("#cancel-vendor-generated-cancel").addEventListener("click", () => {
-    state.vendorGeneratedCancelTarget = null;
-    $("#vendor-generated-cancel-dialog").close();
-  });
-  $("#vendor-generated-cancel-form").addEventListener("submit", submitVendorGeneratedServiceCancel);
   $("#vendor-register-search").addEventListener("input", renderVendorInbox);
   $("#vendor-register-state").addEventListener("change", renderVendorInbox);
   $("#vendor-register-channel").addEventListener("change", renderVendorInbox);

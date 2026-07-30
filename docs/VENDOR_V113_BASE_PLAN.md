@@ -1088,3 +1088,49 @@ Verified package:
   gate without using the staff database.
 - GitHub Release `v1.1.14` is published with the installer, blockmap, and
   `latest.yml`; GitHub's installer digest matches the verified local SHA-256.
+
+### 12.7 v1.1.15 navigation and pre-send cancellation hotfix
+
+Owner trial exposed two connected UI-state faults in v1.1.14:
+
+- returning to the batch list set the active package index to `-1`, but the
+  hidden work panel remained in the CSS grid and rendered `Package 0 of N`;
+- stale hidden message fields were compared against an empty baseline, causing
+  Back, Previous, Next, Close, and window-close to all show the same false
+  Unsaved warning.
+
+The hotfix contract is:
+
+- dirty checking runs only while a real package detail is open and selected;
+- returning to list clears stale recipients, subject, body, preview, selection,
+  and establishes a clean list baseline;
+- hidden batch/work views use `display: none !important`;
+- list mode displays `No package selected`, not `Package 0`;
+- Previous and Next remain disabled without an active package;
+- a genuine staff edit to Action, Recipients, Subject, or Body still receives
+  the save/discard protection.
+
+Owner terminology and flow:
+
+- rename the staff action to `Cancel sending item`;
+- use one standard `Are you sure?` confirmation;
+- OK returns only that stable Service ID to `NOT_GENERATED` and delists it from
+  the active sending queue;
+- Cancel makes no change;
+- use automatic audit reason `STAFF_CANCELED_BEFORE_SEND`, so staff does not
+  fill a second reason form;
+- preserve backend security: the Service must still be `GENERATED`, have no
+  Send Attempt or delivery evidence, and belong to the exact booking/package;
+- siblings remain generated and the remaining snapshot/hash are rebuilt.
+
+Automated status:
+
+- 61 tests pass, including a dedicated false-unsaved/navigation regression;
+- syntax and diff checks pass;
+- Windows installer, ASAR content, and isolated eight-second packaged-app smoke
+  gate pass.
+- installer: `release/ERIM-PSH-Setup-1.1.15.exe`;
+- size: `111,083,225` bytes;
+- SHA-256:
+  `30E0F1639434C2253120963D4AAADF50DFEE7EF34516ABA415E0ADF1671E6E1C`;
+- updater publication remains pending.

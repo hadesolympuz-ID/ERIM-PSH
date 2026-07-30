@@ -180,6 +180,16 @@ test("Generate supports a single channel, full-screen package navigation, and in
   assert.match(main, /vendor:booking-send-attempt-list/);
 });
 
+test("Generate list navigation does not report false unsaved changes and cancellation stays per item", () => {
+  assert.match(app, /state\.vendorCommunicationIndex < 0/);
+  assert.match(app, /!state\.vendorBookingPreview\) return true/);
+  assert.match(app, /No package selected/);
+  assert.match(app, /STAFF_CANCELED_BEFORE_SEND/);
+  assert.match(app, /Cancel sending item/);
+  assert.match(styles, /#vendor-communication-work-view\[hidden\] \{ display: none !important; \}/);
+  assert.doesNotMatch(html, /vendor-generated-cancel-dialog/);
+});
+
 test("Vendor follow-up keeps Day times optional and inserts a new Micro Split item at the top", () => {
   assert.doesNotMatch(html, /Start time \*/);
   assert.doesNotMatch(app, /missingStart/);

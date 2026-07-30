@@ -1081,6 +1081,8 @@ body.supplier-focus-mode { min-width: 0; }
   min-height: 0;
 }
 .vendor-communication-batch-view { min-height: 0; overflow: auto; padding: 16px; }
+#vendor-communication-batch-view[hidden],
+#vendor-communication-work-view[hidden] { display: none !important; }
 .vendor-batch-toolbar {
   display: flex; justify-content: space-between; gap: 18px; align-items: end;
   margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--line);
