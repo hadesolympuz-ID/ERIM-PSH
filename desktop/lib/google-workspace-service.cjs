@@ -45,6 +45,105 @@ class GoogleWorkspaceService {
     return response;
   }
 
+  async vendorGmailPreflight({ checkCentral = true } = {}) {
+    const startedAt = Date.now();
+    const checkedAt = new Date().toISOString();
+    const authStatus = this.authService.status();
+    const base = {
+      state: "AUTH_REQUIRED",
+      ready: false,
+      senderEmail: String(authStatus.email || "").toLowerCase(),
+      checkedAt,
+      latencyMs: 0,
+      sessionRefreshed: false,
+      centralReady: null,
+      centralMessage: "",
+    };
+    if (!authStatus.email && !authStatus.connected) {
+      return { ...base, latencyMs: Date.now() - startedAt };
+    }
+    let token;
+    try {
+      const beforeExpiry = Number(authStatus.expiresAt || 0);
+      token = await this.authService.accessToken();
+      base.sessionRefreshed = beforeExpiry <= Date.now() + 60_000;
+    } catch (error) {
+      return {
+        ...base,
+        state: "AUTH_REQUIRED",
+        message: error.message,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+    let profile;
+    try {
+      const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      profile = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const state = response.status === 403 ? "PERMISSION_REQUIRED"
+          : response.status === 401 ? "AUTH_REQUIRED" : "GMAIL_UNREACHABLE";
+        return {
+          ...base,
+          state,
+          message: profile.error?.message || `Gmail returned HTTP ${response.status}.`,
+          latencyMs: Date.now() - startedAt,
+        };
+      }
+    } catch (error) {
+      return {
+        ...base,
+        state: "GMAIL_UNREACHABLE",
+        message: error.message,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+    const profileEmail = String(profile.emailAddress || "").trim().toLowerCase();
+    if (!profileEmail || (base.senderEmail && profileEmail !== base.senderEmail)) {
+      return {
+        ...base,
+        state: "ACCOUNT_MISMATCH",
+        profileEmail,
+        message: `Connected profile ${profileEmail || "unknown"} does not match ${base.senderEmail || "the selected staff account"}.`,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+    let centralReady = null;
+    let centralMessage = "";
+    if (checkCentral) {
+      const { apiBaseUrl } = this.database.getPublicSettings();
+      if (!apiBaseUrl) {
+        centralReady = false;
+        centralMessage = "Apps Script API URL is not configured.";
+      } else {
+        try {
+          const response = await fetch(apiBaseUrl, { method: "GET", redirect: "follow" });
+          const payload = await response.json().catch(() => ({}));
+          centralReady = response.ok && payload.ok === true;
+          centralMessage = centralReady ? "Central evidence endpoint is ready."
+            : `Central endpoint returned HTTP ${response.status}.`;
+        } catch (error) {
+          centralReady = false;
+          centralMessage = error.message;
+        }
+      }
+    }
+    return {
+      ...base,
+      state: centralReady === false ? "CENTRAL_SYNC_UNAVAILABLE" : "GMAIL_READY",
+      ready: true,
+      senderEmail: profileEmail,
+      profileEmail,
+      message: centralReady === false
+        ? "Gmail is ready; official evidence sync is currently unavailable."
+        : "Gmail account and permission are ready.",
+      centralReady,
+      centralMessage,
+      latencyMs: Date.now() - startedAt,
+    };
+  }
+
   async sheetRecords(sheetName) {
     const { spreadsheetId } = this.database.getPublicSettings();
     if (!spreadsheetId) throw new Error("Google Spreadsheet ID is not configured.");
@@ -221,6 +320,54 @@ class GoogleWorkspaceService {
     return this.database.listSupplierMasterDrafts();
   }
 
+  async listSupplierRateApprovals() {
+    const local = this.database.listSupplierRateApprovals();
+    if (!this.authService?.status().connected) {
+      return { status: "OFFLINE_LOCAL", approvals: local };
+    }
+    try {
+      const remote = await this.callAppsScript("supplier.rate.approval.list", {});
+      (remote || []).forEach((approval) =>
+        this.database.applyRemoteSupplierRateApproval(approval)
+      );
+      const merged = new Map();
+      [...(remote || []), ...this.database.listSupplierRateApprovals()].forEach((approval) =>
+        merged.set(approval.approvalId, approval)
+      );
+      return { status: "SYNCED", approvals: [...merged.values()] };
+    } catch (error) {
+      return { status: "OFFLINE_LOCAL", approvals: local, warning: error.message };
+    }
+  }
+
+  async requestSupplierRateApproval(input = {}) {
+    const local = this.database.requestSupplierRateApproval({
+      ...input,
+      makerEmail: this.authService.status().email || "",
+    });
+    const draft = this.database.listSupplierMasterDrafts({ includeSynced: true })
+      .find((row) => row.draftId === local.draftId);
+    try {
+      const remote = await this.callAppsScript("supplier.rate.approval.request", {
+        approval: { ...local, payload: draft?.payload || {} },
+      });
+      this.database.applyRemoteSupplierRateApproval(remote);
+      return { status: "SYNCED", approval: remote };
+    } catch (error) {
+      return {
+        status: "LOCAL_PENDING_SYNC",
+        approval: local,
+        warning: error.message,
+      };
+    }
+  }
+
+  async reviewSupplierRateApproval(input = {}) {
+    const remote = await this.callAppsScript("supplier.rate.approval.review", input);
+    this.database.applyRemoteSupplierRateApproval(remote);
+    return { status: "SYNCED", approval: remote };
+  }
+
   discardSupplierMasterDraft(draftId) {
     return this.database.discardSupplierMasterDraft(draftId);
   }
@@ -309,6 +456,9 @@ class GoogleWorkspaceService {
   }
 
   async publishSupplierMasterDrafts({ draftIds = [], sessionId = "" } = {}) {
+    if (this.authService?.status().connected) {
+      await this.listSupplierRateApprovals();
+    }
     const previousSession = sessionId
       ? this.database.getSupplierPublishSession(sessionId)
       : null;
@@ -341,6 +491,16 @@ class GoogleWorkspaceService {
         catalog: this.database.getSupplierMasterCatalog(),
         summary: { total: 0, synced: 0, failed: 0, conflicts: 0 },
       };
+    }
+    const unapprovedRates = drafts.filter((draft) =>
+      draft.entityKind === "CONTRACT"
+      && (draft.payload?.rates || []).length
+      && draft.rateApproval?.status !== "APPROVED_TO_SYNC"
+    );
+    if (unapprovedRates.length) {
+      throw new Error(
+        `${unapprovedRates.length} local Contract/Rate change(s) require Manager approval before Google sync.`,
+      );
     }
     const plan = this.supplierPublishPlan(drafts);
     let session = previousSession
@@ -919,12 +1079,30 @@ class GoogleWorkspaceService {
       throw new Error("This booking is already recorded as sent. Generate an amendment instead of resending it.");
     }
     if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
+    const requestedRecipients = resendOfAttemptId && Array.isArray(input.recipients)
+      ? input.recipients
+      : booking.recipients;
+    if (!resendOfAttemptId && Array.isArray(input.recipients)
+      && JSON.stringify(input.recipients) !== JSON.stringify(booking.recipients)) {
+      throw new Error("Recipients changed after Generate. Regenerate the booking snapshot before Send.");
+    }
+    if (!requestedRecipients.some((row) =>
+      String(row.recipientType || "").toUpperCase() === "TO"
+      && String(row.address || "").trim()
+    )) {
+      throw new Error("At least one TO email address is required.");
+    }
+    const preflight = await this.vendorGmailPreflight({ checkCentral: true });
+    if (!preflight.ready || !["GMAIL_READY", "CENTRAL_SYNC_UNAVAILABLE"].includes(preflight.state)) {
+      throw new Error(`Gmail pre-send check failed: ${preflight.state}. ${preflight.message || ""}`.trim());
+    }
     const sendAttempt = this.database.prepareVendorBookingSendAttempt({
       bookingId: booking.bookingId,
-      actorEmail: this.authService.status().email || "",
+      actorEmail: preflight.senderEmail,
       resendOfAttemptId,
       resendReason: input.resendReason,
-      recipients: input.recipients,
+      recipients: requestedRecipients,
+      expectedBookingUpdatedAt: input.expectedBookingUpdatedAt || booking.updatedAt,
     });
     const cleanHeader = (value) => String(value || "").replace(/[\r\n]+/g, " ").trim();
     const snapshot = sendAttempt.snapshot || {};
@@ -1030,34 +1208,107 @@ class GoogleWorkspaceService {
     }
   }
 
+  async reconcileVendorSendAttempt(sendAttemptId) {
+    const attempt = this.database.getVendorSendAttempt(sendAttemptId);
+    if (!attempt || attempt.status !== "SEND_OUTCOME_UNKNOWN") {
+      throw new Error("Only a Send Attempt with unknown Gmail outcome can be reconciled.");
+    }
+    const preflight = await this.vendorGmailPreflight({ checkCentral: true });
+    if (!preflight.ready) {
+      throw new Error(`Gmail reconciliation requires a ready session: ${preflight.state}.`);
+    }
+    const snapshot = attempt.snapshot || {};
+    const prepared = new Date(attempt.preparedAt);
+    const after = new Date(prepared.getTime() - 86_400_000)
+      .toISOString().slice(0, 10).replaceAll("-", "/");
+    const query = `in:sent after:${after} subject:"${String(snapshot.subject || "").replaceAll('"', "")}"`;
+    const listed = await this.authorizedFetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=${encodeURIComponent(query)}`,
+    );
+    const expectedTo = (snapshot.recipients || [])
+      .filter((row) => String(row.recipientType || "").toUpperCase() === "TO")
+      .map((row) => String(row.address || "").toLowerCase());
+    const candidates = [];
+    for (const row of listed.messages || []) {
+      const message = await this.authorizedFetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(row.id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=To&metadataHeaders=From`,
+      );
+      const headers = Object.fromEntries((message.payload?.headers || [])
+        .map((header) => [String(header.name || "").toLowerCase(), String(header.value || "")]));
+      const sentAt = Number(message.internalDate || 0);
+      const subjectMatches = headers.subject === String(snapshot.subject || "");
+      const toText = String(headers.to || "").toLowerCase();
+      const recipientsMatch = expectedTo.length && expectedTo.every((address) => toText.includes(address));
+      const timeMatches = !sentAt || sentAt >= prepared.getTime() - 60_000;
+      if (subjectMatches && recipientsMatch && timeMatches) candidates.push(message);
+    }
+    if (candidates.length !== 1) {
+      throw new Error(candidates.length
+        ? "Gmail reconciliation found multiple possible deliveries. The attempt remains blocked for manual review."
+        : "No proven Gmail delivery was found. The attempt remains blocked; do not resend.");
+    }
+    const accepted = this.database.recordVendorSendGmailAccepted(sendAttemptId, {
+      gmailMessageId: candidates[0].id,
+      gmailThreadId: candidates[0].threadId,
+    });
+    let synced;
+    try {
+      synced = await this.syncVendorSendAttempt(sendAttemptId);
+    } catch (error) {
+      synced = this.database.recordVendorSendSyncResult(sendAttemptId, { ok: false, error });
+    }
+    return {
+      booking: this.database.getVendorBooking(attempt.bookingId),
+      sendAttempt: synced,
+      gmailMessageId: accepted.gmailMessageId,
+      gmailThreadId: accepted.gmailThreadId,
+      pendingSync: synced.status !== "SYNCED",
+    };
+  }
+
   async getVendorOperationalModel() {
     if (this.authService?.status().connected) {
       const connectedEmail = String(this.authService.status().email || "").toLowerCase();
       const linked = this.database.listVendorBookings()
-        .filter((booking) => booking.gmailThreadId && booking.gmailMessageId)
+        .filter((booking) => booking.channel === "EMAIL")
         .slice(0, 50);
       await Promise.all(linked.map(async (booking) => {
-        try {
-          const thread = await this.getGmailThread(booking.gmailThreadId);
-          const outboundIndex = thread.messages.findIndex((message) =>
-            message.messageId === booking.gmailMessageId
-          );
-          const candidates = thread.messages.slice(Math.max(0, outboundIndex + 1));
-          const inbound = [...candidates].reverse().find((message) => {
-            const from = String(message.from || "").toLowerCase();
-            return message.messageId !== booking.gmailMessageId
-              && (!connectedEmail || !from.includes(connectedEmail));
-          });
-          if (inbound) {
-            this.database.recordVendorReplyDetected({
-              bookingId: booking.bookingId,
-              gmailMessageId: inbound.messageId,
-              receivedAt: inbound.date,
+        const attempts = this.database.listVendorSendAttempts(booking.bookingId)
+          .filter((attempt) => attempt.gmailThreadId && attempt.gmailMessageId);
+        const byThread = new Map();
+        attempts.forEach((attempt) => {
+          const group = byThread.get(attempt.gmailThreadId) || [];
+          group.push(attempt);
+          byThread.set(attempt.gmailThreadId, group);
+        });
+        await Promise.all([...byThread.entries()].map(async ([threadId, threadAttempts]) => {
+          try {
+            const thread = await this.getGmailThread(threadId);
+            const outboundIds = new Set(threadAttempts.map((attempt) => attempt.gmailMessageId));
+            const latestOutboundIndex = Math.max(...threadAttempts.map((attempt) =>
+              thread.messages.findIndex((message) => message.messageId === attempt.gmailMessageId)
+            ));
+            const candidates = thread.messages.slice(Math.max(0, latestOutboundIndex + 1));
+            const inbound = [...candidates].reverse().find((message) => {
+              const from = String(message.from || "").toLowerCase();
+              return !outboundIds.has(message.messageId)
+                && (!connectedEmail || !from.includes(connectedEmail));
             });
+            if (inbound) {
+              const relatedAttempt = [...threadAttempts]
+                .sort((a, b) => String(b.gmailAcceptedAt).localeCompare(String(a.gmailAcceptedAt)))[0];
+              this.database.recordVendorReplyDetected({
+                bookingId: booking.bookingId,
+                sendAttemptId: relatedAttempt?.sendAttemptId || "",
+                gmailThreadId: threadId,
+                gmailMessageId: inbound.messageId,
+                receivedAt: inbound.date,
+              });
+            }
+          } catch {
+            // A temporarily unavailable Gmail thread never changes business state.
           }
-        } catch {
-          // A temporarily unavailable Gmail thread never changes business state.
-        }
+        }));
       }));
     }
     return this.database.getVendorOperationalModel();

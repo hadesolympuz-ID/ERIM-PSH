@@ -26,6 +26,7 @@ const state = {
   vendorCommunicationBatch: [],
   vendorCommunicationIndex: -1,
   vendorCommunicationBaseline: "",
+  vendorGmailReadiness: null,
   vendorExpandedClients: new Set(),
   vendorExpandedDays: new Set(),
   vendorTreeInitialized: false,
@@ -46,9 +47,11 @@ const state = {
   },
   supplierMasterLoaded: false,
   supplierMasterDrafts: [],
+  supplierRateApprovals: [],
   supplierPublishSession: null,
   supplierPublishSessions: [],
   supplierPublishActive: false,
+  supplierRateApprovalAction: null,
   supplierFocusContext: null,
   vendorSplitSuggestionSequence: 0,
   selectedSupplierTypeCode: "VENDOR",
@@ -371,6 +374,11 @@ function renderVendorInbox() {
       <div class="vendor-register-actions">
         <button class="button ghost small" type="button" data-open-vendor-register="${escapeHtml(item.packageKey)}">Open booking</button>
         ${item.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(item.gmailThreadId)}">Open Gmail thread</button>` : ""}
+        ${item.channel === "EMAIL" && ["SENT", "SENT_PENDING_SYNC", "SEND_OUTCOME_UNKNOWN"].includes(item.communicationStatus)
+          ? `<button class="button ghost small" type="button"
+              data-open-vendor-history="${escapeHtml(item.bookingId)}">Delivery history / Resend</button>` : ""}
+        ${item.channel === "EMAIL"
+          ? `<small>Evidence: ${escapeHtml((item.deliveryEvidenceStatus || "EMAIL_ID_NOT_CREATED").replaceAll("_", " "))}</small>` : ""}
         ${item.externalReference ? `<small>Evidence: ${escapeHtml(item.externalReference)}</small>` : ""}
         ${item.communicationStatus === "SENT_PENDING_SYNC" && item.lastSendAttemptId
           ? `<button class="button danger small" type="button" data-retry-vendor-sync="${escapeHtml(item.lastSendAttemptId)}">Retry evidence sync</button>` : ""}
@@ -556,7 +564,8 @@ function renderVendorBookingQueue() {
                     <small>Booking: ${escapeHtml(vendorBookingStatusLabel(service.workflowStatus))} · Rate: ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · Supplier: ${escapeHtml(service.supplierResult || "PENDING")}</small>
                   </button>
                   ${service.gmailThreadId
-                    ? `<button type="button" class="vendor-tree-link" data-open-gmail-thread="${escapeHtml(service.gmailThreadId)}">Gmail</button>`
+                    ? `<button type="button" class="vendor-tree-link"
+                        data-open-vendor-history="${escapeHtml(service.bookingId)}">Delivery / Resend</button>`
                     : service.workflowStatus === "GENERATED"
                       ? `<button type="button" class="vendor-tree-link" data-resume-vendor-draft="${escapeHtml(service.bookingId)}">Resume draft</button>`
                       : `<span class="vendor-tree-state">${service.workflowStatus === "SENT_PENDING_SYNC" ? "Retry sync" : "Open"}</span>`}
@@ -633,9 +642,43 @@ function selectedVendorServicesByPackage() {
 
 function vendorCommunicationSort(left, right) {
   const channelOrder = { EMAIL: 0, WHATSAPP: 1, PORTAL: 2, OTHERS: 3, OTHER: 3 };
-  return (channelOrder[left.channel] ?? 9) - (channelOrder[right.channel] ?? 9)
-    || String(left.supplierName).localeCompare(String(right.supplierName))
-    || String(left.customerCode).localeCompare(String(right.customerCode));
+  const channelResult = (channelOrder[left.channel] ?? 9) - (channelOrder[right.channel] ?? 9);
+  if (channelResult) return channelResult;
+  if (left.channel === "PORTAL" && right.channel === "PORTAL") {
+    return String(left.customerCode).localeCompare(String(right.customerCode))
+      || String(left.supplierName).localeCompare(String(right.supplierName))
+      || String(left.firstServiceDate || "9999-12-31").localeCompare(String(right.firstServiceDate || "9999-12-31"))
+      || String(left.firstProductName || "").localeCompare(String(right.firstProductName || ""))
+      || String(left.packageKey).localeCompare(String(right.packageKey));
+  }
+  return String(left.supplierName).localeCompare(String(right.supplierName))
+    || String(left.customerCode).localeCompare(String(right.customerCode))
+    || String(left.firstServiceDate || "9999-12-31").localeCompare(String(right.firstServiceDate || "9999-12-31"))
+    || Number(left.firstDayNumber || 0) - Number(right.firstDayNumber || 0)
+    || String(left.packageKey).localeCompare(String(right.packageKey));
+}
+
+function renderVendorGmailReadiness() {
+  const panel = $("#vendor-gmail-readiness");
+  const preview = state.vendorBookingPreview;
+  if (!panel || preview?.channel !== "EMAIL") {
+    if (panel) panel.hidden = true;
+    return;
+  }
+  const readiness = state.vendorGmailReadiness;
+  panel.hidden = false;
+  panel.className = `vendor-gmail-readiness ${readiness?.ready ? "ready" : "attention"}`;
+  panel.innerHTML = readiness ? `
+    <strong>${escapeHtml(readiness.state.replaceAll("_", " "))}</strong>
+    <small>Sender: ${escapeHtml(readiness.senderEmail || readiness.profileEmail || "Not verified")}</small>
+    <small>Checked: ${escapeHtml(readiness.checkedAt || "")} · ${Number(readiness.latencyMs || 0)} ms
+      · ${readiness.sessionRefreshed ? "session refreshed" : "session active"}</small>
+    <small>Central evidence: ${readiness.centralReady === false ? "UNAVAILABLE" : readiness.centralReady ? "READY" : "NOT CHECKED"}</small>
+    <button class="button ghost small" type="button" data-recheck-vendor-gmail>Recheck Gmail</button>
+  ` : `
+    <strong>Gmail has not been verified for this batch.</strong>
+    <button class="button ghost small" type="button" data-recheck-vendor-gmail>Check Gmail</button>
+  `;
 }
 
 async function prepareSelectedVendorServices() {
@@ -646,12 +689,34 @@ async function prepareSelectedVendorServices() {
   const original = button.textContent;
   button.textContent = `Generating ${groups.size} package(s)...`;
   try {
-    const generatedBatch = [];
+    const prepared = [];
     for (const [packageKey, serviceIds] of groups.entries()) {
       const channel = state.vendorPackageChannels.get(packageKey) || "";
       const preview = await window.erim.vendor.getBookingPreview({
         packageKey, serviceIds, actionType: "NEW", channel,
       });
+      prepared.push({ packageKey, serviceIds, preview });
+    }
+    if (prepared.some((item) => item.preview.channel === "EMAIL")) {
+      state.vendorGmailReadiness = await window.erim.vendor.gmailPreflight({ checkCentral: true });
+      if (!state.vendorGmailReadiness.ready) {
+        const reconnect = window.confirm(
+          `Gmail preflight: ${state.vendorGmailReadiness.state}\n${state.vendorGmailReadiness.message || ""}\n\nOK: Reconnect Gmail\nCancel: choose Draft Only or cancel Generate.`
+        );
+        if (reconnect) {
+          state.auth = await window.erim.auth.login();
+          state.vendorGmailReadiness = await window.erim.vendor.gmailPreflight({ checkCentral: true });
+        }
+        if (!state.vendorGmailReadiness.ready) {
+          const draftOnly = window.confirm(
+            "Gmail is not ready.\n\nOK: Generate Draft Only (Send remains disabled until recheck)\nCancel: cancel Generate."
+          );
+          if (!draftOnly) return;
+        }
+      }
+    }
+    const generatedBatch = [];
+    for (const { packageKey, serviceIds, preview } of prepared) {
       const booking = await window.erim.vendor.generateBooking({
         packageKey,
         serviceIds,
@@ -669,6 +734,9 @@ async function prepareSelectedVendorServices() {
         channel: booking.channel,
         supplierName: booking.supplierName,
         customerCode: booking.customerCode,
+        firstServiceDate: preview.services[0]?.serviceDate || "",
+        firstDayNumber: preview.services[0]?.dayNumber || 0,
+        firstProductName: preview.services[0]?.productName || preview.services[0]?.activityText || "",
       });
     }
     [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
@@ -705,6 +773,9 @@ async function resumeVendorGeneratedDrafts(preferredBookingId = "") {
         channel: booking.channel,
         supplierName: booking.supplierName,
         customerCode: booking.customerCode,
+        firstServiceDate: booking.services[0]?.serviceDate || "",
+        firstDayNumber: booking.services[0]?.dayNumber || 0,
+        firstProductName: booking.services[0]?.productName || booking.services[0]?.activityText || "",
       }))
       .filter((entry) => entry.packageKey && entry.bookingId && entry.serviceIds.length)
       .sort(vendorCommunicationSort);
@@ -754,6 +825,7 @@ async function openVendorBookingPackage(packageKey, options = {}) {
       serviceIds,
       actionType: options.actionType || $("#vendor-booking-action")?.value || "NEW",
       channel: options.channel || "",
+      bookingId: options.bookingId || "",
       cancellationReason: options.cancellationReason || "",
     });
     state.vendorBookingPreview = preview;
@@ -844,6 +916,8 @@ function renderVendorPreparationDetails() {
       <strong>${escapeHtml(service.rateStatus || "PENDING_RATE")} · ${escapeHtml(service.priceBasis || "PER_SERVICE")}</strong>
       <small>${escapeHtml(vendorServiceRateLabel(service))}<br>
         Contract: ${escapeHtml(service.contractId || "Not linked")} · Valid to: ${escapeHtml(service.rateValidTo || "Not recorded")}</small>
+      ${service.rateProvenance === "LOCAL_SUPPLIER_RATE"
+        ? `<small class="supplier-draft-error">LOCAL RATE — SYNC APPROVAL REQUIRED · ${escapeHtml((service.localRateApprovalStatus || "LOCAL_ONLY").replaceAll("_", " "))}</small>` : ""}
     </article>
     <article class="vendor-prep-card white">
       <span>Rate source</span>
@@ -964,6 +1038,13 @@ function renderVendorBookingPreview() {
   $("#vendor-booking-recipients").value = recipientLines(effectiveRecipients);
   $("#vendor-booking-subject").value = effectiveSubject;
   $("#vendor-booking-body").value = effectiveBody;
+  const deliveryHistoryMode = ["SENT", "SENT_PENDING_SYNC", "SEND_OUTCOME_UNKNOWN"]
+    .includes(storedSnapshot?.communicationStatus || "");
+  $("#vendor-booking-action").disabled = deliveryHistoryMode;
+  $("#vendor-booking-recipients").readOnly = deliveryHistoryMode;
+  $("#vendor-booking-subject").readOnly = deliveryHistoryMode;
+  $("#vendor-booking-body").readOnly = deliveryHistoryMode;
+  $("#generate-vendor-booking").hidden = deliveryHistoryMode;
   $("#vendor-booking-service-summary").innerHTML = `
     <div><strong>${preview.serviceCount} service</strong><small>${preview.adultPax} adult · ${preview.childPax} child · ${preview.infantPax} infant</small></div>
     ${preview.services.map((service) => `
@@ -1008,24 +1089,49 @@ function renderVendorBookingPreview() {
   const attemptHistory = (state.vendorSendAttempts || []).map((attempt) => `
     <article class="vendor-final-message">
       <strong>${attempt.resendOfAttemptId ? "Resend" : "Original send"} · ${escapeHtml(attempt.status.replaceAll("_", " "))}</strong>
-      <small>${escapeHtml(attempt.preparedAt || "")}${attempt.resendReason ? ` · ${escapeHtml(attempt.resendReason)}` : ""}</small>
+      <small>${escapeHtml(attempt.preparedAt || "")}${attempt.resendReason ? ` · ${escapeHtml(attempt.resendReason)}` : ""}
+        ${attempt.actorEmail ? `<br>Sender: ${escapeHtml(attempt.actorEmail)}` : ""}
+        ${attempt.gmailMessageId ? `<br>Message ID: ${escapeHtml(attempt.gmailMessageId)}` : ""}
+        ${attempt.gmailThreadId ? `<br>Thread ID: ${escapeHtml(attempt.gmailThreadId)}` : ""}
+      </small>
       ${attempt.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(attempt.gmailThreadId)}">Open Gmail thread</button>` : ""}
+      ${attempt.gmailMessageId ? `<button class="button ghost small" type="button"
+        data-copy-vendor-evidence="${escapeHtml(attempt.gmailMessageId)}">Copy Message ID</button>` : ""}
+      ${latest.communicationStatus === "SENT" && attempt.status === "SYNCED"
+        ? `<button class="button danger small" type="button"
+            data-open-vendor-resend-attempt="${escapeHtml(attempt.sendAttemptId)}">Resend from this delivery</button>` : ""}
+      ${attempt.status === "SEND_OUTCOME_UNKNOWN"
+        ? `<button class="button danger small" type="button"
+            data-reconcile-vendor-send="${escapeHtml(attempt.sendAttemptId)}">Reconcile Gmail outcome</button>` : ""}
     </article>
   `).join("");
   const whatsappNumber = (preview.recipients || []).find((row) =>
     String(row.recipientType || "").toUpperCase() === "WHATSAPP"
   )?.address || "";
   const channelAction = preview.channel === "PORTAL" && /^https:\/\//i.test(sop.portalUrl || "")
-    ? `<button class="button primary" type="button" data-open-vendor-portal="${escapeHtml(sop.portalUrl)}">Open supplier portal</button>`
+    ? `<button class="button primary" type="button" data-open-vendor-booking-portal="${escapeHtml(sop.portalUrl)}">Open supplier portal</button>`
     : preview.channel === "WHATSAPP" && whatsappNumber
       ? `<button class="button primary" type="button" data-open-vendor-portal="https://wa.me/${escapeHtml(String(whatsappNumber).replace(/\D/g, ""))}">Open WhatsApp</button>`
       : "";
   $("#vendor-email-context-content").innerHTML = `
+    ${preview.channel === "PORTAL" && preview.portalTransaction?.paymentInstruction ? `
+      <article class="vendor-portal-payment-notice">
+        <span>Eka Jaya payment method · ${escapeHtml(String(preview.portalTransaction.leadDays))} calendar days</span>
+        <strong>${escapeHtml(preview.portalTransaction.paymentInstruction)}</strong>
+        <small>Booking date ${escapeHtml(preview.portalTransaction.bookingDate)}
+          → outbound ${escapeHtml(preview.portalTransaction.earliestServiceDate)}</small>
+      </article>` : ""}
     ${preview.channel === "EMAIL" ? `<article class="vendor-final-message">
       <strong>Gmail sender: ${escapeHtml(state.auth.email || "Google account not connected")}</strong>
       <small>${emailRecipients.length
         ? emailRecipients.map((row) => `${escapeHtml(row.recipientType)}: ${escapeHtml(row.address)}`).join("<br>")
         : "No Email recipient is ready."}</small>
+    </article>
+    <article class="vendor-final-message">
+      <strong>${escapeHtml((latest.deliveryEvidenceStatus || "EMAIL_ID_NOT_CREATED").replaceAll("_", " "))}</strong>
+      <small>${latest.gmailMessageId ? `Message ID: ${escapeHtml(latest.gmailMessageId)}<br>` : ""}
+        ${latest.gmailThreadId ? `Thread ID: ${escapeHtml(latest.gmailThreadId)}<br>` : ""}
+        Official sync: ${escapeHtml(latest.officialSyncStatus || "NOT REQUIRED")}</small>
     </article>` : ""}
     ${latest.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(latest.gmailThreadId)}">Open stored Gmail thread</button>`
       : `<div class="callout">No stored Gmail thread yet. Generating does not send or create a thread.</div>`}
@@ -1041,7 +1147,18 @@ function renderVendorBookingPreview() {
   `;
   const generated = preview.latestBooking?.communicationStatus === "GENERATED";
   $("#vendor-booking-send-panel").hidden = !generated || preview.channel === "EMAIL";
+  $("#vendor-external-reference-label").textContent = preview.channel === "PORTAL"
+    ? "Portal ticket / booking reference"
+    : preview.channel === "WHATSAPP"
+      ? "WhatsApp delivery time / evidence"
+      : "External reference / evidence note";
+  $("#record-vendor-booking-sent").textContent = preview.channel === "PORTAL"
+    ? "Record portal booking"
+    : preview.channel === "WHATSAPP" ? "Record WhatsApp sent" : "Record as sent";
   $("#send-vendor-booking-email").hidden = !generated || preview.channel !== "EMAIL";
+  $("#send-vendor-booking-email").disabled = preview.channel === "EMAIL"
+    && (!state.vendorGmailReadiness?.ready
+      || !["GMAIL_READY", "CENTRAL_SYNC_UNAVAILABLE"].includes(state.vendorGmailReadiness.state));
   $("#vendor-booking-send-note").textContent = preview.channel === "EMAIL"
     ? generated
       ? "Generated snapshot is ready. Send uses the connected employee Gmail and requires one final confirmation."
@@ -1055,6 +1172,7 @@ function renderVendorBookingPreview() {
     subject: $("#vendor-booking-subject").value,
     body: $("#vendor-booking-body").value,
   });
+  renderVendorGmailReadiness();
   renderVendorCommunicationQueue();
 }
 
@@ -1123,6 +1241,11 @@ async function sendVendorBookingEmail() {
   if (!booking?.bookingId || booking.communicationStatus !== "GENERATED") {
     return toast("Generate the latest email snapshot first.", true);
   }
+  state.vendorGmailReadiness = await window.erim.vendor.gmailPreflight({ checkCentral: true });
+  renderVendorGmailReadiness();
+  if (!state.vendorGmailReadiness.ready) {
+    return toast(`Gmail is not ready: ${state.vendorGmailReadiness.state}. Reconnect before Send.`, true);
+  }
   const to = (booking.recipients || [])
     .filter((row) => row.recipientType === "TO").map((row) => row.address).join(", ");
   const confirmed = window.confirm(
@@ -1133,7 +1256,10 @@ async function sendVendorBookingEmail() {
   button.disabled = true;
   button.textContent = "Sending...";
   try {
-    const result = await window.erim.vendor.sendBookingEmail({ bookingId: booking.bookingId });
+    const result = await window.erim.vendor.sendBookingEmail({
+      bookingId: booking.bookingId,
+      expectedBookingUpdatedAt: booking.updatedAt,
+    });
     await refresh();
     await openVendorBookingPackage(state.selectedVendorPackageKey, {
       actionType: booking.actionType, channel: "EMAIL",
@@ -1149,9 +1275,75 @@ async function sendVendorBookingEmail() {
   }
 }
 
-function openVendorResendDialog() {
+async function recheckVendorGmail() {
+  const button = $("[data-recheck-vendor-gmail]");
+  if (button) button.disabled = true;
+  try {
+    state.vendorGmailReadiness = await window.erim.vendor.gmailPreflight({ checkCentral: true });
+    renderVendorBookingPreview();
+    toast(state.vendorGmailReadiness.ready
+      ? `Gmail ready as ${state.vendorGmailReadiness.senderEmail}.`
+      : `Gmail check: ${state.vendorGmailReadiness.state}`, !state.vendorGmailReadiness.ready);
+    return state.vendorGmailReadiness;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function openVendorBookingPortal(url) {
+  const preview = state.vendorBookingPreview;
+  if (!preview || preview.channel !== "PORTAL") return;
+  const refreshed = await window.erim.vendor.getBookingPreview({
+    packageKey: preview.packageKey,
+    serviceIds: preview.selectedServiceIds,
+    bookingId: preview.latestBooking?.bookingId || "",
+    actionType: preview.actionType,
+    channel: "PORTAL",
+  });
+  if (refreshed.latestBooking?.bookingId
+    && refreshed.latestBooking.communicationStatus === "GENERATED") {
+    const evidence = await window.erim.vendor.refreshPortalEvidence(
+      refreshed.latestBooking.bookingId,
+    );
+    refreshed.latestBooking = evidence.booking;
+    refreshed.portalTransaction = evidence.portalTransaction;
+  }
+  state.vendorBookingPreview = refreshed;
+  renderVendorBookingPreview();
+  await window.erim.external.open(url);
+}
+
+async function openVendorDeliveryHistory(bookingId) {
+  const booking = state.vendorBookings.find((row) => row.bookingId === bookingId);
+  if (!booking) return toast("Booking delivery history was not found.", true);
+  const entry = {
+    packageKey: booking.packageKey,
+    serviceIds: (booking.services || []).map((service) => service.serviceId).filter(Boolean),
+    bookingId: booking.bookingId,
+    channel: booking.channel,
+    supplierName: booking.supplierName,
+    customerCode: booking.customerCode,
+    firstServiceDate: booking.services?.[0]?.serviceDate || "",
+    firstDayNumber: booking.services?.[0]?.dayNumber || 0,
+    firstProductName: booking.services?.[0]?.productName || booking.services?.[0]?.activityText || "",
+  };
+  state.vendorCommunicationBatch = [entry];
+  state.vendorCommunicationIndex = 0;
+  const dialog = $("#vendor-communication-dialog");
+  if (!dialog.open) dialog.showModal();
+  await openVendorBookingPackage(booking.packageKey, {
+    bookingId: booking.bookingId,
+    serviceIds: entry.serviceIds,
+    actionType: booking.actionType,
+    channel: booking.channel,
+  });
+}
+
+function openVendorResendDialog(sendAttemptId = "") {
   const booking = state.vendorBookingPreview?.latestBooking;
   const originalAttempt = (state.vendorSendAttempts || []).find((attempt) =>
+    attempt.sendAttemptId === sendAttemptId
+  ) || (state.vendorSendAttempts || []).find((attempt) =>
     ["SYNCED", "SENT_PENDING_SYNC", "GMAIL_ACCEPTED"].includes(attempt.status)
   );
   if (!booking?.bookingId || !originalAttempt?.sendAttemptId) {
@@ -1421,29 +1613,170 @@ function supplierDraftLabel(draft) {
   return draft.entityId;
 }
 
+function supplierApprovalReminderLabel(approval) {
+  if (approval?.status !== "APPROVAL_REQUESTED" || !approval.requestedAt) return "";
+  const hours = Math.max(0, (Date.now() - Date.parse(approval.requestedAt)) / 3_600_000);
+  if (hours >= 24) return "REMINDER 24H";
+  if (hours >= 8) return "REMINDER 8H";
+  if (hours >= 4) return "REMINDER 4H";
+  return "";
+}
+
 function renderSupplierDraftStatus() {
   const pending = (state.supplierMasterDrafts || []).filter((row) => row.localStatus !== "SYNCED");
+  const publishable = pending.filter((row) =>
+    row.entityKind !== "CONTRACT"
+    || !(row.payload?.rates || []).length
+    || row.rateApproval?.status === "APPROVED_TO_SYNC"
+  );
+  const approvalPending = pending.filter((row) =>
+    row.rateApproval?.status === "APPROVAL_REQUESTED"
+  );
   $("#supplier-draft-count").textContent = String(pending.length);
-  $("#publish-supplier-drafts").disabled = !pending.length;
+  $("#publish-supplier-drafts").disabled = !publishable.length;
   $("#review-supplier-drafts").classList.toggle("attention", Boolean(pending.length));
   const list = $("#supplier-draft-list");
   if (!list) return;
-  list.innerHTML = pending.length ? pending.map((draft) => `
-    <label class="supplier-draft-row">
+  const mayReviewCentral = state.bootstrap?.settings?.department === "MANAGER_ADMIN"
+    || state.bootstrap?.settings?.environment === "ADMIN_DEV";
+  const localApprovalIds = new Set(pending.map((draft) => draft.rateApproval?.approvalId).filter(Boolean));
+  const centralOnly = (state.supplierRateApprovals || []).filter((approval) =>
+    approval.status === "APPROVAL_REQUESTED" && !localApprovalIds.has(approval.approvalId)
+  );
+  $("#supplier-draft-count").textContent = String(pending.length + centralOnly.length);
+  $("#review-supplier-drafts").classList.toggle(
+    "attention",
+    Boolean(pending.length || centralOnly.length),
+  );
+  const centralMarkup = centralOnly.map((approval) => `
+    <div class="supplier-draft-row">
+      <span>
+        <strong>${escapeHtml(approval.payload?.contractNumber || approval.entityId || "Local Contract / Rate")}</strong>
+        <small>Central approval inbox · Maker ${escapeHtml(approval.makerEmail || approval.makerEmployeeId || "unknown")}
+          · ${escapeHtml(formatDate(approval.requestedAt))}</small>
+        <span class="supplier-draft-error">LOCAL RATE — SYNC APPROVAL REQUIRED · APPROVAL REQUESTED</span>
+        ${supplierApprovalReminderLabel(approval)
+          ? `<span class="supplier-draft-error">${supplierApprovalReminderLabel(approval)}</span>` : ""}
+        <small>${escapeHtml(approval.requestReason || "")}<br>${escapeHtml(approval.evidenceReference || "")}</small>
+        ${mayReviewCentral ? `
+          <button class="button primary small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="APPROVE">Approve sync</button>
+          <button class="button ghost small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="REQUEST_CHANGES">Request changes</button>
+          <button class="button danger small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="REJECT">Reject</button>
+        ` : ""}
+      </span>
+      ${statusPill(approval.status)}
+    </div>
+  `).join("");
+  const localMarkup = pending.map((draft) => {
+    const rateApprovalRequired = draft.entityKind === "CONTRACT"
+      && (draft.payload?.rates || []).length;
+    const approval = draft.rateApproval;
+    const mayReview = state.bootstrap?.settings?.department === "MANAGER_ADMIN"
+      || state.bootstrap?.settings?.environment === "ADMIN_DEV";
+    const canPublish = !rateApprovalRequired || approval?.status === "APPROVED_TO_SYNC";
+    return `
+    <div class="supplier-draft-row">
       <input type="checkbox" data-supplier-draft-select value="${escapeHtml(draft.draftId)}"
-        ${draft.localStatus === "SYNCING" ? "disabled" : "checked"} />
+        ${draft.localStatus === "SYNCING" || !canPublish ? "disabled" : "checked"} />
       <span>
         <strong>${escapeHtml(supplierDraftLabel(draft))}</strong>
         <small>${escapeHtml(draft.entityKind)} · saved ${escapeHtml(formatDate(draft.updatedAt))}</small>
+        ${rateApprovalRequired ? `<span class="supplier-draft-error">LOCAL RATE — SYNC APPROVAL REQUIRED · ${escapeHtml((approval?.status || "LOCAL_ONLY").replaceAll("_", " "))}</span>` : ""}
+        ${supplierApprovalReminderLabel(approval)
+          ? `<span class="supplier-draft-error">${supplierApprovalReminderLabel(approval)}</span>` : ""}
         ${draft.lastErrorMessage ? `<span class="supplier-draft-error">${escapeHtml(draft.lastErrorMessage)}</span>` : ""}
+        ${rateApprovalRequired && !["APPROVAL_REQUESTED", "APPROVED_TO_SYNC"].includes(approval?.status)
+          ? `<button class="button ghost small" type="button" data-request-rate-approval="${escapeHtml(draft.draftId)}">Request approval</button>` : ""}
+        ${mayReview && approval?.status === "APPROVAL_REQUESTED"
+          ? `<button class="button primary small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="APPROVE">Approve sync</button>
+             <button class="button ghost small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="REQUEST_CHANGES">Request changes</button>
+             <button class="button danger small" type="button" data-review-rate-approval="${escapeHtml(approval.approvalId)}" data-rate-decision="REJECT">Reject</button>` : ""}
+        ${approval?.affectedBookingIds?.length
+          ? `<small>${approval.affectedBookingIds.length} generated/sent booking(s) retain this local-rate snapshot and require impact review after rejection or changes.</small>` : ""}
       </span>
       ${statusPill(draft.localStatus)}
-    </label>
-  `).join("") : `<div class="empty-notifications">All Supplier Master changes are published.</div>`;
+    </div>`;
+  }).join("");
+  list.innerHTML = centralMarkup + localMarkup
+    || `<div class="empty-notifications">All Supplier Master changes are published.</div>`;
   $("#supplier-queue-summary").textContent = pending.length
-    ? `${pending.length} local change(s) waiting for Google`
+    ? `${pending.length} local change(s) · ${approvalPending.length} approval request(s) pending · ${publishable.length} publishable`
     : "No pending changes.";
-  $("#publish-selected-supplier-drafts").disabled = !pending.length;
+  $("#publish-selected-supplier-drafts").disabled = !publishable.length;
+}
+
+function requestSupplierRateApproval(draftId) {
+  state.supplierRateApprovalAction = { mode: "REQUEST", draftId };
+  $("#supplier-rate-approval-title").textContent = "Request Local Rate sync approval";
+  $("#supplier-rate-approval-notice").innerHTML =
+    "<strong>Local rate remains usable on this PC.</strong><p>Google publication stays locked until another Manager/Admin approves this exact snapshot.</p>";
+  $("#supplier-rate-evidence-field").hidden = false;
+  $("#supplier-rate-approval-evidence").value = "";
+  $("#supplier-rate-approval-reason").value = "";
+  $("#confirm-supplier-rate-approval").textContent = "Request approval";
+  $("#confirm-supplier-rate-approval").className = "button primary";
+  $("#supplier-rate-approval-dialog").showModal();
+}
+
+function reviewSupplierRateApproval(approvalId, decision) {
+  state.supplierRateApprovalAction = { mode: "REVIEW", approvalId, decision };
+  $("#supplier-rate-approval-title").textContent =
+    decision === "APPROVE" ? "Approve Local Rate sync"
+      : decision === "REQUEST_CHANGES" ? "Request Local Rate changes" : "Reject Local Rate sync";
+  $("#supplier-rate-approval-notice").innerHTML = decision === "APPROVE"
+    ? "<strong>Approve the exact saved snapshot?</strong><p>The approved Contract/Rate becomes eligible for controlled Google sync.</p>"
+    : decision === "REQUEST_CHANGES"
+      ? "<strong>Return this rate to the maker?</strong><p>New bookings stop offering this rate until the maker saves and requests approval again.</p>"
+      : "<strong>Reject this sync request?</strong><p>The rate remains in audit history; affected booking snapshots are never overwritten.</p>";
+  $("#supplier-rate-evidence-field").hidden = true;
+  $("#supplier-rate-approval-reason").value = "";
+  $("#confirm-supplier-rate-approval").textContent =
+    decision === "APPROVE" ? "Approve sync"
+      : decision === "REQUEST_CHANGES" ? "Request changes" : "Reject request";
+  $("#confirm-supplier-rate-approval").className =
+    decision === "APPROVE" ? "button primary" : "button danger";
+  $("#supplier-rate-approval-dialog").showModal();
+}
+
+async function submitSupplierRateApproval(event) {
+  event.preventDefault();
+  const action = state.supplierRateApprovalAction;
+  if (!action) return;
+  const reason = $("#supplier-rate-approval-reason").value.trim();
+  const evidenceReference = $("#supplier-rate-approval-evidence").value.trim();
+  if (action.mode === "REQUEST" && (!reason || !evidenceReference)) {
+    return toast("Approval reason and source/evidence reference are required.", true);
+  }
+  if (action.mode === "REVIEW" && action.decision !== "APPROVE" && !reason) {
+    return toast("Review reason is required.", true);
+  }
+  try {
+    if (action.mode === "REQUEST") {
+      await window.erim.supplierMaster.requestRateApproval({
+        draftId: action.draftId, reason, evidenceReference,
+      });
+    } else {
+      await window.erim.supplierMaster.reviewRateApproval({
+        approvalId: action.approvalId,
+        decision: action.decision,
+        reason,
+      });
+    }
+    state.supplierMasterDrafts = await window.erim.supplierMaster.listDrafts();
+    state.supplierRateApprovals =
+      (await window.erim.supplierMaster.listRateApprovals()).approvals || [];
+    renderSupplierDraftStatus();
+    $("#supplier-rate-approval-dialog").close();
+    toast(action.mode === "REQUEST"
+      ? "Rate sync approval requested. The local rate remains usable on this PC."
+      : action.decision === "APPROVE"
+        ? "Local Contract/Rate approved for controlled Google sync."
+        : action.decision === "REQUEST_CHANGES"
+          ? "Local Contract/Rate returned to the maker for changes."
+          : "Local Contract/Rate sync request rejected.");
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function renderSupplierPublishProgress(session = state.supplierPublishSession) {
@@ -1869,7 +2202,7 @@ function fillSupplierForm(supplier) {
   });
   ["leadTime", "cutoffTime", "requiredInformation", "confirmationProcedure",
     "amendmentProcedure", "cancellationProcedure", "emergencyProcedure", "portalUrl",
-    "accountReference", "subjectTemplate", "bodyTemplate"].forEach((field) => {
+    "accountReference", "portalPaymentRule", "subjectTemplate", "bodyTemplate"].forEach((field) => {
     form.elements[field].value = sop[field] || "";
   });
   $("#supplier-form-title").textContent = supplier.supplierName;
@@ -1988,6 +2321,7 @@ function collectSupplierForm() {
       emergencyProcedure: form.elements.emergencyProcedure.value.trim(),
       portalUrl: form.elements.portalUrl.value.trim(),
       accountReference: form.elements.accountReference.value.trim(),
+      portalPaymentRule: form.elements.portalPaymentRule.value,
       subjectTemplate: form.elements.subjectTemplate.value.trim(),
       bodyTemplate: form.elements.bodyTemplate.value.trim(),
     },
@@ -3324,6 +3658,8 @@ function vendorSplitRateMarkup(split = {}) {
         ${ready ? "Rate ready" : "Pending rate"}
       </span>
       <small>${escapeHtml(parts.join(" · ") || "Select a matching master service to load its rate.")}</small>
+      ${rate?.localDraftStatus
+        ? `<small class="supplier-draft-error">LOCAL RATE — SYNC APPROVAL REQUIRED · ${escapeHtml((rate.localRateApprovalStatus || "LOCAL_ONLY").replaceAll("_", " "))}</small>` : ""}
     </div>
   `;
 }
@@ -4157,6 +4493,8 @@ function bindEvents() {
     }
   });
   $("#review-supplier-drafts").addEventListener("click", async () => {
+    state.supplierRateApprovals =
+      (await window.erim.supplierMaster.listRateApprovals()).approvals || [];
     renderSupplierDraftStatus();
     await loadLatestSupplierPublishSession();
     $("#supplier-draft-dialog").showModal();
@@ -4167,6 +4505,22 @@ function bindEvents() {
   $("#select-all-supplier-drafts").addEventListener("change", (event) => {
     $$("[data-supplier-draft-select]:not(:disabled)").forEach((node) => { node.checked = event.target.checked; });
   });
+  $("#supplier-draft-list").addEventListener("click", (event) => {
+    const request = event.target.closest("[data-request-rate-approval]");
+    if (request) return requestSupplierRateApproval(request.dataset.requestRateApproval);
+    const review = event.target.closest("[data-review-rate-approval]");
+    if (review) {
+      return reviewSupplierRateApproval(
+        review.dataset.reviewRateApproval,
+        review.dataset.rateDecision,
+      );
+    }
+  });
+  $("#close-supplier-rate-approval").addEventListener("click", () =>
+    $("#supplier-rate-approval-dialog").close());
+  $("#cancel-supplier-rate-approval").addEventListener("click", () =>
+    $("#supplier-rate-approval-dialog").close());
+  $("#supplier-rate-approval-form").addEventListener("submit", submitSupplierRateApproval);
   $("#publish-selected-supplier-drafts").addEventListener("click", () => {
     const draftIds = $$("[data-supplier-draft-select]:checked").map((node) => node.value);
     if (!draftIds.length) return toast("Choose at least one pending change.", true);
@@ -4584,6 +4938,23 @@ function bindEvents() {
         `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(gmailThread.dataset.openGmailThread)}`,
       );
     }
+    const copyEvidence = event.target.closest("[data-copy-vendor-evidence]");
+    if (copyEvidence) {
+      try {
+        await navigator.clipboard.writeText(copyEvidence.dataset.copyVendorEvidence);
+        return toast("Gmail Message ID copied.");
+      } catch (error) {
+        return toast(`Unable to copy Message ID: ${error.message}`, true);
+      }
+    }
+    const deliveryHistory = event.target.closest("[data-open-vendor-history]");
+    if (deliveryHistory) {
+      return openVendorDeliveryHistory(deliveryHistory.dataset.openVendorHistory);
+    }
+    const resendAttempt = event.target.closest("[data-open-vendor-resend-attempt]");
+    if (resendAttempt) {
+      return openVendorResendDialog(resendAttempt.dataset.openVendorResendAttempt);
+    }
     if (event.target.closest("#open-vendor-resend")) return openVendorResendDialog();
     const portal = event.target.closest("[data-open-vendor-portal]");
     if (portal) {
@@ -4592,6 +4963,17 @@ function bindEvents() {
       } catch (error) {
         return toast(error.message, true);
       }
+    }
+    const bookingPortal = event.target.closest("[data-open-vendor-booking-portal]");
+    if (bookingPortal) {
+      try {
+        return await openVendorBookingPortal(bookingPortal.dataset.openVendorBookingPortal);
+      } catch (error) {
+        return toast(error.message, true);
+      }
+    }
+    if (event.target.closest("[data-recheck-vendor-gmail]")) {
+      return recheckVendorGmail();
     }
     const skipRate = event.target.closest("[data-skip-vendor-rate]");
     if (skipRate) {
@@ -4608,6 +4990,21 @@ function bindEvents() {
         })
         .catch((error) => toast(error.message, true))
         .finally(() => { retrySync.disabled = false; });
+      return;
+    }
+    const reconcileSend = event.target.closest("[data-reconcile-vendor-send]");
+    if (reconcileSend) {
+      reconcileSend.disabled = true;
+      window.erim.vendor.reconcileSend(reconcileSend.dataset.reconcileVendorSend)
+        .then(async (result) => {
+          await refresh();
+          await openVendorDeliveryHistory(result.booking.bookingId);
+          toast(result.pendingSync
+            ? "Gmail delivery was proven; official evidence sync remains pending."
+            : "Gmail delivery was proven and reconciled.");
+        })
+        .catch((error) => toast(error.message, true))
+        .finally(() => { reconcileSend.disabled = false; });
       return;
     }
     const supplierReadiness = event.target.closest("[data-open-supplier-readiness]");
@@ -4967,6 +5364,25 @@ window.erim.masterData.onStatus((payload) => {
   state.vendorSuggestions = supplierSuggestionsFromCatalog(state.supplierMaster);
   renderVendorSuggestions(state.vendorSuggestions);
   if (state.currentView === "supplier-master") renderSupplierMaster();
+});
+window.addEventListener("online", () => {
+  state.vendorGmailReadiness = null;
+  if ($("#vendor-communication-dialog")?.open) renderVendorBookingPreview();
+});
+window.addEventListener("offline", () => {
+  state.vendorGmailReadiness = {
+    state: "GMAIL_UNREACHABLE",
+    ready: false,
+    checkedAt: new Date().toISOString(),
+    message: "This PC is offline.",
+  };
+  if ($("#vendor-communication-dialog")?.open) renderVendorBookingPreview();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.vendorGmailReadiness) {
+    const age = Date.now() - Date.parse(state.vendorGmailReadiness.checkedAt || 0);
+    if (age > 300_000) state.vendorGmailReadiness = null;
+  }
 });
 initializeSupplierFocusMode()
   .then((focused) => focused || refresh())

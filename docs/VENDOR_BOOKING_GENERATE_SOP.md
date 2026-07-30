@@ -1,6 +1,6 @@
 # Vendor Booking Generate, Send, Revise, and Cancel SOP
 
-Status: `v1.1.11 GENERATED-DRAFT RECOVERY — WINDOWS UAT BUILD READY`
+Status: `v1.1.12 PRIORITY 1–5 IMPLEMENTED — LOCAL VERIFICATION`
 Operational owner: Vendor Booking
 
 ## 1. Queue ownership
@@ -49,6 +49,13 @@ If the communication popup closes before delivery, the snapshot remains
 in the Daywise toolbar to restore the generated queue. Closing the popup never
 changes a draft to Sent or removes it from the working flow.
 
+Until the final mail-merge sample is approved, the `STANDARD_V1` fallback body
+prints each service's Day number, Day Wise Header, optional Start/Finish time,
+Hotel on that Day, date, Product/service, pax, quantity, and rate basis in the
+same deterministic order used by the booking snapshot. The standard fallback
+does not attach files automatically. Attachments require a separately reviewed
+rule and explicit staff confirmation.
+
 ### 2.1 Deterministic grouping and sort
 
 One package contains selected Vendor services for one Customer Code and one
@@ -57,19 +64,44 @@ stable Supplier identity, including services on multiple Days.
 Package order is:
 
 1. channel/SOP priority: Email, WhatsApp, Portal, Others;
-2. Supplier Name;
-3. Customer Code;
-4. first service date;
-5. first Day number;
-6. stable Package Key.
+2. for Email, WhatsApp, and Others: Supplier Name, Customer Code, first service
+   date, first Day number, then stable Package Key;
+3. for Portal: Customer Code, Supplier Name, first service date, first Product
+   Name, then stable Package Key.
 
-Service order inside a package is:
+Service order inside an Email, WhatsApp, or Other package is:
 
 1. Day number;
 2. service date;
 3. Micro Split sequence;
 4. Product Name;
 5. stable Service ID.
+
+Service order inside a Portal package is:
+
+1. service date;
+2. Day number;
+3. Product Name;
+4. Micro Split sequence;
+5. stable Service ID.
+
+A Portal package is also the candidate ticket transaction boundary. Outbound
+and return services may share one Portal booking/ticket reference only when
+they have the same Customer Code and stable Supplier identity and the supplier
+issues them in one transaction. The package retains every included stable
+Service ID. Different suppliers always create separate Portal packages and
+separate references, even when their services form the outbound and return
+legs of one customer journey. A possible omitted same-supplier return produces
+a non-blocking notice; the application must not auto-add it.
+
+For the configured stable Eka Jaya Supplier identity, the Portal action panel
+must also calculate calendar-day lead time from the Portal booking/action date
+to the earliest included service date. A round trip therefore uses its
+outbound date. Show `USE DEPOSIT` when the lead time is exactly 15 days or
+less, and `USE PREPAID` when it is more than 15 days. Recheck this rule before
+opening the Portal action, and retain the calculation inputs, result, and rule
+version in the booking snapshot/evidence. Do not activate the rule through a
+loose Supplier display-name match.
 
 The backend snapshot and rendered message must use the same sorted service
 array. Source insertion order must not change the result.
@@ -173,22 +205,16 @@ communication evidence, and reason.
 
 ## 8. Remaining controlled work
 
-- publish official Supplier Booking, Booking Service, Communication, and
-  Recipient records through Apps Script/Google Sheets with idempotent retry;
-- replace the current package-first editor with an all-item Vendor readiness
-  panel showing Type, Supplier, Product/service, contract/rate, channel, and
-  destination completeness;
-- add actionable notices for non-contracted items, missing WhatsApp/email,
-  missing portal details, missing recipients, and missing Booking SOP;
-- deep-link every notice to the exact Supplier Master entry detail, then
-  refresh the booking item after the correction enters Local Pending;
-- allow the generating channel to be selected or changed only from active
-  Booking SOP channels and revalidate its required destination;
-- add an Email generation popup with outgoing selection/mail-merge preview on
-  the left and the permitted Gmail context on the right;
-- apply the project owner's pending sample mail-merge body and Subject format
-  before finalizing template tokens or layout;
-- add DEV recipient whitelist and attachment controls;
+- run the connected Workspace Gmail send/readback gates with an approved test
+  recipient, including `SENT_PENDING_SYNC`, reconciliation, resend, and reply
+  detection across original and resend threads;
+- run the cross-account maker/checker approval and Apps Script sync gates for a
+  newly entered Contract Rate;
+- configure the stable Eka Jaya Supplier SOP once with
+  `EKA_JAYA_15_DAY`, then verify 14/15/16-day Portal notices against live data;
+- replace `STANDARD_V1` only after the owner supplies and approves the final
+  mail-merge body and attachment rules;
+- add DEV recipient whitelist controls;
 - implement revision comparison and per-item impact decisions;
 - implement supplier-reply review, confirmation results, completion gate, and
   final Reservation handoff.

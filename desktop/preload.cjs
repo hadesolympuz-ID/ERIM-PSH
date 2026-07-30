@@ -54,12 +54,17 @@ contextBridge.exposeInMainWorld("erim", {
     listBookings: () => ipcRenderer.invoke("vendor:booking-list"),
     listSendAttempts: (bookingId) =>
       ipcRenderer.invoke("vendor:booking-send-attempt-list", bookingId),
+    gmailPreflight: (details) => ipcRenderer.invoke("vendor:gmail-preflight", details),
     getBookingPreview: (details) => ipcRenderer.invoke("vendor:booking-preview", details),
     generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
     sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),
     recordExternalSent: (details) => ipcRenderer.invoke("vendor:booking-external-sent", details),
+    refreshPortalEvidence: (bookingId) =>
+      ipcRenderer.invoke("vendor:booking-portal-evidence-refresh", bookingId),
     retrySendSync: (sendAttemptId) =>
       ipcRenderer.invoke("vendor:booking-send-sync-retry", sendAttemptId),
+    reconcileSend: (sendAttemptId) =>
+      ipcRenderer.invoke("vendor:booking-send-reconcile", sendAttemptId),
   },
   masterData: {
     sync: () => ipcRenderer.invoke("master-data:sync"),
@@ -79,6 +84,12 @@ contextBridge.exposeInMainWorld("erim", {
     saveContract: (details) => ipcRenderer.invoke("supplier-master:contract-save", details),
     archive: (details) => ipcRenderer.invoke("supplier-master:archive", details),
     listDrafts: () => ipcRenderer.invoke("supplier-master:drafts-list"),
+    listRateApprovals: (details) =>
+      ipcRenderer.invoke("supplier-master:rate-approvals-list", details),
+    requestRateApproval: (details) =>
+      ipcRenderer.invoke("supplier-master:rate-approval-request", details),
+    reviewRateApproval: (details) =>
+      ipcRenderer.invoke("supplier-master:rate-approval-review", details),
     publishDrafts: (details) => ipcRenderer.invoke("supplier-master:drafts-publish", details),
     listPublishSessions: () => ipcRenderer.invoke("supplier-master:publish-sessions-list"),
     onPublishProgress: (callback) => {

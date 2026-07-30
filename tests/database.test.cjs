@@ -846,6 +846,12 @@ test("publishes a selected Supplier chain in dependency stages with confirmed pr
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "erim-psh-publish-session-"));
   const database = new LocalDatabase(path.join(directory, "test.sqlite"));
   try {
+    database.saveSettings({
+      employeeId: "RATE-MAKER",
+      employeeName: "Rate Maker",
+      department: "VENDOR",
+      environment: "DEV",
+    });
     database.replaceSupplierMasterCache({
       supplierTypes: [{
         supplierTypeId: "ST-TRANSPORT", typeCode: "TRANSPORT", typeName: "Transport",
@@ -868,6 +874,24 @@ test("publishes a selected Supplier chain in dependency stages with confirmed pr
         priceBasis: "PER_VEHICLE", amount: 500000,
       }],
     }).draft;
+    const approval = database.requestSupplierRateApproval({
+      draftId: contract.draftId,
+      reason: "Publish tested transport rate",
+      evidenceReference: "TEST-CONTRACT-CTR-STAGED",
+      makerEmail: "maker@example.test",
+    });
+    database.saveSettings({
+      employeeId: "RATE-CHECKER",
+      employeeName: "Rate Checker",
+      department: "MANAGER_ADMIN",
+      environment: "DEV",
+    });
+    database.reviewSupplierRateApproval({
+      approvalId: approval.approvalId,
+      decision: "APPROVE",
+      reason: "Test approval",
+      reviewerEmail: "checker@example.test",
+    });
     const progress = [];
     const calls = [];
     const service = new GoogleWorkspaceService({

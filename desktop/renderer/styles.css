@@ -1079,6 +1079,19 @@ body.supplier-focus-mode { min-width: 0; }
 .vendor-communication-send-actions .button { width: 100%; }
 .vendor-communication-action .vendor-booking-sop { margin-top: 0; }
 .vendor-communication-action .vendor-booking-send-panel { grid-template-columns: 1fr; }
+.vendor-gmail-readiness {
+  position: sticky; top: 0; z-index: 2; display: grid; gap: 4px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: #f8fafb; font-size: 10px;
+}
+.vendor-gmail-readiness.ready { border-color: #8bc9ac; background: #edf9f3; }
+.vendor-gmail-readiness.attention { border-color: #e5b6a9; background: #fff4f1; }
+.vendor-gmail-readiness strong, .vendor-gmail-readiness small { display: block; overflow-wrap: anywhere; }
+.vendor-portal-payment-notice {
+  padding: 12px; border: 2px solid #d99b22; border-radius: 10px;
+  background: #fff8df; color: #5e430d;
+}
+.vendor-portal-payment-notice strong { display: block; font-size: 16px; }
 .vendor-resend-dialog { width: min(760px,calc(100vw - 36px)); }
 .vendor-resend-content { display: grid; gap: 12px; padding: 16px; }
 .vendor-resend-content > label,

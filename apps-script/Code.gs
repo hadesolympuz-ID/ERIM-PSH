@@ -55,6 +55,22 @@ function doPost(event) {
       return json_({ ok: true, data: publishSupplierMasterBatch_(request, actor) });
     }
 
+    if (route === "supplier.rate.approval.list") {
+      requireDesktop_(request, actor);
+      return json_({ ok: true, data: listSupplierRateApprovals_(actor) });
+    }
+
+    if (route === "supplier.rate.approval.request") {
+      requireDesktop_(request, actor);
+      return json_({ ok: true, data: requestSupplierRateApproval_(request, actor) });
+    }
+
+    if (route === "supplier.rate.approval.review") {
+      requireDesktop_(request, actor);
+      requireSupplierManager_(actor);
+      return json_({ ok: true, data: reviewSupplierRateApproval_(request, actor) });
+    }
+
     if (route === "supplier.type.save") {
       requireDesktop_(request, actor);
       requireSupplierManager_(actor);
@@ -209,7 +225,7 @@ const SUPPLIER_MASTER_SCHEMA = {
     "sop_id", "supplier_id", "booking_channels", "lead_time", "cutoff_time",
     "required_information", "confirmation_procedure", "amendment_procedure",
     "cancellation_procedure", "emergency_procedure", "portal_url", "account_reference",
-    "subject_template", "body_template", "status", "record_version", "created_at",
+    "portal_payment_rule", "subject_template", "body_template", "status", "record_version", "created_at",
     "created_by", "updated_at", "updated_by",
   ],
   SUPPLIER_PRODUCTS: [
@@ -234,6 +250,13 @@ const SUPPLIER_MASTER_SCHEMA = {
   SUPPLIER_MASTER_EVENTS: [
     "event_id", "event_key", "event_type", "entity_type", "entity_id", "supplier_id",
     "type_code", "summary", "event_at", "actor_employee_id",
+  ],
+  SUPPLIER_RATE_APPROVALS: [
+    "approval_id", "draft_id", "entity_id", "supplier_id", "snapshot_hash",
+    "payload_json", "status", "maker_employee_id", "maker_email",
+    "request_reason", "evidence_reference", "requested_at",
+    "reviewer_employee_id", "reviewer_email", "review_reason", "reviewed_at",
+    "created_at", "updated_at",
   ],
 };
 
@@ -594,6 +617,7 @@ function saveSupplier_(request, actor, options) {
     emergency_procedure: sopInput.emergencyProcedure || "",
     portal_url: sopInput.portalUrl || "",
     account_reference: sopInput.accountReference || "",
+    portal_payment_rule: sopInput.portalPaymentRule || "",
     subject_template: sopInput.subjectTemplate || "",
     body_template: sopInput.bodyTemplate || "",
     status: "ACTIVE",
@@ -1619,6 +1643,116 @@ function supplierMasterCatalog_() {
     checksum: digest_(JSON.stringify(payload)),
     sourceVersion: new Date().toISOString(),
   });
+}
+
+function supplierRateApprovalRecord_(row) {
+  return {
+    approvalId: row.approval_id || "",
+    draftId: row.draft_id || "",
+    entityId: row.entity_id || "",
+    supplierId: row.supplier_id || "",
+    snapshotHash: row.snapshot_hash || "",
+    payload: parseJsonObject_(row.payload_json),
+    status: row.status || "LOCAL_ONLY",
+    makerEmployeeId: row.maker_employee_id || "",
+    makerEmail: row.maker_email || "",
+    requestReason: row.request_reason || "",
+    evidenceReference: row.evidence_reference || "",
+    requestedAt: row.requested_at || "",
+    reviewerEmployeeId: row.reviewer_employee_id || "",
+    reviewerEmail: row.reviewer_email || "",
+    reviewReason: row.review_reason || "",
+    reviewedAt: row.reviewed_at || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function listSupplierRateApprovals_(actor) {
+  ensureSheetWithHeaders_(
+    "SUPPLIER_RATE_APPROVALS",
+    SUPPLIER_MASTER_SCHEMA.SUPPLIER_RATE_APPROVALS,
+  );
+  const manager = ["ADMIN", "MANAGER"].includes(String(actor.role || "").toUpperCase())
+    || String(actor.department || "").toUpperCase().replace(/[ -]+/g, "_") === "MANAGER_ADMIN";
+  return allRecords_("SUPPLIER_RATE_APPROVALS")
+    .filter((row) => manager || String(row.maker_employee_id) === String(actor.employeeId))
+    .map(supplierRateApprovalRecord_)
+    .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+}
+
+function requestSupplierRateApproval_(request, actor) {
+  ensureSheetWithHeaders_(
+    "SUPPLIER_RATE_APPROVALS",
+    SUPPLIER_MASTER_SCHEMA.SUPPLIER_RATE_APPROVALS,
+  );
+  const approval = request.approval || {};
+  if (!approval.approvalId || !approval.draftId || !approval.entityId
+      || !approval.snapshotHash || !approval.requestReason || !approval.evidenceReference) {
+    throw apiError_("VALIDATION_ERROR", "Complete Local Rate approval data is required.");
+  }
+  const now = new Date().toISOString();
+  const existing = findRecord_("SUPPLIER_RATE_APPROVALS", "draft_id", approval.draftId);
+  const record = {
+    approval_id: existing && existing.approval_id || approval.approvalId,
+    draft_id: approval.draftId,
+    entity_id: approval.entityId,
+    supplier_id: approval.supplierId || "",
+    snapshot_hash: approval.snapshotHash,
+    payload_json: JSON.stringify(approval.payload || {}),
+    status: "APPROVAL_REQUESTED",
+    maker_employee_id: actor.employeeId,
+    maker_email: actor.email,
+    request_reason: approval.requestReason,
+    evidence_reference: approval.evidenceReference,
+    requested_at: now,
+    reviewer_employee_id: "",
+    reviewer_email: "",
+    review_reason: "",
+    reviewed_at: "",
+    created_at: existing && existing.created_at || now,
+    updated_at: now,
+  };
+  if (existing) updateRecord_("SUPPLIER_RATE_APPROVALS", "draft_id", approval.draftId, record);
+  else appendRecord_("SUPPLIER_RATE_APPROVALS", record);
+  return supplierRateApprovalRecord_(record);
+}
+
+function reviewSupplierRateApproval_(request, actor) {
+  ensureSheetWithHeaders_(
+    "SUPPLIER_RATE_APPROVALS",
+    SUPPLIER_MASTER_SCHEMA.SUPPLIER_RATE_APPROVALS,
+  );
+  const approvalId = String(request.approvalId || "");
+  const decision = String(request.decision || "").toUpperCase();
+  if (!approvalId || !["APPROVE", "REQUEST_CHANGES", "REJECT"].includes(decision)) {
+    throw apiError_("VALIDATION_ERROR", "Approval ID and review decision are required.");
+  }
+  const existing = findRecord_("SUPPLIER_RATE_APPROVALS", "approval_id", approvalId);
+  if (!existing || String(existing.status) !== "APPROVAL_REQUESTED") {
+    throw apiError_("APPROVAL_NOT_PENDING", "This Local Rate approval is no longer pending.");
+  }
+  if (String(existing.maker_employee_id) === String(actor.employeeId)
+      || String(existing.maker_email).toLowerCase() === String(actor.email).toLowerCase()) {
+    throw apiError_("MAKER_CHECKER_REQUIRED", "The employee who entered the rate cannot approve it.");
+  }
+  const reason = String(request.reason || "").trim();
+  if (decision !== "APPROVE" && !reason) {
+    throw apiError_("VALIDATION_ERROR", "Review reason is required.");
+  }
+  const now = new Date().toISOString();
+  const changes = {
+    status: decision === "APPROVE"
+      ? "APPROVED_TO_SYNC"
+      : decision === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : "REJECTED",
+    reviewer_employee_id: actor.employeeId,
+    reviewer_email: actor.email,
+    review_reason: reason,
+    reviewed_at: now,
+    updated_at: now,
+  };
+  updateRecord_("SUPPLIER_RATE_APPROVALS", "approval_id", approvalId, changes);
+  return supplierRateApprovalRecord_(Object.assign({}, existing, changes));
 }
 
 function camelizeSupplierRecord_(record) {

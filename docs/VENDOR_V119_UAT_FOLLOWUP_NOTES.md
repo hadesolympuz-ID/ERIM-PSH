@@ -1,6 +1,6 @@
 # Vendor v1.1.9 UAT Follow-up Notes
 
-Status: `IMPLEMENTED THROUGH v1.1.11 — WINDOWS UAT BUILD READY`
+Status: `IMPLEMENTED THROUGH v1.1.12 — LOCAL VERIFICATION`
 
 Recorded: 2026-07-30
 
@@ -635,18 +635,18 @@ locally so no external email or official record was created.
 Add an automatic Email-evidence mark. It must be derived from the ledger and
 must never be a manually editable checkbox.
 
-- [ ] `EMAIL ID — NOT CREATED`: generated draft; Message ID and Thread ID are
+- [x] `EMAIL ID — NOT CREATED`: generated draft; Message ID and Thread ID are
   empty.
-- [ ] `EMAIL ID — RECORDED / SYNC PENDING`: Gmail accepted and both IDs exist,
+- [x] `EMAIL ID — RECORDED / SYNC PENDING`: Gmail accepted and both IDs exist,
   but official evidence has not synced.
-- [ ] `EMAIL ID — RECORDED / SYNCED`: both IDs exist and official evidence is
+- [x] `EMAIL ID — RECORDED / SYNCED`: both IDs exist and official evidence is
   synced.
-- [ ] `EMAIL OUTCOME UNKNOWN`: Gmail outcome cannot be proven; block another
+- [x] `EMAIL OUTCOME UNKNOWN`: Gmail outcome cannot be proven; block another
   Send until reconciliation.
-- [ ] `NON-EMAIL CHANNEL`: use external evidence instead of Gmail ID.
-- [ ] Display Gmail Message ID, Thread ID, sender, recipients, accepted time,
+- [x] `NON-EMAIL CHANNEL`: use external evidence instead of Gmail ID.
+- [x] Display Gmail Message ID, Thread ID, sender, recipients, accepted time,
   and evidence-sync state in Delivery History.
-- [ ] Provide Copy Message ID and Open Gmail Thread actions where useful.
+- [x] Provide Copy Message ID and Open Gmail Thread actions where useful.
 
 ### 12.6 Failure and anti-double-send branches
 
@@ -658,11 +658,11 @@ must never be a manually editable checkbox.
 - [x] An unresolved active Send Attempt blocks a new Send Attempt.
 - [x] An unknown Gmail outcome becomes `SEND_OUTCOME_UNKNOWN` and blocks
   automatic retry.
-- [ ] Move the final TO-recipient invariant before Send Attempt insertion so a
+- [x] Move the final TO-recipient invariant before Send Attempt insertion so a
   malformed direct IPC/API request cannot leave a `PREPARED` attempt with no TO
   recipient. The UI already validates TO, but the backend invariant should be
   authoritative.
-- [ ] Add an automated test for the no-TO backend invariant and confirm that no
+- [x] Add an automated test for the no-TO backend invariant and confirm that no
   Send Attempt row is inserted on rejection.
 
 ### 12.7 Intentional resend / alternate recipient
@@ -699,20 +699,20 @@ Current condition:
 
 Required positioning:
 
-- [ ] Add `Delivery history / Resend` beside `Open Gmail` on a Sent Email
+- [x] Add `Delivery history / Resend` beside `Open Gmail` on a Sent Email
   service in the Daywise tree.
-- [ ] Add the same action to the Booking Register / Vendor Inbox Sent row.
-- [ ] Open the full-screen communication workspace directly on the selected
+- [x] Add the same action to the Booking Register / Vendor Inbox Sent row.
+- [x] Open the full-screen communication workspace directly on the selected
   Sent booking in read-only Delivery History mode.
-- [ ] Keep Subject/body/service snapshot read-only for Resend.
-- [ ] Position `Kirim ulang / Ganti penerima` under the original delivery
+- [x] Keep Subject/body/service snapshot read-only for Resend.
+- [x] Position `Kirim ulang / Ganti penerima` under the original delivery
   evidence in the right panel.
-- [ ] Do not show Resend for `GENERATED`.
-- [ ] Show `Retry evidence sync` instead of Resend for
+- [x] Do not show Resend for `GENERATED`.
+- [x] Show `Retry evidence sync` instead of Resend for
   `SENT_PENDING_SYNC`.
-- [ ] Show `Reconcile Gmail outcome` and block Resend for
+- [x] Show `Reconcile Gmail outcome` and block Resend for
   `SEND_OUTCOME_UNKNOWN`.
-- [ ] Show `Amend booking` separately when content or services must change.
+- [x] Show `Amend booking` separately when content or services must change.
 
 ### 12.9 Multi-attempt Gmail thread and reply detection gap
 
@@ -721,16 +721,16 @@ Required positioning:
 - [x] The booking row stores only the latest Gmail Message ID and Thread ID.
 - [x] Current automatic reply detection scans only the booking's latest stored
   Gmail thread.
-- [ ] Change reply detection to scan every proven Gmail thread in all synced or
+- [x] Change reply detection to scan every proven Gmail thread in all synced or
   Gmail-accepted Send Attempts for the booking.
-- [ ] Deduplicate thread IDs before Gmail reads.
-- [ ] Match each outbound Message ID inside its own Thread ID.
-- [ ] Ignore the connected employee's outbound messages.
-- [ ] Detect a supplier inbound message after the applicable outbound message.
-- [ ] Record which Send Attempt and Thread produced the inbound reply.
-- [ ] Preserve replies from the original thread even after an alternate-
+- [x] Deduplicate thread IDs before Gmail reads.
+- [x] Match each outbound Message ID inside its own Thread ID.
+- [x] Ignore the connected employee's outbound messages.
+- [x] Detect a supplier inbound message after the applicable outbound message.
+- [x] Record which Send Attempt and Thread produced the inbound reply.
+- [x] Preserve replies from the original thread even after an alternate-
   recipient resend creates a newer thread.
-- [ ] Display every delivery/thread chronologically in Delivery History.
+- [x] Display every delivery/thread chronologically in Delivery History.
 
 ### 12.10 Required implementation order
 
@@ -769,7 +769,7 @@ Required positioning:
 
 ## 13. Approved deterministic sort and Gmail connection preflight
 
-Status: `OWNER APPROVED — RECORDED FOR IMPLEMENTATION`
+Status: `IMPLEMENTED IN v1.1.12 — PACKAGED/CONNECTED UAT PENDING`
 
 ### 13.1 Package merge boundary
 
@@ -782,6 +782,46 @@ Status: `OWNER APPROVED — RECORDED FOR IMPLEMENTATION`
   similar.
 - [x] Continue excluding every non-`VENDOR` Type.
 
+Portal is a transaction-group exception to ordinary message packaging:
+
+- [x] Group a possible Portal transaction under one Customer Code and one
+  stable Supplier identity.
+- [x] Allow outbound and return services from the same Portal supplier to be
+  booked together and retain one Portal ticket/booking reference when the
+  supplier issues them as one transaction.
+- [x] Never combine outbound and return services across different Supplier
+  identities. For example, an outbound service with Wijaya Perkasa and a
+  return service with Eka Jaya must become two Portal packages with separate
+  booking references.
+- [x] Keep every included stable Service ID on the Portal transaction so one
+  accepted package reference can update only those exact services.
+- [x] Show a non-blocking `Possible return segment not included` notice when a
+  likely same-supplier return exists outside the current selection. The notice
+  must never auto-add a service or combine different suppliers.
+- [x] Treat a later change to one service in a combined Portal ticket as an
+  impact to the shared transaction and require review of the other included
+  segment before Amendment or cancellation.
+
+Eka Jaya Portal payment notice:
+
+- [x] Apply this rule only to the configured stable Supplier identity for Eka
+  Jaya, not by a loose display-name match.
+- [x] Calculate lead time in calendar days from the Portal booking/action date
+  to the earliest included service date. For a round trip, this is the
+  outbound date.
+- [x] When lead time is exactly 15 days or less, show `USE DEPOSIT`.
+- [x] When lead time is more than 15 days, show `USE PREPAID`.
+- [x] Display the result prominently in the Portal action panel before the
+  supplier website is opened.
+- [x] Preserve the calculated lead days, payment instruction, calculation
+  date, earliest service date, and rule version in the Portal booking
+  snapshot/evidence.
+- [x] Recalculate the notice before the Portal action if the booking date or
+  earliest included service date changed.
+- [x] Add automated boundary coverage for 14, 15, and 16 calendar days plus a
+  same-supplier round trip. Keep a return date crossing the threshold in the
+  connected live UAT gate.
+
 ### 13.2 Approved package sort
 
 Implement this deterministic ascending order:
@@ -792,22 +832,33 @@ Implement this deterministic ascending order:
    - `PORTAL`;
    - `OTHERS` / `OTHER`;
    - unknown channel last;
-2. normalized Supplier Name;
-3. Customer Code;
-4. earliest selected service date;
-5. earliest selected Day number;
-6. stable Package Key.
+2. for `EMAIL`, `WHATSAPP`, `OTHERS`, and unknown:
+   - normalized Supplier Name;
+   - Customer Code;
+   - earliest selected service date;
+   - earliest selected Day number;
+   - stable Package Key;
+3. for `PORTAL`:
+   - Customer Code;
+   - normalized Supplier Name;
+   - earliest selected service date;
+   - normalized first Product Name;
+   - stable Package Key.
 
-- [ ] Add first service date and first Day metadata to the generated queue
+- [x] Add first service date and first Day metadata to the generated queue
   entry.
-- [ ] Add the final stable Package Key tie-breaker.
-- [ ] Use the same comparator when generating and resuming drafts.
-- [ ] Add automated coverage proving the result does not depend on insertion
+- [x] Add normalized first Product metadata required by the Portal comparator.
+- [x] Add the final stable Package Key tie-breaker.
+- [x] Use the same comparator when generating and resuming drafts.
+- [x] Add automated coverage proving the result does not depend on insertion
   order.
+- [x] Add Portal coverage for a same-supplier round trip using one transaction
+  reference and a different-supplier outbound/return using two references.
 
 ### 13.3 Approved service sort inside one package
 
-Implement this deterministic ascending order:
+For `EMAIL`, `WHATSAPP`, `OTHERS`, and unknown, implement this deterministic
+ascending order:
 
 1. Day number;
 2. service date;
@@ -815,13 +866,21 @@ Implement this deterministic ascending order:
 4. normalized Product Name;
 5. stable Service ID.
 
-- [ ] Sort before building `selectedServiceIds`.
-- [ ] Use the sorted service array for the generated snapshot.
-- [ ] Use the same array for Subject/body preview, MIME, evidence, and Delivery
+For `PORTAL`, keep ticket segments chronological and deterministic:
+
+1. service date;
+2. Day number;
+3. normalized Product Name;
+4. Micro Split `splitSequence`;
+5. stable Service ID.
+
+- [x] Sort before building `selectedServiceIds`.
+- [x] Use the sorted service array for the generated snapshot.
+- [x] Use the same array for Subject/body preview, MIME, evidence, and Delivery
   History.
-- [ ] Preserve stable Service IDs; sorting must not create or change identity.
-- [ ] Add a test with unsorted input Days and Split sequences.
-- [ ] Confirm the standard email body prints Day 1, Day 2, Day 3 consistently.
+- [x] Preserve stable Service IDs; sorting must not create or change identity.
+- [x] Add a test with unsorted input Days and Split sequences.
+- [x] Confirm the standard email body prints Day 1, Day 2, Day 3 consistently.
 
 ### 13.4 Generate-time Gmail preflight
 
@@ -872,11 +931,11 @@ Email cannot be sent until Gmail is ready.
 
 `Generate Draft Only`:
 
-- [ ] creates or updates only the generated local snapshot;
-- [ ] marks the package `EMAIL PREFLIGHT REQUIRED`;
-- [ ] does not create a Send Attempt;
-- [ ] keeps `Send via Gmail` disabled;
-- [ ] permits later Resume and Recheck Connection.
+- [x] creates or updates only the generated local snapshot;
+- [x] marks the package `EMAIL PREFLIGHT REQUIRED`;
+- [x] does not create a Send Attempt;
+- [x] keeps `Send via Gmail` disabled;
+- [x] permits later Resume and Recheck Connection.
 
 ### 13.6 Communication-workspace readiness notice
 
@@ -899,12 +958,12 @@ Email may be sent once; official evidence will remain SENT_PENDING_SYNC.
 
 Required actions:
 
-- [ ] `Recheck connection`;
-- [ ] `Reconnect Google` when auth/permission fails;
-- [ ] show the returned sender account;
-- [ ] show preflight age;
-- [ ] mark stale after five minutes or when the app resumes from sleep;
-- [ ] rerun on network change where detectable.
+- [x] `Recheck connection`;
+- [x] `Reconnect Google` when auth/permission fails;
+- [x] show the returned sender account;
+- [x] show preflight age;
+- [x] mark stale after five minutes or when the app resumes from sleep;
+- [x] rerun on network change where detectable.
 
 ### 13.7 Mandatory pre-Send recheck
 
@@ -919,11 +978,11 @@ before the final confirmation and Send Attempt insertion:
 6. then create the immutable Send Attempt;
 7. then show final confirmation and call Gmail exactly once.
 
-- [ ] A failed pre-Send check creates no Send Attempt.
-- [ ] A canceled final confirmation creates no Send Attempt.
-- [ ] A successful preflight does not weaken the existing
+- [x] A failed pre-Send check creates no Send Attempt.
+- [x] A canceled final confirmation creates no Send Attempt.
+- [x] A successful preflight does not weaken the existing
   `SEND_OUTCOME_UNKNOWN` protection.
-- [ ] A Gmail failure before receiving proven IDs must never be silently
+- [x] A Gmail failure before receiving proven IDs must never be silently
   retried.
 
 ### 13.8 Implementation order

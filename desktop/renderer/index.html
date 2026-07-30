@@ -342,6 +342,7 @@
                 </section>
                 <aside class="vendor-communication-action">
                   <div><p class="eyebrow">Selected channel</p><h2>Send & evidence</h2></div>
+                  <div id="vendor-gmail-readiness" class="vendor-gmail-readiness" hidden></div>
                   <div id="vendor-booking-sop" class="vendor-booking-sop"></div>
                   <div id="vendor-email-context-content" class="vendor-email-context-content"></div>
                   <div class="vendor-booking-actions vendor-communication-send-actions">
@@ -350,7 +351,7 @@
                     <button id="send-vendor-booking-email" class="button danger" type="button" hidden>Send via Gmail</button>
                   </div>
                   <div id="vendor-booking-send-panel" class="vendor-booking-send-panel" hidden>
-                    <label>External reference / evidence note<input id="vendor-booking-external-reference" placeholder="WhatsApp time, portal booking ID, or evidence note" /></label>
+                    <label><span id="vendor-external-reference-label">External reference / evidence note</span><input id="vendor-booking-external-reference" placeholder="WhatsApp time, portal booking ID, or evidence note" /></label>
                     <button id="record-vendor-booking-sent" class="button primary" type="button">Record as sent</button>
                   </div>
                 </aside>
@@ -492,6 +493,10 @@
                           <label class="wide">Emergency/escalation procedure<textarea name="emergencyProcedure" rows="3"></textarea></label>
                           <label>Portal URL<input name="portalUrl" type="url" placeholder="https://" /></label>
                           <label>Account reference<input name="accountReference" placeholder="No passwords" /></label>
+                          <label>Portal payment rule<select name="portalPaymentRule">
+                            <option value="">Standard / none</option>
+                            <option value="EKA_JAYA_15_DAY">Eka Jaya: ≤15 Deposit, &gt;15 Prepaid</option>
+                          </select></label>
                           <label class="wide">Default email subject template<input name="subjectTemplate" /></label>
                           <label class="wide">Default booking body template<textarea name="bodyTemplate" rows="4"></textarea></label>
                         </div>
@@ -1140,6 +1145,28 @@
         <button id="cancel-supplier-draft-dialog" class="button ghost" type="button">Close</button>
         <button id="publish-selected-supplier-drafts" class="button primary" type="button">Publish selected to Google</button>
       </div>
+    </dialog>
+
+    <dialog id="supplier-rate-approval-dialog" class="compact-dialog">
+      <form id="supplier-rate-approval-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Maker-checker control</p><h2 id="supplier-rate-approval-title">Local Rate approval</h2></div>
+          <button id="close-supplier-rate-approval" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="supplier-maintenance-content">
+          <div id="supplier-rate-approval-notice" class="maintenance-warning"></div>
+          <label id="supplier-rate-evidence-field">Source/evidence reference
+            <input id="supplier-rate-approval-evidence" placeholder="Contract, quote, email, or approved document" />
+          </label>
+          <label>Reason / review note
+            <textarea id="supplier-rate-approval-reason" rows="4"></textarea>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-rate-approval" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-rate-approval" class="button primary" type="submit">Continue</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog id="supplier-maintenance-dialog" class="compact-dialog supplier-maintenance-dialog">

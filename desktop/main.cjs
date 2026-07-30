@@ -158,14 +158,20 @@ function registerIpc() {
   ipcMain.handle("vendor:booking-list", () => database.listVendorBookings());
   ipcMain.handle("vendor:booking-send-attempt-list", (_event, bookingId) =>
     database.listVendorSendAttempts(bookingId));
+  ipcMain.handle("vendor:gmail-preflight", (_event, details) =>
+    googleWorkspace.vendorGmailPreflight(details || {}));
   ipcMain.handle("vendor:booking-preview", (_event, details) => database.getVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-generate", (_event, details) => database.saveVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-email-send", (_event, details) =>
     googleWorkspace.sendVendorBookingEmail(details || {}));
   ipcMain.handle("vendor:booking-external-sent", (_event, details) =>
     database.recordVendorBookingExternalAction(details || {}));
+  ipcMain.handle("vendor:booking-portal-evidence-refresh", (_event, bookingId) =>
+    database.refreshVendorPortalEvidence(bookingId));
   ipcMain.handle("vendor:booking-send-sync-retry", (_event, sendAttemptId) =>
     googleWorkspace.retryVendorSendSync(sendAttemptId));
+  ipcMain.handle("vendor:booking-send-reconcile", (_event, sendAttemptId) =>
+    googleWorkspace.reconcileVendorSendAttempt(sendAttemptId));
   ipcMain.handle("master-data:sync", () => googleWorkspace.syncMasterDataCache());
   ipcMain.handle("supplier-master:list", (_event, options) => googleWorkspace.listSupplierMaster(options || {}));
   ipcMain.handle("supplier-master:initialize", () => googleWorkspace.initializeSupplierMaster());
@@ -177,6 +183,12 @@ function registerIpc() {
   ipcMain.handle("supplier-master:contract-save", (_event, details) => googleWorkspace.saveSupplierContract(details));
   ipcMain.handle("supplier-master:archive", (_event, details) => googleWorkspace.archiveSupplierEntity(details));
   ipcMain.handle("supplier-master:drafts-list", () => googleWorkspace.listSupplierMasterDrafts());
+  ipcMain.handle("supplier-master:rate-approvals-list", () =>
+    googleWorkspace.listSupplierRateApprovals());
+  ipcMain.handle("supplier-master:rate-approval-request", (_event, details) =>
+    googleWorkspace.requestSupplierRateApproval(details || {}));
+  ipcMain.handle("supplier-master:rate-approval-review", (_event, details) =>
+    googleWorkspace.reviewSupplierRateApproval(details || {}));
   ipcMain.handle("supplier-master:drafts-publish", (_event, details) =>
     googleWorkspace.publishSupplierMasterDrafts(details || {}));
   ipcMain.handle("supplier-master:publish-sessions-list", () =>
