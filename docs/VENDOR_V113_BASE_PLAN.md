@@ -1071,7 +1071,7 @@ Remaining gates:
 
 - [x] build and inspect the v1.1.14 Windows artifact;
 - [x] run the packaged desktop smoke test;
-- publish the desktop updater only after artifact/hash verification;
+- [x] publish the desktop updater only after artifact/hash verification;
 - deploy the Apps Script source separately from the desktop release;
 - use controlled UAT for representative online posting and real supplier
   delivery.
@@ -1086,3 +1086,5 @@ Verified package:
   exact-product email source;
 - the packaged executable stayed alive through the isolated eight-second smoke
   gate without using the staff database.
+- GitHub Release `v1.1.14` is published with the installer, blockmap, and
+  `latest.yml`; GitHub's installer digest matches the verified local SHA-256.
