@@ -289,6 +289,20 @@ class LocalDatabase {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS local_vendor_process_events (
+        process_event_id TEXT PRIMARY KEY,
+        customer_code TEXT NOT NULL,
+        customer_name TEXT NOT NULL DEFAULT '',
+        source_action TEXT NOT NULL,
+        process_state TEXT NOT NULL,
+        result_message TEXT NOT NULL DEFAULT '',
+        required_action TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_process_event_customer
+        ON local_vendor_process_events(customer_code, created_at);
+
       CREATE TABLE IF NOT EXISTS vendor_hotel_drafts (
         hotel_stay_id TEXT PRIMARY KEY,
         vendor_draft_id TEXT NOT NULL,
@@ -2201,7 +2215,8 @@ class LocalDatabase {
       adultPax: Number(draft.adult_pax || 0),
       childPax: Number(draft.child_pax || 0),
       infantPax: Number(draft.infant_pax || 0),
-      totalPax: Number(draft.total_pax_manual || 0),
+      totalPax: Number(draft.adult_pax || 0)
+        + Number(draft.child_pax || 0) + Number(draft.infant_pax || 0),
       tourId: draft.tour_id || "",
       sourcePublicationId: draft.source_publication_id || "",
       sourceRecordVersion: Number(draft.source_record_version || 0),
@@ -2288,11 +2303,11 @@ class LocalDatabase {
       adultPax: Number(input.adultPax ?? 0),
       childPax: Number(input.childPax ?? 0),
       infantPax: Number(input.infantPax ?? 0),
-      totalPax: Number(input.totalPax ?? 0),
     };
     if (!Object.values(pax).every((value) => Number.isInteger(value) && value >= 0)) {
-      throw new Error("Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.");
+      throw new Error("Adult, Child, and Infant must be whole numbers starting from 0.");
     }
+    pax.totalPax = pax.adultPax + pax.childPax + pax.infantPax;
     const draftId = existing?.vendorDraftId || input.vendorDraftId || this.id("VDR");
     const now = this.now();
     const owner = this.settings().employee_id || "DEV-USER";
@@ -2496,6 +2511,14 @@ class LocalDatabase {
       });
     })();
     const saved = this.getVendorIntakeDraftByCode(code);
+    this.recordVendorProcessEvent({
+      customerCode: saved.customerCode,
+      customerName: saved.customerName,
+      sourceAction: input.processSource || "SAVE_LOCAL_DRAFT",
+      processState: "LOCAL_SAVED",
+      resultMessage: "Structured Vendor draft saved on this PC.",
+      requiredAction: "OPEN_DRAFT",
+    });
     this.log("VENDOR_INTAKE_DRAFT_SAVED", "VENDOR_INTAKE", draftId, {
       customerCode: code,
       hotelCount: saved.hotels.length,
@@ -2503,6 +2526,50 @@ class LocalDatabase {
       splitCount: saved.days.reduce((sum, day) => sum + day.splits.length, 0),
     });
     return saved;
+  }
+
+  recordVendorProcessEvent(input = {}) {
+    const customerCode = String(input.customerCode || "").trim().toUpperCase();
+    if (!customerCode) throw new Error("Customer Code is required for Vendor process reporting.");
+    const now = this.now();
+    const event = {
+      processEventId: this.id("VPE"),
+      customerCode,
+      customerName: String(input.customerName || "").trim(),
+      sourceAction: String(input.sourceAction || "UNKNOWN").trim().toUpperCase(),
+      processState: String(input.processState || "FAILED").trim().toUpperCase(),
+      resultMessage: String(input.resultMessage || "").trim(),
+      requiredAction: String(input.requiredAction || "").trim().toUpperCase(),
+      createdAt: now,
+    };
+    this.db.prepare(`
+      INSERT INTO local_vendor_process_events (
+        process_event_id, customer_code, customer_name, source_action,
+        process_state, result_message, required_action, created_at
+      ) VALUES (
+        @processEventId, @customerCode, @customerName, @sourceAction,
+        @processState, @resultMessage, @requiredAction, @createdAt
+      )
+    `).run(event);
+    return event;
+  }
+
+  listVendorProcessEvents(limit = 100) {
+    return this.db.prepare(`
+      SELECT process_event_id, customer_code, customer_name, source_action,
+        process_state, result_message, required_action, created_at
+      FROM local_vendor_process_events
+      ORDER BY created_at DESC LIMIT ?
+    `).all(Math.max(1, Math.min(Number(limit) || 100, 500))).map((row) => ({
+      processEventId: row.process_event_id,
+      customerCode: row.customer_code,
+      customerName: row.customer_name,
+      sourceAction: row.source_action,
+      processState: row.process_state,
+      resultMessage: row.result_message,
+      requiredAction: row.required_action,
+      createdAt: row.created_at,
+    }));
   }
 
   markVendorIntakePublished(customerCode) {
@@ -2759,7 +2826,6 @@ class LocalDatabase {
       const dayContext = [
         `Day ${service.dayNumber}`,
         service.serviceDate || "date pending",
-        service.dayTitle ? `Header: ${service.dayTitle}` : "",
       ].filter(Boolean).join(" | ");
       const operationalContext = [
         service.hotelOnDay ? `Hotel: ${service.hotelOnDay}` : "",
@@ -2782,7 +2848,7 @@ class LocalDatabase {
       `Please ${actionType === "CANCEL" ? "cancel all services" : actionType === "AMEND" ? "revise the booking" : "arrange the following booking"} for:`,
       `Customer: ${item.customerName}`,
       `Customer Code: ${item.customerCode}`,
-      `Pax: ${item.totalPax || item.adultPax + item.childPax + item.infantPax} total (${item.adultPax} adult, ${item.childPax} child, ${item.infantPax} infant)`,
+      `Pax: ${item.adultPax} adult, ${item.childPax} child, ${item.infantPax} infant`,
       "",
       serviceLines,
       "",
@@ -3635,6 +3701,7 @@ class LocalDatabase {
         )
       ),
       deliveryReport: this.getVendorBookingDeliveryReport(),
+      processReport: this.listVendorProcessEvents(),
       workInbox,
     };
   }

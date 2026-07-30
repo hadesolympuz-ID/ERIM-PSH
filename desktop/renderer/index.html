@@ -144,6 +144,10 @@
                 <div class="panel-heading"><div><p class="eyebrow">Arrival D+1 to D+7</p><h2>Upcoming Arrival Recheck</h2></div><span id="vendor-upcoming-count" class="inbox-count">0</span></div>
                 <div id="vendor-upcoming-list" class="vendor-dashboard-scroll"></div>
               </section>
+              <section class="panel vendor-process-report">
+                <div class="panel-heading"><div><p class="eyebrow">Local & online publication</p><h2>Online Process Report</h2></div><span id="vendor-process-report-count" class="inbox-count">0</span></div>
+                <div id="vendor-process-report-list" class="vendor-process-report-list"></div>
+              </section>
             </div>
           </section>
 
@@ -232,7 +236,6 @@
                     <label>Customer Code<input name="customerCode" readonly /></label>
                     <label>Customer Name<input name="customerName" required /></label>
                     <label>Client Tag / Occasion<input name="clientTag" placeholder="HONEYMOONERS" /></label>
-                    <label>Total Pax<input name="totalPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
@@ -240,14 +243,14 @@
                   <div class="vendor-travel-fields">
                     <div class="vendor-travel-group">
                       <strong>Arrival</strong>
-                      <label>Date<input name="arrivalDate" type="date" required /><small data-date-display-for="arrivalDate"></small></label>
+                      <label>Date<input name="arrivalDate" type="text" placeholder="03/October/2026" required data-vendor-date-input /></label>
                       <label>Flight<input name="arrivalFlight" /></label>
                       <label>Time<input name="arrivalTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
                       <label>Sector<input name="arrivalSector" /></label>
                     </div>
                     <div class="vendor-travel-group">
                       <strong>Departure</strong>
-                      <label>Date<input name="departureDate" type="date" required /><small data-date-display-for="departureDate"></small></label>
+                      <label>Date<input name="departureDate" type="text" placeholder="03/October/2026" required data-vendor-date-input /></label>
                       <label>Flight<input name="departureFlight" /></label>
                       <label>Time<input name="departureTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
                       <label>Sector<input name="departureSector" /></label>
@@ -329,7 +332,6 @@
               <header class="vendor-communication-header">
                 <div><p class="eyebrow">Controlled communication workspace</p><h2>Generate & Send Supplier Booking</h2></div>
                 <div class="vendor-communication-header-actions">
-                  <button id="vendor-communication-back-list" class="button ghost" type="button" hidden>Back to list</button>
                   <div id="vendor-communication-progress" class="vendor-communication-progress">0 Packages</div>
                   <button id="close-vendor-communication" class="button ghost" type="button">Close</button>
                 </div>
@@ -361,6 +363,9 @@
                       <label class="wide">Booking message<textarea id="vendor-booking-body" rows="16"></textarea></label>
                     </div>
                     <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
+                    <div class="vendor-selected-item-actions">
+                      <button id="vendor-communication-back-list" class="button ghost" type="button">Back to list</button>
+                    </div>
                     <div class="vendor-communication-navigation">
                       <button id="vendor-communication-previous" class="button ghost" type="button">Previous</button>
                       <strong id="vendor-communication-position">Package 0 of 0</strong>

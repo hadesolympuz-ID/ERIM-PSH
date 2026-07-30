@@ -100,7 +100,9 @@ test("Portal preview groups only one stable supplier, sorts chronologically, and
     ]);
     assert.equal(preview.portalTransaction.leadDays, 15);
     assert.equal(preview.portalTransaction.paymentInstruction, "USE DEPOSIT");
-    assert.match(preview.body, /Header: Fastboat to Gili/);
+    assert.doesNotMatch(preview.body, /Header: Fastboat to Gili/);
+    assert.match(preview.body, /Bali to Gili T/);
+    assert.match(preview.body, /Gili T to Bali/);
     assert.match(preview.body, /Hotel: Gili Resort/);
     assert.match(preview.body, /Start: 08:00/);
     assert.equal(new Set(preview.portalTransaction.serviceIds).size, 2);
@@ -152,7 +154,7 @@ test("backend rejects an empty TO before inserting a Send Attempt", () =>
     assert.equal(database.getVendorBooking(booking.bookingId).lastSendAttemptId, "");
   }));
 
-test("Day 0 and manual Total Pax persist independently", () =>
+test("Day 0 persists and Total Pax is always derived from Adult, Child, and Infant", () =>
   withDatabase((database) => {
     const saved = database.saveVendorIntakeDraft({
       customerCode: "ND/DAY-ZERO",
@@ -172,6 +174,18 @@ test("Day 0 and manual Total Pax persist independently", () =>
       }],
     });
     assert.equal(saved.totalPax, 4);
+    const overwritten = database.saveVendorIntakeDraft({
+      ...saved,
+      totalPax: 999,
+      adultPax: 1,
+      childPax: 2,
+      infantPax: 3,
+    });
+    assert.equal(overwritten.totalPax, 6);
+    const processRows = database.getVendorOperationalModel().processReport;
+    assert.equal(processRows[0].customerCode, "ND/DAY-ZERO");
+    assert.equal(processRows[0].processState, "LOCAL_SAVED");
+    assert.equal(processRows[0].requiredAction, "OPEN_DRAFT");
     assert.deepEqual(saved.days.map((day) => day.dayNumber), [0, 1]);
     assert.equal(saved.days[0].startTime, "23:59");
   }));

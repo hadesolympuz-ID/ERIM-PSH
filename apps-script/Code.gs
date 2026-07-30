@@ -908,7 +908,8 @@ function saveVendorIntake_(request, actor) {
       pax_adult: Number(intake.adultPax || 0),
       pax_child: Number(intake.childPax || 0),
       pax_infant: Number(intake.infantPax || 0),
-      pax_total_manual: Number(intake.totalPax || 0),
+      pax_total_manual: Number(intake.adultPax || 0)
+        + Number(intake.childPax || 0) + Number(intake.infantPax || 0),
       arrival_date: intake.arrivalDate || "",
       arrival_flight: intake.arrivalFlight || "",
       arrival_sector: intake.arrivalSector || "",
@@ -1072,10 +1073,10 @@ function validateVendorIntakePayload_(intake) {
   if (String(intake.departureDate) < String(intake.arrivalDate)) {
     throw apiError_("VALIDATION_ERROR", "Departure date cannot be earlier than arrival date.");
   }
-  ["totalPax", "adultPax", "childPax", "infantPax"].forEach((field) => {
+  ["adultPax", "childPax", "infantPax"].forEach((field) => {
     const value = Number(intake[field] ?? 0);
     if (!Number.isInteger(value) || value < 0) {
-      throw apiError_("VALIDATION_ERROR", "Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.");
+      throw apiError_("VALIDATION_ERROR", "Adult, Child, and Infant must be whole numbers starting from 0.");
     }
   });
   ensureSupplierMasterSchema_();

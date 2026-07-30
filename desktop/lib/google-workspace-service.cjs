@@ -1023,6 +1023,7 @@ class GoogleWorkspaceService {
         documentHtml: itinerary.documentHtml,
         suggestions,
         conversionWarnings: itinerary.conversionWarnings,
+        sourceProgramDays: extracted.programDays || [],
         sourceRefreshedAt: new Date().toISOString(),
       };
     }
@@ -1056,19 +1057,51 @@ class GoogleWorkspaceService {
       extractionStatus: "NEEDS_REVIEW",
       localStatus: "LOCAL_DRAFT",
       conversionWarnings: itinerary.conversionWarnings,
+      sourceProgramDays: extracted.programDays || [],
     };
   }
 
   async publishVendorIntake(input) {
-    const saved = this.database.saveVendorIntakeDraft(input);
-    const result = await this.callAppsScript("vendor.intake.save", {
-      requestId: `VINT-${crypto.randomUUID()}`,
-      sourcePublicationId: saved.sourcePublicationId,
-      sourceRecordVersion: saved.sourceRecordVersion,
-      intake: saved,
+    const saved = this.database.saveVendorIntakeDraft({
+      ...input,
+      processSource: "POST_STRUCTURED_DATA_ONLINE",
     });
-    this.database.markVendorIntakePublished(saved.customerCode);
-    return { ...result, local: this.database.getVendorIntakeDraftByCode(saved.customerCode) };
+    this.database.recordVendorProcessEvent({
+      customerCode: saved.customerCode,
+      customerName: saved.customerName,
+      sourceAction: "POST_STRUCTURED_DATA_ONLINE",
+      processState: "POSTING",
+      resultMessage: "Posting structured Vendor data to the official online database.",
+      requiredAction: "",
+    });
+    try {
+      const result = await this.callAppsScript("vendor.intake.save", {
+        requestId: `VINT-${crypto.randomUUID()}`,
+        sourcePublicationId: saved.sourcePublicationId,
+        sourceRecordVersion: saved.sourceRecordVersion,
+        intake: saved,
+      });
+      this.database.markVendorIntakePublished(saved.customerCode);
+      this.database.recordVendorProcessEvent({
+        customerCode: saved.customerCode,
+        customerName: saved.customerName,
+        sourceAction: "POST_STRUCTURED_DATA_ONLINE",
+        processState: "POSTED_ONLINE",
+        resultMessage: `Online post confirmed${result.publicationId ? `: ${result.publicationId}` : "."}`,
+        requiredAction: "VIEW_POSTED_RESULT",
+      });
+      return { ...result, local: this.database.getVendorIntakeDraftByCode(saved.customerCode) };
+    } catch (error) {
+      this.database.recordVendorProcessEvent({
+        customerCode: saved.customerCode,
+        customerName: saved.customerName,
+        sourceAction: "POST_STRUCTURED_DATA_ONLINE",
+        processState: "FAILED",
+        resultMessage: error.message,
+        requiredAction: "RETRY_POST",
+      });
+      throw error;
+    }
   }
 
   async sendVendorBookingEmail(input = {}) {

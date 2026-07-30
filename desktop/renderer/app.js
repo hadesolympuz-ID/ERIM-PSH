@@ -169,6 +169,29 @@ function formatVendorDate(value) {
   return `${fields.day}/${fields.month}/${fields.year}`;
 }
 
+function parseVendorDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const match = text.match(/^(\d{1,2})[\/\s-]([A-Za-z]+)[\/\s-](\d{4})$/);
+  if (!match) return "";
+  const monthNames = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ];
+  const month = monthNames.indexOf(match[2].toLowerCase());
+  const day = Number(match[1]);
+  const year = Number(match[3]);
+  if (month < 0 || day < 1 || day > 31) return "";
+  const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const date = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso ? "" : iso;
+}
+
+function vendorDateValue(input) {
+  return parseVendorDate(input?.value);
+}
+
 function formatWita(value) {
   if (!value) return "—";
   return `${new Intl.DateTimeFormat("en-GB", {
@@ -187,13 +210,9 @@ function normalizeHourTime(value) {
 }
 
 function refreshVendorDateDisplays(root = document) {
-  root.querySelectorAll("[data-date-display-for]").forEach((node) => {
-    const input = root.querySelector(`[name="${node.dataset.dateDisplayFor}"]`);
-    node.textContent = formatVendorDate(input?.value);
-  });
-  root.querySelectorAll("[data-vendor-date-display]").forEach((node) => {
-    const input = node.closest("label")?.querySelector('input[type="date"]');
-    node.textContent = formatVendorDate(input?.value);
+  root.querySelectorAll("[data-vendor-date-input]").forEach((input) => {
+    const iso = parseVendorDate(input.value);
+    if (iso) input.value = formatVendorDate(iso);
   });
 }
 
@@ -365,6 +384,26 @@ function renderVendorDashboard() {
       </article>
     `).join("") : `<div class="empty-notifications">No applicable work item.</div>`;
   });
+  const processRows = state.vendorOperational.processReport || [];
+  $("#vendor-process-report-count").textContent = processRows.length;
+  $("#vendor-process-report-list").innerHTML = processRows.length ? `
+    <div class="vendor-process-row vendor-process-head">
+      <span>Code / Client</span><span>Source</span><span>State</span>
+      <span>Latest result</span><span>Time</span><span>Action</span>
+    </div>
+    ${processRows.map((item) => `<div class="vendor-process-row">
+      <span><strong>${escapeHtml(item.customerCode)}</strong><small>${escapeHtml(item.customerName)}</small></span>
+      <span>${escapeHtml(item.sourceAction.replaceAll("_", " "))}</span>
+      <span>${statusPill(item.processState)}</span>
+      <span>${escapeHtml(item.resultMessage || "—")}</span>
+      <span>${escapeHtml(formatWita(item.createdAt))}</span>
+      <span>${item.requiredAction
+        ? `<button class="button ghost small" type="button"
+            data-vendor-process-code="${escapeHtml(item.customerCode)}"
+            data-vendor-process-action="${escapeHtml(item.requiredAction)}">${escapeHtml(item.requiredAction.replaceAll("_", " "))}</button>`
+        : "—"}</span>
+    </div>`).join("")}
+  ` : `<div class="empty-notifications">No local or online Vendor process has been recorded.</div>`;
 }
 
 function renderVendorInboxLegacy() {
@@ -1046,7 +1085,9 @@ function vendorCommunicationBooking(entry) {
 function showVendorCommunicationBatchList() {
   $("#vendor-communication-batch-view").hidden = false;
   $("#vendor-communication-work-view").hidden = true;
-  $("#vendor-communication-back-list").hidden = true;
+  state.vendorCommunicationIndex = -1;
+  state.vendorBookingPreview = null;
+  state.vendorCommunicationBaseline = "";
   renderVendorCommunicationQueue();
   renderVendorCommunicationBatchGrid();
 }
@@ -1054,7 +1095,21 @@ function showVendorCommunicationBatchList() {
 function showVendorCommunicationWorkView() {
   $("#vendor-communication-batch-view").hidden = true;
   $("#vendor-communication-work-view").hidden = false;
-  $("#vendor-communication-back-list").hidden = false;
+}
+
+function refreshVendorCommunicationBatch() {
+  const activeById = new Map((state.vendorBookings || [])
+    .filter((booking) => booking.communicationStatus === "GENERATED")
+    .map((booking) => [booking.bookingId, booking]));
+  state.vendorCommunicationBatch = (state.vendorCommunicationBatch || []).map((entry) => {
+    const booking = activeById.get(entry.bookingId);
+    if (!booking) return null;
+    const serviceIds = (booking.services || []).map((service) => service.serviceId).filter(Boolean);
+    return serviceIds.length ? { ...entry, serviceIds } : null;
+  }).filter(Boolean).sort(vendorCommunicationSort);
+  if (state.vendorCommunicationIndex >= state.vendorCommunicationBatch.length) {
+    state.vendorCommunicationIndex = state.vendorCommunicationBatch.length - 1;
+  }
 }
 
 function renderVendorCommunicationBatchGrid() {
@@ -1116,11 +1171,7 @@ async function submitVendorGeneratedServiceCancel(event) {
       window.erim.vendor.listBookingQueue(),
       window.erim.vendor.listBookings(),
     ]);
-    state.vendorCommunicationBatch = (state.vendorCommunicationBatch || []).map((entry) =>
-      entry.bookingId === target.bookingId
-        ? { ...entry, serviceIds: entry.serviceIds.filter((id) => id !== target.serviceId) }
-        : entry
-    ).filter((entry) => entry.serviceIds.length);
+    refreshVendorCommunicationBatch();
     state.vendorGeneratedCancelTarget = null;
     $("#vendor-generated-cancel-dialog").close();
     renderVendorBookingQueue();
@@ -1246,10 +1297,17 @@ function renderVendorBookingPreview() {
   $("#vendor-booking-service-summary").innerHTML = `
     <div><strong>${preview.serviceCount} service</strong><small>${preview.adultPax} adult · ${preview.childPax} child · ${preview.infantPax} infant</small></div>
     ${preview.services.map((service) => `
-      <article>
+      <article class="vendor-booking-service-item">
+        <div>
         <span>Day ${service.dayNumber} · ${escapeHtml(service.serviceDate || "date pending")}</span>
         <strong>${escapeHtml(service.productName || service.activityText)}</strong>
         <small>${escapeHtml(service.priceBasis || "PER SERVICE")} · ${escapeHtml(vendorServiceRateLabel(service))} · ${escapeHtml(service.rateStatus)}</small>
+        </div>
+        ${storedSnapshot?.communicationStatus === "GENERATED"
+          ? `<button class="button danger small" type="button"
+              data-cancel-generated-service="${escapeHtml(service.serviceId)}"
+              data-cancel-generated-booking="${escapeHtml(storedSnapshot.bookingId)}">Cancel Generate item</button>`
+          : ""}
       </article>
     `).join("")}
   `;
@@ -1425,9 +1483,8 @@ async function recordVendorBookingSent() {
       externalReference: $("#vendor-booking-external-reference").value,
     });
     await refresh();
-    await openVendorBookingPackage(state.selectedVendorPackageKey, {
-      actionType: booking.actionType, channel: booking.channel,
-    });
+    refreshVendorCommunicationBatch();
+    showVendorCommunicationBatchList();
     toast("External booking action recorded as sent with local evidence.");
   } catch (error) {
     toast(error.message, true);
@@ -1459,9 +1516,8 @@ async function sendVendorBookingEmail() {
       expectedBookingUpdatedAt: booking.updatedAt,
     });
     await refresh();
-    await openVendorBookingPackage(state.selectedVendorPackageKey, {
-      actionType: booking.actionType, channel: "EMAIL",
-    });
+    refreshVendorCommunicationBatch();
+    showVendorCommunicationBatchList();
     toast(result.pendingSync
       ? `Email sent once. Official evidence is pending sync; Gmail message ${result.gmailMessageId}.`
       : `Email sent and synced. Gmail message: ${result.gmailMessageId}`);
@@ -3522,8 +3578,10 @@ function renderVendorHotels(hotels = []) {
     <div class="hotel-row" data-hotel-stay-id="${escapeHtml(hotel.hotelStayId || "")}">
       <span class="hotel-sequence">#${index + 1}</span>
       <label>Hotel<input data-vendor-hotel-field="hotelName" value="${escapeHtml(hotel.hotelName || "")}" placeholder="Hotel name" /></label>
-      <label>Check-in date<input data-vendor-hotel-field="checkInDate" type="date" value="${escapeHtml(hotel.checkInDate || "")}" /><small data-vendor-date-display>${escapeHtml(formatVendorDate(hotel.checkInDate))}</small></label>
-      <label>Check-out date<input data-vendor-hotel-field="checkOutDate" type="date" value="${escapeHtml(hotel.checkOutDate || "")}" /><small data-vendor-date-display>${escapeHtml(formatVendorDate(hotel.checkOutDate))}</small></label>
+      <label>Check-in date<input data-vendor-hotel-field="checkInDate" data-vendor-date-input
+        value="${escapeHtml(formatVendorDate(hotel.checkInDate))}" placeholder="03/October/2026" /></label>
+      <label>Check-out date<input data-vendor-hotel-field="checkOutDate" data-vendor-date-input
+        value="${escapeHtml(formatVendorDate(hotel.checkOutDate))}" placeholder="03/October/2026" /></label>
       <button class="button ghost small" type="button" data-remove-vendor-hotel="${index}">Remove</button>
     </div>
   `).join("") : `<div class="empty-notifications">No hotel extracted. Add hotel manually if required.</div>`;
@@ -3534,8 +3592,8 @@ function collectVendorHotelRows() {
     hotelStayId: row.dataset.hotelStayId || "",
     staySequence: index + 1,
     hotelName: row.querySelector('[data-vendor-hotel-field="hotelName"]').value.trim(),
-    checkInDate: row.querySelector('[data-vendor-hotel-field="checkInDate"]').value,
-    checkOutDate: row.querySelector('[data-vendor-hotel-field="checkOutDate"]').value,
+    checkInDate: vendorDateValue(row.querySelector('[data-vendor-hotel-field="checkInDate"]')),
+    checkOutDate: vendorDateValue(row.querySelector('[data-vendor-hotel-field="checkOutDate"]')),
   }));
 }
 
@@ -4019,8 +4077,8 @@ function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
           <strong class="vendor-day-number">Day ${Number(day.dayNumber)}</strong>
           <label class="vendor-day-date">
             <span>Date</span>
-            <input data-vendor-day-field="serviceDate" type="date" value="${escapeHtml(day.serviceDate || "")}" />
-            <small data-vendor-date-display>${escapeHtml(formatVendorDate(day.serviceDate))}</small>
+            <input data-vendor-day-field="serviceDate" data-vendor-date-input
+              value="${escapeHtml(formatVendorDate(day.serviceDate))}" placeholder="03/October/2026" />
           </label>
           <label class="vendor-day-title">
             <span>Day Wise Header</span>
@@ -4064,7 +4122,7 @@ function refreshVendorSplitCard(card) {
 
 function openVendorSplitDialog(card) {
   const dayNumber = Number(card.dataset.dayNumber);
-  const serviceDate = card.querySelector('[data-vendor-day-field="serviceDate"]').value;
+  const serviceDate = vendorDateValue(card.querySelector('[data-vendor-day-field="serviceDate"]'));
   const dayTitle = card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim();
   const startTime = card.querySelector('[data-vendor-day-field="startTime"]').value;
   const finishTime = card.querySelector('[data-vendor-day-field="finishTime"]').value;
@@ -4106,7 +4164,10 @@ async function applyVendorSplitDialog() {
   button.textContent = "Saving locally...";
   try {
     const payload = collectVendorIntake();
-    const saved = await window.erim.vendor.saveIntakeDraft(payload);
+    const saved = await window.erim.vendor.saveIntakeDraft({
+      ...payload,
+      processSource: "MICRO_SPLIT_AUTOSAVE",
+    });
     state.vendorIntake = { ...saved, suggestions: state.vendorSuggestions };
     $("#vendor-intake-form").elements.vendorDraftId.value = saved.vendorDraftId || "";
     dialog.close();
@@ -4128,7 +4189,6 @@ function collectVendorIntake() {
     customerCode: form.elements.customerCode.value.trim().toUpperCase(),
     customerName: form.elements.customerName.value.trim(),
     clientTag: form.elements.clientTag.value.trim().toUpperCase(),
-    totalPax: Number(form.elements.totalPax.value || 0),
     adultPax: Number(form.elements.adultPax.value || 0),
     childPax: Number(form.elements.childPax.value || 0),
     infantPax: Number(form.elements.infantPax.value || 0),
@@ -4139,11 +4199,14 @@ function collectVendorIntake() {
     driveFileId: form.elements.driveFileId.value,
     driveFileName: form.elements.driveFileName.value,
     driveFileUrl: form.elements.driveFileUrl.value,
-    arrivalDate: form.elements.arrivalDate.value,
+    totalPax: Number(form.elements.adultPax.value || 0)
+      + Number(form.elements.childPax.value || 0)
+      + Number(form.elements.infantPax.value || 0),
+    arrivalDate: vendorDateValue(form.elements.arrivalDate),
     arrivalFlight: form.elements.arrivalFlight.value.trim(),
     arrivalSector: form.elements.arrivalSector.value.trim(),
     arrivalTime: normalizeHourTime(form.elements.arrivalTime.value),
-    departureDate: form.elements.departureDate.value,
+    departureDate: vendorDateValue(form.elements.departureDate),
     departureFlight: form.elements.departureFlight.value.trim(),
     departureSector: form.elements.departureSector.value.trim(),
     departureTime: normalizeHourTime(form.elements.departureTime.value),
@@ -4151,7 +4214,7 @@ function collectVendorIntake() {
     days: $$("#vendor-day-list .vendor-day-card").map((card) => ({
       tourDayId: card.dataset.tourDayId || "",
       dayNumber: Number(card.dataset.dayNumber),
-      serviceDate: card.querySelector('[data-vendor-day-field="serviceDate"]').value,
+      serviceDate: vendorDateValue(card.querySelector('[data-vendor-day-field="serviceDate"]')),
       dayTitle: card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim(),
       startTime: normalizeHourTime(card.querySelector('[data-vendor-day-field="startTime"]').value),
       finishTime: normalizeHourTime(card.querySelector('[data-vendor-day-field="finishTime"]').value),
@@ -4182,12 +4245,16 @@ function populateVendorIntake(context) {
   const scalarFields = [
     "vendorDraftId", "customerCode", "customerName", "clientTag", "tourId", "sourcePublicationId",
     "sourceRecordVersion", "sourceRevisionId", "driveFileId", "driveFileName", "driveFileUrl",
-    "totalPax", "adultPax", "childPax", "infantPax",
+    "adultPax", "childPax", "infantPax",
     "arrivalDate", "arrivalFlight", "arrivalSector", "arrivalTime",
     "departureDate", "departureFlight", "departureSector", "departureTime",
   ];
   scalarFields.forEach((field) => {
-    if (form.elements[field]) form.elements[field].value = context[field] ?? "";
+    if (form.elements[field]) {
+      const value = context[field] ?? "";
+      form.elements[field].value = ["arrivalDate", "departureDate"].includes(field)
+        ? formatVendorDate(value) : value;
+    }
   });
   refreshVendorDateDisplays(form);
   form.hidden = false;
@@ -4396,9 +4463,9 @@ async function saveVendorIntake(publish = false) {
   if (!payload.customerName || !payload.arrivalDate || !payload.departureDate) {
     return toast("Customer Name, Arrival Date, and Departure Date are required.", true);
   }
-  if (![payload.totalPax, payload.adultPax, payload.childPax, payload.infantPax]
+  if (![payload.adultPax, payload.childPax, payload.infantPax]
     .every((value) => Number.isInteger(value) && value >= 0)) {
-    return toast("Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.", true);
+    return toast("Adult, Child, and Infant must be whole numbers starting from 0.", true);
   }
   const button = publish ? $("#post-vendor-intake") : $("#save-vendor-draft");
   button.disabled = true;
@@ -4407,7 +4474,10 @@ async function saveVendorIntake(publish = false) {
   try {
     const result = publish
       ? await window.erim.vendor.publishIntake({ ...payload, extractionStatus: "CONFIRMED" })
-      : await window.erim.vendor.saveIntakeDraft(payload);
+      : await window.erim.vendor.saveIntakeDraft({
+        ...payload,
+        processSource: "SAVE_LOCAL_DRAFT",
+      });
     const saved = publish ? result.local : result;
     populateVendorIntake(saved);
     await refresh();
@@ -5047,6 +5117,14 @@ function bindEvents() {
   $("#vendor-communication-back-list").addEventListener("click", async () => {
     if (await confirmVendorCommunicationNavigation()) showVendorCommunicationBatchList();
   });
+  $("#vendor-booking-service-summary").addEventListener("click", (event) => {
+    const cancel = event.target.closest("[data-cancel-generated-service]");
+    if (!cancel) return;
+    return cancelVendorGeneratedService(
+      cancel.dataset.cancelGeneratedBooking,
+      cancel.dataset.cancelGeneratedService,
+    );
+  });
   $("#vendor-communication-batch-grid").addEventListener("click", (event) => {
     const review = event.target.closest("[data-vendor-batch-review]");
     if (review) {
@@ -5174,12 +5252,31 @@ function bindEvents() {
     renderVendorHotels(payload.hotels);
     updateVendorDayHotels();
   });
-  $("#rebuild-vendor-days").addEventListener("click", () => {
-    const payload = collectVendorIntake();
-    payload.days = vendorDateRange(payload.arrivalDate, payload.departureDate, payload.days);
-    state.vendorIntake = payload;
-    renderVendorDays(payload.days);
-    toast(`${payload.days.length} Day Wise rows prepared.`);
+  $("#rebuild-vendor-days").addEventListener("click", async () => {
+    const button = $("#rebuild-vendor-days");
+    button.disabled = true;
+    try {
+      const payload = collectVendorIntake();
+      const source = await window.erim.vendor.getIntakeContext(payload.customerCode);
+      const programByDay = new Map((source.sourceProgramDays || [])
+        .map((day) => [Number(day.dayNumber), day]));
+      payload.days = vendorDateRange(payload.arrivalDate, payload.departureDate, payload.days)
+        .map((day) => {
+          const program = programByDay.get(Number(day.dayNumber)) || {};
+          return {
+            ...day,
+            dayTitle: day.dayTitle || program.dayTitle || "",
+            daywiseText: day.daywiseText || program.dayTitle || "",
+          };
+        });
+      state.vendorIntake = { ...payload, sourceProgramDays: source.sourceProgramDays || [] };
+      renderVendorDays(payload.days);
+      toast(`${payload.days.length} Day Wise rows rebuilt from the latest posted Program.`);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
   });
   $("#add-vendor-day-zero").addEventListener("click", () => {
     const payload = collectVendorIntake();
@@ -5363,6 +5460,12 @@ function bindEvents() {
       $$("#recheck-email-panel .selection-item").forEach((item) => item.classList.toggle("selected", item === email));
       return loadRecheckEmailTrail(email.dataset.recheckThreadId);
     }
+    const vendorProcess = event.target.closest("[data-vendor-process-code]");
+    if (vendorProcess) {
+      showView("vendor-new-itinerary", "VENDOR");
+      $("#vendor-customer-code").value = vendorProcess.dataset.vendorProcessCode;
+      return loadVendorItinerary(vendorProcess.dataset.vendorProcessCode);
+    }
     const action = event.target.closest("[data-action]");
     if (!action) return;
     if (action.dataset.action === "save-followup") return saveFollowup(action.dataset.id);
@@ -5400,9 +5503,17 @@ function bindEvents() {
     }
   });
   document.body.addEventListener("focusout", (event) => {
-    if (!event.target.matches("[data-hour-time]")) return;
-    const normalized = normalizeHourTime(event.target.value);
-    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) event.target.value = normalized;
+    if (event.target.matches("[data-hour-time]")) {
+      const normalized = normalizeHourTime(event.target.value);
+      if (/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) event.target.value = normalized;
+    }
+    if (event.target.matches("[data-vendor-date-input]")) {
+      const iso = parseVendorDate(event.target.value);
+      if (iso) event.target.value = formatVendorDate(iso);
+      else if (event.target.value.trim()) {
+        toast("Date must use dd/MMMM/yyyy, for example 03/October/2026.", true);
+      }
+    }
   });
   document.body.addEventListener("change", (event) => {
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {

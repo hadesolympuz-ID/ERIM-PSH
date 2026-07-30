@@ -875,3 +875,214 @@ Kickoff does not authorize:
 
 Until the owner explicitly starts implementation, changes remain limited to
 this base plan and its progress references.
+
+---
+
+## 12. Owner correction after v1.1.13 trial
+
+Status: `RECORDED — FOLLOW-UP IMPLEMENTATION NOT STARTED`
+
+Recorded from the owner's installed v1.1.13 trial on 2026-07-30. These points
+correct the interpretation of the released implementation and supersede any
+conflicting wording above.
+
+### 12.1 Pax entry correction
+
+- `Adult`, `Child`, and `Infant` are the three values staff must enter
+  manually.
+- Do not ask staff to enter a separate independent `Total Pax`.
+- Remove the Total Pax column from the form entirely.
+- When a compatibility payload or message calculation needs Total Pax, derive
+  it internally as `Adult + Child + Infant`; staff never enters or edits it.
+
+### 12.2 Visible date format correction
+
+- The actual date presentation used by staff must visibly read
+  `dd/MMMM/yyyy`, for example `03/October/2026`.
+- A small formatted helper below a native date input is not sufficient while
+  the primary control still displays the browser/Windows locale format.
+- Database and online payload storage remain compact ISO `yyyy-MM-dd`.
+- Date picking/editing must remain practical while the visible office-facing
+  value uses the required long-month format.
+
+### 12.3 Rebuild Dates and Day Wise Header correction
+
+- Clicking `Rebuild dates` must resolve the current posted itinerary again and
+  populate each matching Day Wise Header directly from that Day's `Program`.
+- A Day must not remain blank when the matching posted Program is available.
+- Matching must use explicit Day/date context and must never shift one Day's
+  Program into another.
+- The populated header remains editable after rebuild.
+- An intentional non-empty manual edit remains protected; rebuild fills an
+  empty or source-derived header without silently erasing a later staff edit.
+
+### 12.4 Vendor Daily Control — Online Process Report
+
+Add a new operational item/card to the Vendor Booking Daily Control Dashboard
+for local-save and online-post processing progress.
+
+The report must:
+
+- create/update a process row after `Save local draft`, after a Micro Split
+  autosave, and after `Post structured data online`;
+- distinguish local persistence from online completion;
+- show at least Customer Code, Client, action/source, latest time, progress
+  state, result, and required action;
+- expose explicit states such as `LOCAL_SAVED`, `QUEUED`, `POSTING`,
+  `PENDING_SYNC`, `POSTED_ONLINE`, `FAILED`, and `CONFLICT`;
+- never label a locally saved draft as posted online;
+- retain failed/pending rows for retry and investigation;
+- provide the valid contextual action, such as Open Draft, Retry Post, Review
+  Conflict, or View Posted Result;
+- update from the real local queue/publication result rather than a visual-only
+  progress counter.
+
+This record does not authorize implementation, a new version, Apps Script
+deployment, or a real supplier communication until the owner says to proceed.
+
+### 12.5 Generated item detail — Back to List versus Cancel Generate
+
+Owner clarification:
+
+- `Back to list` and `Cancel Generate item` are two different actions.
+- They may be positioned together near the currently selected generated
+  Service item, but they must never share the same state-changing behavior.
+- Do not place `Back to list` only as a distant global header action when staff
+  are working on one Service item.
+
+Required layout:
+
+- the selected Service-item area exposes one contextual `Cancel Generate item`
+  action;
+- the same local work area exposes one `Back to list` navigation action;
+- if a package contains several Services, each Service has its own
+  `Cancel Generate item`;
+- `Back to list` appears once for the selected/detail area and is not repeated
+  as though it were a per-Service business action;
+- the popup header may retain batch progress and `Close`, but does not need the
+  primary `Back to list` action.
+
+Required `Back to list` behavior:
+
+- it performs navigation only;
+- it must not change `GENERATED`, delivery, Send Attempt, or evidence state;
+- it clears the active detail selection/highlight for Item A;
+- it clears any stale Item A detail context before another item is opened;
+- after staff points to or opens Item B, the middle/right panels must show only
+  Item B context;
+- reopening Item A is allowed only when Item A remains an active generated
+  item;
+- Item A must not remain visually `ON`, selected, or active merely because it
+  was the previously opened item;
+- list filter, sort, expansion, and scroll context remain preserved.
+
+Required `Cancel Generate item` behavior:
+
+1. staff selects the exact stable Service item;
+2. staff clicks `Cancel Generate item`;
+3. the application requests a required revision reason and explicit
+   confirmation;
+4. the backend verifies that this exact Service is still `GENERATED` and has
+   no delivery attempt/evidence that prohibits cancellation;
+5. only that Service returns to `NOT_GENERATED`;
+6. the Service is removed immediately from the active generated batch list;
+7. the parent package service count and generated progress refresh
+   immediately;
+8. all sibling Services remain generated;
+9. the remaining package Subject/body/Portal membership/snapshot hash are
+   rebuilt;
+10. `GENERATE_ITEM_CANCELED` is recorded with Service ID, reason, actor,
+    previous hash, new hash, and time;
+11. if the removed Service was the final active Service, the empty package is
+    marked `GENERATE_CANCELED` and its package row disappears from the active
+    generated batch;
+12. the UI selects the next valid pending generated item when practical, or
+    returns to the refreshed batch list when none remains.
+
+Refresh and return rules:
+
+- after successful Cancel Generate, the generated batch must be re-read from
+  authoritative local state rather than only hiding the DOM row;
+- returning to the list must therefore show the same result after reopening
+  the popup or restarting the application;
+- an item returned to `NOT_GENERATED` may appear again only in the Generate
+  preparation tree, where staff can correct and explicitly generate it again;
+- it must not reappear in the active generated batch until a new Generate
+  succeeds;
+- failure or conflict during cancellation keeps the item visible and shows the
+  error; the UI must not pretend it was removed.
+
+Example:
+
+- Package P contains generated Item A and Item B.
+- Opening A and clicking only `Back to list` leaves A and B generated, but
+  removes A's active highlight.
+- Opening A and completing `Cancel Generate item` removes A from Package P,
+  returns A to `NOT_GENERATED`, preserves B as generated, and refreshes Package
+  P to one active item.
+- If B is later canceled successfully, Package P has no active generated item
+  and disappears from the generated batch.
+
+Acceptance checks:
+
+- [ ] Back to List never changes business state.
+- [ ] Back to List clears stale item selection and detail context.
+- [ ] Opening B after A cannot display A's message, supplier, channel, or
+  actions.
+- [ ] Cancel Generate removes only the confirmed stable Service ID.
+- [ ] Successful cancellation immediately delists that Service from the active
+  generated batch.
+- [ ] Sibling generated Services remain visible and unchanged.
+- [ ] The final removed Service also removes the empty package row.
+- [ ] Reopening/restarting reproduces the refreshed list from SQLite.
+- [ ] The canceled Service is available in Generate preparation as
+  `NOT_GENERATED`.
+- [ ] Failed cancellation never hides the item or records a false success.
+
+### 12.6 v1.1.14 correction implementation
+
+Status: `IMPLEMENTED IN SOURCE — PACKAGE AND CONTROLLED UAT PENDING`
+
+The owner authorized implementation after confirming that the Total Pax column
+must be removed. The v1.1.14 source now implements:
+
+- Adult, Child, and Infant as the only manual pax columns; compatibility Total
+  Pax is derived internally and ignores any caller-supplied independent total;
+- primary Vendor intake, hotel, and Day Wise date text in `dd/MMMM/yyyy`, with
+  ISO conversion at the database and online boundaries;
+- latest posted Program exposure and Rebuild Dates fill for blank matching Day
+  Wise Headers while preserving non-empty staff edits;
+- exact Product/Service-only STANDARD_V1 booking lines, excluding the broad
+  multi-product Day Wise Header from supplier communications;
+- Back to List inside the selected-item work area with selection/detail reset;
+- per-Service Cancel Generate controls in both batch and selected detail views;
+- authoritative active Generated-batch refresh after cancellation and after
+  Gmail or external delivery, so Sent records move to history/report;
+- a persisted Vendor Daily Control Online Process Report for local save, Micro
+  Split autosave, posting, posted-online, and failed results.
+
+Automated status:
+
+- 60 tests pass;
+- JavaScript syntax checks pass;
+- `git diff --check` passes.
+
+Remaining gates:
+
+- [x] build and inspect the v1.1.14 Windows artifact;
+- [x] run the packaged desktop smoke test;
+- publish the desktop updater only after artifact/hash verification;
+- deploy the Apps Script source separately from the desktop release;
+- use controlled UAT for representative online posting and real supplier
+  delivery.
+
+Verified package:
+
+- installer: `release/ERIM-PSH-Setup-1.1.14.exe`;
+- size: `111,083,314` bytes;
+- SHA-256:
+  `EA56ED59041F992903E19EF6D27F9665F27B1540D0754F993A37D06F6DF74A17`;
+- ASAR reports version `1.1.14` and contains the corrected queue, date, and
+  exact-product email source;
+- the packaged executable stayed alive through the isolated eight-second smoke
+  gate without using the staff database.
