@@ -154,6 +154,61 @@ test("backend rejects an empty TO before inserting a Send Attempt", () =>
     assert.equal(database.getVendorBooking(booking.bookingId).lastSendAttemptId, "");
   }));
 
+test("legacy Day Wise Header is removed only from generated not-sent snapshots", () =>
+  withDatabase((database) => {
+    seedVendorCatalog(database, { channel: "EMAIL" });
+    database.saveVendorIntakeDraft({
+      customerCode: "ND/LEGACY-HEADER",
+      customerName: "Legacy Header Guest",
+      arrivalDate: "2026-09-28",
+      departureDate: "2026-09-28",
+      days: [{
+        dayNumber: 2,
+        serviceDate: "2026-09-28",
+        dayTitle: "FULL DAY GWK FOLLOWED BY ULUWATU",
+        splits: [{
+          serviceType: "VENDOR",
+          supplierId: "SUP-EKA",
+          productId: "PROD-EKA-OUT",
+          vendorName: "Eka Jaya Fastboat",
+          activityText: "Romantic Dinner Riverside",
+          rateStatus: "PENDING_RATE",
+        }],
+      }],
+    });
+    const packageItem = database.listVendorBookingQueue()[0];
+    const generated = database.saveVendorBookingPreview({
+      packageKey: packageItem.packageKey,
+      channel: "EMAIL",
+    });
+    const legacyBody = generated.body.replace(
+      "- Day 2 | 2026-09-28",
+      "- Day 2 | 2026-09-28 | Header: FULL DAY GWK FOLLOWED BY ULUWATU",
+    );
+    database.db.prepare(`
+      UPDATE local_vendor_bookings SET body = ?, current_snapshot_hash = 'LEGACY'
+      WHERE booking_id = ?
+    `).run(legacyBody, generated.bookingId);
+    const migrated = database.getVendorBooking(generated.bookingId);
+    assert.doesNotMatch(migrated.body, /\|\s*Header:/);
+    assert.match(migrated.body, /Bali to Gili T/);
+    assert.notEqual(migrated.currentSnapshotHash, "LEGACY");
+    const audit = database.db.prepare(`
+      SELECT action FROM local_activity_log
+      WHERE entity_id = ? AND action = 'VENDOR_GENERATED_BODY_MIGRATED'
+    `).get(generated.bookingId);
+    assert.equal(audit.action, "VENDOR_GENERATED_BODY_MIGRATED");
+
+    database.db.prepare(`
+      UPDATE local_vendor_bookings
+      SET body = ?, communication_status = 'SENT', current_snapshot_hash = 'HISTORY'
+      WHERE booking_id = ?
+    `).run(legacyBody, generated.bookingId);
+    const sentHistory = database.getVendorBooking(generated.bookingId);
+    assert.match(sentHistory.body, /\|\s*Header:/);
+    assert.equal(sentHistory.currentSnapshotHash, "HISTORY");
+  }));
+
 test("Day 0 persists and Total Pax is always derived from Adult, Child, and Infant", () =>
   withDatabase((database) => {
     const saved = database.saveVendorIntakeDraft({

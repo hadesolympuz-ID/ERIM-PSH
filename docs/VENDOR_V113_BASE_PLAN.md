@@ -1135,3 +1135,35 @@ Automated status:
   `30E0F1639434C2253120963D4AAADF50DFEE7EF34516ABA415E0ADF1671E6E1C`;
 - GitHub Release `v1.1.15` is published as Latest with installer, blockmap, and
   `latest.yml`; GitHub's installer digest matches the local verified SHA-256.
+
+### 12.8 v1.1.16 legacy Generated-message migration
+
+Owner retest showed a Day Wise `Header:` inside messages that had already been
+Generated before the exact-product template correction. This is persisted
+snapshot data, not output from the corrected generator.
+
+The compatibility migration:
+
+- runs when a booking snapshot is read;
+- applies only when `communication_status = GENERATED`;
+- refuses to mutate any booking that has a Send Attempt;
+- removes only the legacy `| Header: ...` segment on a `- Day ...` line;
+- retains the following exact Product/Service and operational context;
+- recalculates `current_snapshot_hash` using the existing Service IDs, channel,
+  recipients, subject, and cleaned body;
+- updates the stored draft so Send cannot use the hidden legacy body;
+- records `VENDOR_GENERATED_BODY_MIGRATED` with old/new hash and Service count;
+- never rewrites `SENT`, `SENT_PENDING_SYNC`, `SEND_OUTCOME_UNKNOWN`, or other
+  delivery history.
+
+Automated status:
+
+- 62 tests pass, including generated-not-sent migration and sent-history
+  immutability;
+- syntax and diff checks pass;
+- v1.1.16 Windows package, ASAR, and isolated eight-second smoke gate pass;
+- installer: `release/ERIM-PSH-Setup-1.1.16.exe`;
+- size: `111,083,432` bytes;
+- SHA-256:
+  `02A9EEBB62FE0286CEDCA2BA2CF29673ADE19AD66244882E153E0F39C0818F28`;
+- updater publication remains pending.

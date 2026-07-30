@@ -132,6 +132,13 @@ function calendarLeadDays(fromDate, toDate) {
   return Math.floor((finish - start) / 86_400_000);
 }
 
+function stripLegacyVendorDaywiseHeaders(body) {
+  return String(body || "").replace(
+    /^(\s*-\s*Day\s+\d+\s*\|\s*[^|\r\n]+)\s*\|\s*Header:[^\r\n]*(\r?)$/gim,
+    "$1$2",
+  );
+}
+
 class LocalDatabase {
   constructor(filePath) {
     this.filePath = filePath;
@@ -3085,8 +3092,44 @@ class LocalDatabase {
   }
 
   getVendorBooking(bookingId) {
-    const row = this.db.prepare("SELECT * FROM local_vendor_bookings WHERE booking_id = ?").get(bookingId);
+    let row = this.db.prepare("SELECT * FROM local_vendor_bookings WHERE booking_id = ?").get(bookingId);
     if (!row) return null;
+    const cleanedBody = stripLegacyVendorDaywiseHeaders(row.body);
+    if (row.communication_status === "GENERATED" && cleanedBody !== row.body) {
+      const deliveryAttempt = this.db.prepare(`
+        SELECT 1 FROM local_vendor_send_attempts WHERE booking_id = ? LIMIT 1
+      `).get(bookingId);
+      if (!deliveryAttempt) {
+        const serviceIds = this.db.prepare(`
+          SELECT service_id FROM local_vendor_booking_services
+          WHERE booking_id = ? AND service_status <> 'GENERATE_ITEM_CANCELED'
+          ORDER BY created_at
+        `).all(bookingId).map((item) => item.service_id);
+        const recipients = JSON.parse(row.recipients_json || "[]");
+        const migratedHash = crypto.createHash("sha256").update(JSON.stringify({
+          serviceIds,
+          channel: row.channel,
+          recipients,
+          subject: row.subject,
+          body: cleanedBody,
+        })).digest("hex");
+        const now = this.now();
+        this.db.prepare(`
+          UPDATE local_vendor_bookings
+          SET body = ?, current_snapshot_hash = ?, updated_at = ?
+          WHERE booking_id = ? AND communication_status = 'GENERATED'
+        `).run(cleanedBody, migratedHash, now, bookingId);
+        this.log("VENDOR_GENERATED_BODY_MIGRATED", "VENDOR_BOOKING", bookingId, {
+          reason: "LEGACY_DAYWISE_HEADER_REMOVED",
+          serviceCount: serviceIds.length,
+          previousSnapshotHash: row.current_snapshot_hash || "",
+          migratedSnapshotHash: migratedHash,
+        });
+        row = this.db.prepare(
+          "SELECT * FROM local_vendor_bookings WHERE booking_id = ?",
+        ).get(bookingId);
+      }
+    }
     return {
       ...this.vendorBookingRow(row),
       services: this.db.prepare(`
