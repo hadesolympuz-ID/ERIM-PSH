@@ -170,6 +170,10 @@ test("Generate supports a single channel, full-screen package navigation, and in
   assert.match(app, /function renderVendorPreparationDetails/);
   assert.match(app, /function renderVendorCommunicationQueue/);
   assert.match(app, /function navigateVendorCommunication/);
+  assert.match(app, /function resumeVendorGeneratedDrafts/);
+  assert.match(app, /DRAFT READY — NOT SENT/);
+  assert.match(app, /addEventListener\("cancel", async \(event\)/);
+  assert.match(html, /id="vendor-tree-resume"/);
   assert.match(app, /function openVendorResendDialog/);
   assert.match(app, /resendOfAttemptId/);
   assert.match(preload, /listSendAttempts/);

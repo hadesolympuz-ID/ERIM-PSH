@@ -455,6 +455,12 @@ function vendorServiceRateLabel(service) {
   return rates.join(" · ") || "Rate amount pending";
 }
 
+function vendorBookingStatusLabel(status) {
+  if (status === "GENERATED") return "DRAFT READY — NOT SENT";
+  if (status === "SENT_PENDING_SYNC") return "SENT — SYNC PENDING";
+  return String(status || "NOT_GENERATED").replaceAll("_", " ");
+}
+
 function renderVendorBookingQueue() {
   const list = $("#vendor-booking-queue-list");
   if (!list) return;
@@ -547,11 +553,13 @@ function renderVendorBookingQueue() {
                     data-vendor-tree-open-package="${escapeHtml(service.package.packageKey)}"
                     data-vendor-tree-open-service="${escapeHtml(service.serviceId)}">
                     <strong>${escapeHtml(service.package.supplierName)} | ${escapeHtml(service.productName || service.activityText)}</strong>
-                    <small>Booking: ${escapeHtml(service.workflowStatus.replaceAll("_", " "))} · Rate: ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · Supplier: ${escapeHtml(service.supplierResult || "PENDING")}</small>
+                    <small>Booking: ${escapeHtml(vendorBookingStatusLabel(service.workflowStatus))} · Rate: ${escapeHtml(service.rateStatus.replaceAll("_", " "))} · Supplier: ${escapeHtml(service.supplierResult || "PENDING")}</small>
                   </button>
                   ${service.gmailThreadId
                     ? `<button type="button" class="vendor-tree-link" data-open-gmail-thread="${escapeHtml(service.gmailThreadId)}">Gmail</button>`
-                    : `<span class="vendor-tree-state">${service.workflowStatus === "GENERATED" ? "Open draft" : service.workflowStatus === "SENT_PENDING_SYNC" ? "Retry sync" : "Open"}</span>`}
+                    : service.workflowStatus === "GENERATED"
+                      ? `<button type="button" class="vendor-tree-link" data-resume-vendor-draft="${escapeHtml(service.bookingId)}">Resume draft</button>`
+                      : `<span class="vendor-tree-state">${service.workflowStatus === "SENT_PENDING_SYNC" ? "Retry sync" : "Open"}</span>`}
                 </div>
               `).join("")}
             </div>
@@ -589,6 +597,16 @@ function renderVendorBookingQueue() {
   });
   const selectedCount = state.selectedVendorServiceIds.size;
   $("#vendor-tree-selected-count").textContent = `${selectedCount} selected`;
+  const draftCount = new Set(
+    [...clients.values()].flatMap((client) => [...client.days.values()])
+      .flatMap((day) => day.services)
+      .filter((service) => service.workflowStatus === "GENERATED" && service.bookingId)
+      .map((service) => service.bookingId),
+  ).size;
+  $("#vendor-tree-resume").disabled = draftCount === 0;
+  $("#vendor-tree-resume").textContent = draftCount
+    ? `Resume ${draftCount} draft${draftCount === 1 ? "" : "s"}`
+    : "Resume drafts";
   $("#vendor-tree-prepare").disabled = selectedCount === 0;
   const packageCount = selectedVendorServicesByPackage().size;
   $("#vendor-tree-prepare").textContent = selectedCount
@@ -611,6 +629,13 @@ function selectedVendorServicesByPackage() {
     if (serviceIds.length) groups.set(item.packageKey, serviceIds);
   });
   return groups;
+}
+
+function vendorCommunicationSort(left, right) {
+  const channelOrder = { EMAIL: 0, WHATSAPP: 1, PORTAL: 2, OTHERS: 3, OTHER: 3 };
+  return (channelOrder[left.channel] ?? 9) - (channelOrder[right.channel] ?? 9)
+    || String(left.supplierName).localeCompare(String(right.supplierName))
+    || String(left.customerCode).localeCompare(String(right.customerCode));
 }
 
 async function prepareSelectedVendorServices() {
@@ -650,12 +675,7 @@ async function prepareSelectedVendorServices() {
       window.erim.vendor.listBookingQueue(),
       window.erim.vendor.listBookings(),
     ]);
-    const channelOrder = { EMAIL: 0, WHATSAPP: 1, PORTAL: 2, OTHERS: 3, OTHER: 3 };
-    state.vendorCommunicationBatch = generatedBatch.sort((left, right) =>
-      (channelOrder[left.channel] ?? 9) - (channelOrder[right.channel] ?? 9)
-      || String(left.supplierName).localeCompare(String(right.supplierName))
-      || String(left.customerCode).localeCompare(String(right.customerCode))
-    );
+    state.vendorCommunicationBatch = generatedBatch.sort(vendorCommunicationSort);
     state.vendorCommunicationIndex = 0;
     renderVendorBookingQueue();
     $("#vendor-communication-dialog").showModal();
@@ -667,6 +687,41 @@ async function prepareSelectedVendorServices() {
     button.disabled = false;
     button.textContent = original;
     renderVendorBookingQueue();
+  }
+}
+
+async function resumeVendorGeneratedDrafts(preferredBookingId = "") {
+  try {
+    [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.listBookingQueue(),
+      window.erim.vendor.listBookings(),
+    ]);
+    const batch = state.vendorBookings
+      .filter((booking) => booking.communicationStatus === "GENERATED")
+      .map((booking) => ({
+        packageKey: booking.packageKey,
+        serviceIds: (booking.services || []).map((service) => service.serviceId).filter(Boolean),
+        bookingId: booking.bookingId,
+        channel: booking.channel,
+        supplierName: booking.supplierName,
+        customerCode: booking.customerCode,
+      }))
+      .filter((entry) => entry.packageKey && entry.bookingId && entry.serviceIds.length)
+      .sort(vendorCommunicationSort);
+    if (!batch.length) {
+      renderVendorBookingQueue();
+      return toast("No generated draft is waiting to be sent.", true);
+    }
+    state.vendorCommunicationBatch = batch;
+    const preferredIndex = batch.findIndex((entry) => entry.bookingId === preferredBookingId);
+    state.vendorCommunicationIndex = preferredIndex >= 0 ? preferredIndex : 0;
+    renderVendorBookingQueue();
+    const dialog = $("#vendor-communication-dialog");
+    if (!dialog.open) dialog.showModal();
+    await openVendorCommunicationPackage(state.vendorCommunicationIndex);
+    toast(`${batch.length} generated draft(s) restored. Nothing is marked Sent until delivery succeeds.`);
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -4353,6 +4408,8 @@ function bindEvents() {
       event.stopPropagation();
       return;
     }
+    const resume = event.target.closest("[data-resume-vendor-draft]");
+    if (resume) return resumeVendorGeneratedDrafts(resume.dataset.resumeVendorDraft);
     const open = event.target.closest("[data-vendor-tree-open-package]");
     if (open) {
       return openVendorBookingPackage(open.dataset.vendorTreeOpenPackage, {
@@ -4402,8 +4459,15 @@ function bindEvents() {
     state.selectedVendorServiceIds.clear();
     renderVendorBookingQueue();
   });
+  $("#vendor-tree-resume").addEventListener("click", () => resumeVendorGeneratedDrafts());
   $("#vendor-tree-prepare").addEventListener("click", prepareSelectedVendorServices);
   $("#close-vendor-communication").addEventListener("click", async () => {
+    if (!await confirmVendorCommunicationNavigation()) return;
+    $("#vendor-communication-dialog").close();
+    renderVendorPreparationDetails();
+  });
+  $("#vendor-communication-dialog").addEventListener("cancel", async (event) => {
+    event.preventDefault();
     if (!await confirmVendorCommunicationNavigation()) return;
     $("#vendor-communication-dialog").close();
     renderVendorPreparationDetails();

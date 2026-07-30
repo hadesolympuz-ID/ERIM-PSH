@@ -1,6 +1,6 @@
 # Vendor Booking Generate, Send, Revise, and Cancel SOP
 
-Status: `v1.1.10 WINDOWS UAT BUILD READY`
+Status: `v1.1.11 GENERATED-DRAFT RECOVERY — WINDOWS UAT BUILD READY`
 Operational owner: Vendor Booking
 
 ## 1. Queue ownership
@@ -40,6 +40,11 @@ Generate creates an exact working snapshot and service links in local SQLite.
 It does not send anything. Re-generating an unsent action updates that draft
 snapshot. A sent New/Amend/Cancel record is never overwritten; the next action
 creates a new history record.
+
+If the communication popup closes before delivery, the snapshot remains
+`DRAFT READY — NOT SENT`. Use `Resume draft` on the service or `Resume drafts`
+in the Daywise toolbar to restore the generated queue. Closing the popup never
+changes a draft to Sent or removes it from the working flow.
 
 ## 3. Email sending
 
