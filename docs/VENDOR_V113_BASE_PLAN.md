@@ -1166,4 +1166,5 @@ Automated status:
 - size: `111,083,432` bytes;
 - SHA-256:
   `02A9EEBB62FE0286CEDCA2BA2CF29673ADE19AD66244882E153E0F39C0818F28`;
-- updater publication remains pending.
+- GitHub Release `v1.1.16` is published as Latest with installer, blockmap, and
+  `latest.yml`; GitHub's installer digest matches the local verified SHA-256.
