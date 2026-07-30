@@ -24,16 +24,19 @@ Operational owner: Vendor Booking
 3. Click one service to inspect its exact Supplier/SOP detail in the middle
    panel and Product/Contract/Rate detail in the right panel.
 4. Select exactly one communication channel for each supplier package.
-5. Click `Generate Booking` in the left panel. The selected services are
+5. Click `Generate Booking` in the left panel. If at least one selected package
+   uses Email, ERIM-PSH must run the focused Gmail connection preflight before
+   preparing the communication batch.
+6. The selected services are
    regrouped into supplier packages and opened in the full-screen communication
    workspace; nothing is sent.
-6. Use the package queue and `Previous` / `Next pending` to review every
+7. Use the package queue and `Previous` / `Next pending` to review every
    service date, Day number, Product/service name, pax, quantity, price basis,
    and rate warning.
-7. Verify all recipients. Each editable row uses `TO | address`,
+8. Verify all recipients. Each editable row uses `TO | address`,
    `CC | address`, `BCC | address`, or `WHATSAPP | number`.
-8. Review and edit Subject and Booking Message.
-9. Select New Booking or Amendment, then Regenerate Snapshot if the content
+9. Review and edit Subject and Booking Message.
+10. Select New Booking or Amendment, then Regenerate Snapshot if the content
    changed.
 
 Generate creates an exact working snapshot and service links in local SQLite.
@@ -46,14 +49,59 @@ If the communication popup closes before delivery, the snapshot remains
 in the Daywise toolbar to restore the generated queue. Closing the popup never
 changes a draft to Sent or removes it from the working flow.
 
+### 2.1 Deterministic grouping and sort
+
+One package contains selected Vendor services for one Customer Code and one
+stable Supplier identity, including services on multiple Days.
+
+Package order is:
+
+1. channel/SOP priority: Email, WhatsApp, Portal, Others;
+2. Supplier Name;
+3. Customer Code;
+4. first service date;
+5. first Day number;
+6. stable Package Key.
+
+Service order inside a package is:
+
+1. Day number;
+2. service date;
+3. Micro Split sequence;
+4. Product Name;
+5. stable Service ID.
+
+The backend snapshot and rendered message must use the same sorted service
+array. Source insertion order must not change the result.
+
+### 2.2 Gmail preflight
+
+For an Email package, `Connected` is only a display hint. Generate must:
+
+1. refresh the OAuth access token when required;
+2. call Gmail `users/me/profile`;
+3. verify the returned Gmail account matches the connected employee;
+4. classify permission, authentication, network, and central-sync readiness;
+5. show sender and checked time in the communication workspace.
+
+If Gmail auth/profile is not ready, Email generation is blocked by default and
+offers Reconnect, Generate Draft Only, or Cancel. Generate Draft Only must keep
+Send disabled until a later successful preflight.
+
+The same focused Gmail preflight is mandatory again immediately before Send.
+The pre-Send preflight and final TO validation occur before creating the
+immutable Send Attempt. Apps Script unavailability is a warning, not a Gmail
+blocker, because a proven Gmail Send may safely become `SENT_PENDING_SYNC`.
+
 ## 3. Email sending
 
 1. Email requires at least one `TO` recipient.
-2. Generate the latest snapshot.
+2. Generate the latest snapshot and confirm the Generate preflight result.
 3. Click Send via Gmail.
-4. Read the final confirmation showing supplier, TO, subject, and the connected
+4. ERIM-PSH rechecks Gmail connection, token, account, and permission.
+5. Read the final confirmation showing supplier, TO, subject, and the connected
    employee Gmail.
-5. Confirm only when those values are correct.
+6. Confirm only when those values are correct.
 
 After Gmail accepts the message, ERIM-PSH records Sent time, Gmail message ID,
 Gmail thread ID, exact recipients, Subject, Body, services, source revision,

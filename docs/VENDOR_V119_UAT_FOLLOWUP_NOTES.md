@@ -766,3 +766,202 @@ Required positioning:
 - [ ] No-TO backend rejection creates no Send Attempt.
 - [ ] `SEND_OUTCOME_UNKNOWN` blocks Send and Resend until reconciliation.
 - [ ] Amendment remains separate from Resend.
+
+## 13. Approved deterministic sort and Gmail connection preflight
+
+Status: `OWNER APPROVED — RECORDED FOR IMPLEMENTATION`
+
+### 13.1 Package merge boundary
+
+- [x] Merge selected service rows only when Customer Code and stable Supplier
+  identity are the same.
+- [x] Allow one package to contain the same supplier's services from multiple
+  Days for the same client.
+- [x] Never merge different Customer Codes.
+- [x] Never merge different Supplier IDs only because their display names are
+  similar.
+- [x] Continue excluding every non-`VENDOR` Type.
+
+### 13.2 Approved package sort
+
+Implement this deterministic ascending order:
+
+1. communication channel/SOP priority:
+   - `EMAIL`;
+   - `WHATSAPP`;
+   - `PORTAL`;
+   - `OTHERS` / `OTHER`;
+   - unknown channel last;
+2. normalized Supplier Name;
+3. Customer Code;
+4. earliest selected service date;
+5. earliest selected Day number;
+6. stable Package Key.
+
+- [ ] Add first service date and first Day metadata to the generated queue
+  entry.
+- [ ] Add the final stable Package Key tie-breaker.
+- [ ] Use the same comparator when generating and resuming drafts.
+- [ ] Add automated coverage proving the result does not depend on insertion
+  order.
+
+### 13.3 Approved service sort inside one package
+
+Implement this deterministic ascending order:
+
+1. Day number;
+2. service date;
+3. Micro Split `splitSequence`;
+4. normalized Product Name;
+5. stable Service ID.
+
+- [ ] Sort before building `selectedServiceIds`.
+- [ ] Use the sorted service array for the generated snapshot.
+- [ ] Use the same array for Subject/body preview, MIME, evidence, and Delivery
+  History.
+- [ ] Preserve stable Service IDs; sorting must not create or change identity.
+- [ ] Add a test with unsorted input Days and Split sequences.
+- [ ] Confirm the standard email body prints Day 1, Day 2, Day 3 consistently.
+
+### 13.4 Generate-time Gmail preflight
+
+Run this only when at least one selected package uses Email.
+
+The preflight must not rely only on cached `auth.status.connected`.
+
+Required checks:
+
+1. OAuth configuration exists;
+2. an encrypted session or active in-memory session exists;
+3. `accessToken()` succeeds and refreshes the token when it is near expiry;
+4. Gmail `users/me/profile` returns HTTP success;
+5. returned `emailAddress` matches the connected employee email;
+6. Gmail permission is sufficient for the configured Email workflow;
+7. result includes sender email, checked time, and latency;
+8. Apps Script health is checked separately as central-evidence readiness.
+
+Do not store or display access tokens, refresh tokens, OAuth codes, or
+authorization headers.
+
+### 13.5 Generate preflight result states
+
+| State | Meaning | Generate behavior | Send behavior |
+| --- | --- | --- | --- |
+| `GMAIL_READY` | Token refresh/profile succeeds and account matches | Proceed | Recheck before Send |
+| `AUTH_REQUIRED` | No usable session/refresh fails | Block Email by default; offer Reconnect | Disabled |
+| `PERMISSION_REQUIRED` | Gmail returns permission failure | Require reconnect/consent | Disabled |
+| `ACCOUNT_MISMATCH` | Gmail profile differs from selected sender | Block Email | Disabled |
+| `GMAIL_UNREACHABLE` | Network/API temporarily unavailable | Offer Generate Draft Only or Cancel | Disabled |
+| `CENTRAL_SYNC_UNAVAILABLE` | Gmail ready; Apps Script unavailable | Generate allowed with warning | Send allowed; result may become `SENT_PENDING_SYNC` |
+| `NON_EMAIL` | Package is WhatsApp/Portal/Other | Gmail check not required | Use channel-specific action |
+
+Generate failure dialog:
+
+```text
+GMAIL IS NOT READY
+
+Connected account: {cached employee email}
+Result: {AUTH_REQUIRED / PERMISSION_REQUIRED / ACCOUNT_MISMATCH /
+         GMAIL_UNREACHABLE}
+Checked: {timestamp}
+
+Email cannot be sent until Gmail is ready.
+
+[Reconnect Google] [Generate Draft Only] [Cancel]
+```
+
+`Generate Draft Only`:
+
+- [ ] creates or updates only the generated local snapshot;
+- [ ] marks the package `EMAIL PREFLIGHT REQUIRED`;
+- [ ] does not create a Send Attempt;
+- [ ] keeps `Send via Gmail` disabled;
+- [ ] permits later Resume and Recheck Connection.
+
+### 13.6 Communication-workspace readiness notice
+
+Show a sticky readiness card for the active Email package:
+
+```text
+GMAIL READY
+Sender: staff@company.com
+Session: active / refreshed
+Checked: 10:22:15
+Central evidence: READY
+```
+
+Alternative warning:
+
+```text
+GMAIL READY — CENTRAL SYNC UNAVAILABLE
+Email may be sent once; official evidence will remain SENT_PENDING_SYNC.
+```
+
+Required actions:
+
+- [ ] `Recheck connection`;
+- [ ] `Reconnect Google` when auth/permission fails;
+- [ ] show the returned sender account;
+- [ ] show preflight age;
+- [ ] mark stale after five minutes or when the app resumes from sleep;
+- [ ] rerun on network change where detectable.
+
+### 13.7 Mandatory pre-Send recheck
+
+Generate preflight is early warning, not a delivery guarantee. Immediately
+before the final confirmation and Send Attempt insertion:
+
+1. validate at least one TO recipient;
+2. call `accessToken()` so refresh can occur;
+3. call Gmail `users/me/profile`;
+4. verify the sender account still matches;
+5. verify the generated snapshot has not changed;
+6. then create the immutable Send Attempt;
+7. then show final confirmation and call Gmail exactly once.
+
+- [ ] A failed pre-Send check creates no Send Attempt.
+- [ ] A canceled final confirmation creates no Send Attempt.
+- [ ] A successful preflight does not weaken the existing
+  `SEND_OUTCOME_UNKNOWN` protection.
+- [ ] A Gmail failure before receiving proven IDs must never be silently
+  retried.
+
+### 13.8 Implementation order
+
+1. Add deterministic service sorting in the backend read/preview path.
+2. Add deterministic package metadata and comparator.
+3. Add a focused Gmail preflight service reusing token refresh and Gmail
+   profile verification.
+4. Expose focused preflight through IPC without exposing credentials.
+5. Run preflight on Generate for selected Email packages.
+6. Add Generate Draft Only and readiness states.
+7. Add sticky readiness notice and Recheck Connection.
+8. Run mandatory validation/preflight before Send Attempt creation.
+9. Add packaged and connected-account UAT.
+
+### 13.9 UAT gates
+
+- [ ] Same selected data produces the same package order across repeated runs.
+- [ ] Same package produces the same service order regardless of source
+  insertion order.
+- [ ] Services from one client/supplier and multiple Days merge once.
+- [ ] Different clients never merge.
+- [ ] Email packages sort before WhatsApp, Portal, and Others.
+- [ ] Day/service body lines are deterministic.
+- [ ] Generate with a valid session shows the verified Gmail sender.
+- [ ] Near-expiry token is refreshed during preflight.
+- [ ] Expired session with valid refresh token recovers without new login.
+- [ ] Revoked refresh token produces `AUTH_REQUIRED`.
+- [ ] Missing Gmail permission produces `PERMISSION_REQUIRED`.
+- [ ] Different Gmail profile produces `ACCOUNT_MISMATCH`.
+- [ ] Offline Gmail produces `GMAIL_UNREACHABLE`.
+- [ ] Generate Draft Only creates no Send Attempt.
+- [ ] Non-Email packages are not blocked by Gmail readiness.
+- [ ] Apps Script outage shows Central Sync warning without falsely marking
+  Gmail unavailable.
+- [ ] Pre-Send recheck is executed even after Generate passed.
+- [ ] Session loss between Generate and Send creates no Send Attempt.
+- [ ] Final confirmation cancellation creates no Send Attempt.
+- [ ] Successful Send still creates exactly one Gmail Message ID.
+- [ ] Gmail accepted plus central failure becomes `SENT_PENDING_SYNC`.
+- [ ] Retry central sync performs zero additional Gmail sends.
