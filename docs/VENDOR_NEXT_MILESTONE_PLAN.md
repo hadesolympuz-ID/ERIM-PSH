@@ -4,6 +4,10 @@ Status: `APPROVED FOR NEXT DEVELOPMENT`
 Recorded: 2026-07-28  
 Target: post-v1.1.7 Vendor Booking development
 
+Historical note: this plan governed the milestone delivered through v1.1.12.
+The authoritative next-step base plan is now
+`docs/VENDOR_V113_BASE_PLAN.md`.
+
 ## 1. Milestone outcome
 
 The next milestone delivers one connected Vendor Booking operating loop:

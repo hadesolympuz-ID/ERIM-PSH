@@ -1024,3 +1024,356 @@ before the final confirmation and Send Attempt insertion:
 - [ ] Successful Send still creates exactly one Gmail Message ID.
 - [ ] Gmail accepted plus central failure becomes `SENT_PENDING_SYNC`.
 - [ ] Retry central sync performs zero additional Gmail sends.
+
+## 14. v1.1.13 New Itinerary and Generate compact-workspace follow-up
+
+Status: `PHASES 1–5 CONFIRMED — IMPLEMENTATION PAUSED`
+
+Recorded on 2026-07-30 after the v1.1.12 Priority 1–5 release. No application
+source change is authorized by this record alone. The owner requested that the
+follow-up be confirmed and implemented one workspace at a time. Phase 1 covers
+Vendor Booking → New Itinerary. Phase 2 covers only Cancel Generate inside the
+maximized Generate & Send Supplier Booking popup. Phase 3 covers only the
+Generate preparation submenu's compact tree and always-visible delivery-channel
+readiness. Phase 4 covers the service-level Booking Delivery Report. Phase 5
+covers the spreadsheet-style Generated Batch List shown immediately after
+Generate.
+
+The five confirmed phases, their shared data contracts, implementation order,
+non-goals, and consolidated release gates are compiled into the authoritative
+v1.1.13 base-plan record:
+`docs/VENDOR_V113_BASE_PLAN.md`.
+
+### 14.1 New Itinerary → Vendor Booking
+
+Current verified condition:
+
+- Day Wise Header is not automatically populated from each posted itinerary
+  `Program` row. A rebuilt Day currently preserves an existing local title by
+  service date, otherwise it starts blank and requires manual input.
+- Arrival and departure dates/times already exist in the extracted itinerary
+  contract, but the revised workspace must make their source and result clear.
+- SQLite and the Apps Script payload currently use compact ISO dates
+  (`YYYY-MM-DD`), which should remain the storage and comparison format.
+
+Requested behavior:
+
+- [ ] Extract the Day Wise Header automatically from the matching posted
+  itinerary `Program`/day heading when structured itinerary content is loaded.
+- [ ] Bind by the posted itinerary Day/date relationship so the Program for one
+  Day cannot be copied into another Day merely because the text order changed.
+- [ ] Preserve manual edits on a saved local Day. Rebuild Dates may fill an
+  empty title from the posted itinerary but must not silently overwrite a
+  non-empty local title.
+- [ ] When staff types only an hour into a time field, normalize the minutes to
+  `00` so Start/Finish and manually edited Arrival/Departure time entry does
+  not require repeated cursor movement. For example, `9` or `09` becomes
+  `09:00`. Keep valid manually entered minutes such as `09:35` unchanged.
+- [ ] Reduce New Itinerary Day-card typography, textarea height, input height,
+  spacing, and padding so more Days fit in the working viewport.
+- [ ] Display dates in the UI as `dd/MMMM/yyyy` with an unambiguous full month
+  name. Continue storing and sorting dates internally as compact ISO
+  `YYYY-MM-DD`.
+- [ ] Add an explicit `+ Add Day 0` control directly below the
+  `Day Wise & micro split` heading.
+- [ ] Do not create Day 0 automatically. It exists only after staff deliberately
+  presses `+ Add Day 0`.
+- [ ] When Day 0 exists, hide or disable `+ Add Day 0` so only one Day 0 can
+  exist, and show an explicit `Delete Day 0` action in the same control area.
+- [ ] `Delete Day 0` removes only Day 0 and never changes Day 1+ numbering,
+  dates, titles, or Micro Split records.
+- [ ] If Day 0 is still completely blank, allow deletion after one clear
+  confirmation. If it contains a date, title, time, detail, or Micro Split
+  record, show a stronger confirmation summarizing what will be removed.
+- [ ] Deleting Day 0 from the UI must become permanent only when the local
+  itinerary draft is saved. Until then, normal unsaved-change protection
+  applies.
+- [ ] Support one optional, flexible Day 0 before Day 1. Its service date, Day
+  Wise Header, Start/Finish time, detail, and Micro Split records remain
+  editable. It may use a date earlier than the official arrival date, for
+  example a 23:59 pickup on 02 January for a 00:10 arrival on 03 January.
+- [ ] Once staff has added Day 0, Rebuild Dates must preserve it and allow its
+  date to be adjusted while rebuilding Day 1 through departure.
+- [ ] Adding, adjusting, or removing Day 0 must not renumber, overwrite, or
+  erase ordinary Day 1+ records and their Micro Split items.
+- [ ] Operational date sorting must place Day 0 according to its service date
+  and time before Day 1 so Transport can detect the earlier on-ground pickup.
+- [ ] Total Pax is a direct manual input controlled by staff. Do not derive or
+  overwrite it automatically from itinerary prose.
+- [ ] Preserve the existing Adult, Child, and Infant fields separately until
+  the owner reviews their final relationship with manual Total Pax. Phase 1
+  must not silently change their current data contract.
+- [ ] Arrival date/time and Departure date/time must be populated from the
+  posted itinerary extraction when available and remain visibly reviewable and
+  editable. Rebuild Dates uses those reviewed dates for Day 1 through
+  departure; it must not replace them with Day 0.
+
+### 14.2 Generate preparation compact directory tree
+
+Phase status: `PHASE 3 CONFIRMED — IMPLEMENTATION PAUSED`
+
+Visual direction: use a simple, dense Windows/CMD-style directory hierarchy
+similar to the owner-provided reference image. The tree remains
+Client → Day → Vendor service.
+
+- [ ] Replace the visually large tree cards with simple compact rows using a
+  standard Windows/system font stack (`Segoe UI`, Arial, sans-serif).
+- [ ] Use approximately 12px standard row text, 11px secondary metadata, and
+  restrained 13–14px section headings. Do not reuse oversized dashboard/banner
+  typography inside the working tree.
+- [ ] Reduce banner, heading, row, badge, button, and metadata height, padding,
+  and vertical gaps so substantially more booking rows fit in the viewport.
+- [ ] Use compact square expand/collapse markers, folder/item cues, indentation,
+  and continuous branch lines similar to the supplied tree-view reference so
+  Client, Day, and service hierarchy can be scanned without large cards.
+- [ ] Keep selection checkboxes compact and aligned with their corresponding
+  Client, Day, or service row.
+- [ ] Render Day Wise Header in solid black, compact text. Keep status/rate
+  metadata secondary and muted.
+- [ ] Use a subtle selected-row background or left marker; selection styling
+  must not reduce Day Wise Header contrast.
+- [ ] Continue showing stable Customer Code, Day/date, Supplier, Product, rate
+  state, and booking state without turning the compact tree into an ambiguous
+  flat list.
+- [ ] In the middle Supplier/SOP detail panel for the currently selected tree
+  item/package, always render four radio-style options: Email, WhatsApp,
+  Portal, and Other. Do not hide an option merely because its destination is
+  incomplete.
+- [ ] Require exactly one selected delivery channel per supplier package.
+- [ ] Preselect the explicit default/current channel already stored for that
+  Supplier/SOP in the database. When legacy data has active channels but no
+  explicit default, use the first active channel in stored SOP order and label
+  it as a fallback rather than silently inventing another default.
+- [ ] Preserve a staff channel selection while the same package remains in the
+  preparation session. Saving/generating the snapshot records that selection
+  for controlled resume.
+- [ ] Mark each channel option as `READY` or `DATA MISSING` and show the
+  destination directly beneath the option.
+- [ ] For Email, show every configured TO destination and a compact CC summary.
+  A missing TO makes Email `DATA MISSING` even if CC exists.
+- [ ] For WhatsApp, show the configured recipient name and international
+  number. A missing number makes WhatsApp `DATA MISSING`.
+- [ ] For Portal, show the configured portal host/URL and account reference
+  without displaying or storing passwords.
+- [ ] For Other, show the configured instruction, destination, or reference.
+  Blank instructions make Other `DATA MISSING`.
+- [ ] Keep every `DATA MISSING` channel selectable. Selecting it must never
+  silently switch back to another channel.
+- [ ] Immediately open a compact in-place `Complete delivery channel` popup
+  when staff selects a channel whose required data is incomplete. Do not
+  navigate away from Generate or lose the selected Client/Day/service/package.
+- [ ] The popup identifies Customer Code, Supplier, selected channel, missing
+  field count, and exactly why the channel is incomplete.
+- [ ] Render only the relevant completion fields directly in the popup:
+  - Email: at least one TO address, plus optional repeatable CC/BCC;
+  - WhatsApp: recipient name and international phone number;
+  - Portal: portal URL and non-secret account reference;
+  - Other: method/instruction and destination/reference.
+- [ ] Validate email, international phone, and URL formats before local save.
+  Passwords, OTPs, access tokens, cookies, and recovery codes are never fields
+  in this popup and must not enter SQLite, Google Sheets, logs, or snapshots.
+- [ ] Provide `Save locally & queue online` and `Cancel` actions. Cancel keeps
+  the chosen channel visible as `DATA MISSING` and keeps Generate blocked for
+  that package without discarding unrelated work.
+- [ ] `Save locally & queue online` creates or updates the exact Supplier
+  Booking SOP/Recipient local draft with actor, time, package context, base
+  online version, and stable Supplier identity.
+- [ ] The saved local overlay immediately refreshes the selected package,
+  destination summary, and channel mark. If validation is complete, change the
+  selected channel to `READY` without requiring Generate-page reload.
+- [ ] Automatically add the staged SOP/Recipient change to the existing
+  dependency-ordered Supplier publish queue for online database synchronization.
+  Local save does not falsely mark the online record `SYNCED`.
+- [ ] Show the resulting state beside the channel:
+  `READY — LOCAL PENDING ONLINE`, `SYNC QUEUED`, `SYNCED`, `CONFLICT`, or
+  `FAILED`, as applicable.
+- [ ] Preserve local pending channel details during Supplier Master refresh.
+  A base-version conflict must remain visible and require review; it must not
+  silently overwrite either the online value or the staff's local entry.
+- [ ] Generate may proceed using complete local-pending channel details while
+  the online push remains queued, but the booking snapshot must record local
+  provenance and pending-sync state.
+- [ ] Retain an optional `Open exact Supplier Master` action for full SOP or
+  recipient maintenance beyond the missing fields shown in the compact popup.
+- [ ] Changing the channel before Generate must regenerate recipients,
+  destination hints, sort position, preview, and snapshot from the selected
+  channel. It must never reuse stale recipient data from another channel.
+
+### 14.3 Generate & Send Supplier Booking — Cancel Generate per item
+
+Phase status: `PHASE 2 CONFIRMED — IMPLEMENTATION PAUSED`
+
+`Cancel generate` corrects an unsent generated draft. It is not a supplier
+cancellation and must never send a message or create delivery evidence.
+
+- [ ] Scope this control specifically to the maximized
+  `Generate & Send Supplier Booking` popup opened after staff clicks Generate
+  for selected booking items.
+- [ ] Keep the left list grouped by Supplier package and show each generated
+  service as a compact child item.
+- [ ] Add a compact `Cancel generate` button directly beside every individual
+  generated service child item, not one bulk button for the whole package.
+- [ ] Keep package/item rows available for normal selection and preview;
+  `Cancel generate` is a separate explicit action and must not fire when staff
+  merely selects the row.
+- [ ] Show `Cancel generate` only while the containing package is
+  `GENERATED / DRAFT READY — NOT SENT` with no delivery attempt/evidence.
+- [ ] Show the Customer Code, Supplier, channel, one exact Service ID,
+  Day/date/Product, remaining sibling count, and a clear `NOT SENT` warning
+  before confirmation.
+- [ ] Require an operational reason and explicit confirmation.
+- [ ] Record one auditable `GENERATE_ITEM_CANCELED` event with actor, time,
+  reason, package key, previous channel, and before-change snapshot hash.
+- [ ] Create no Gmail Send Attempt, Gmail Message/Thread ID, Apps Script
+  communication evidence, Portal reference, WhatsApp evidence, or supplier
+  cancellation record.
+- [ ] Release only the selected stable Service ID back to `NOT_GENERATED`.
+- [ ] Preserve all sibling services as generated in the same supplier package.
+- [ ] Rebuild the remaining ordered service snapshot, Subject/body, Portal
+  membership, rate provenance, updated time, and hash without the removed item.
+- [ ] After release, make that exact service selectable again in the main
+  Generate preparation tree. Staff can correct the itinerary/Supplier/Rate/
+  channel/message as applicable and run Generate again.
+- [ ] Keep the package `GENERATED` while at least one sibling service remains.
+  Use `GENERATE_CANCELED` only when its final item is removed.
+- [ ] Remove only the canceled service child from the popup without closing the
+  workspace. Keep the package selected and move to the next/previous sibling;
+  move package selection only if it becomes empty.
+- [ ] Update both service-item and package progress counts.
+- [ ] Make the canceled snapshot visible in Delivery/Generation History with
+  actor, time, reason, previous channel, exact Service ID, and before/after
+  snapshot hashes.
+- [ ] Block `Cancel generate` for `SENT`, `SENT_PENDING_SYNC`,
+  `SEND_OUTCOME_UNKNOWN`, and any package with proven delivery. Those states
+  continue through Amendment, reconciliation, resend, or supplier
+  cancellation SOP as applicable.
+
+### 14.4 Booking Delivery Report
+
+Phase status: `PHASE 4 CONFIRMED — IMPLEMENTATION PAUSED`
+
+- [ ] Add a compact list view using one row per stable Service ID.
+- [ ] Primary columns are Customer Code, Client Name, service date, Day,
+  Product/service, Supplier, channel, booking/delivery status, Sent date/time,
+  and contextual action.
+- [ ] Display Sent time as `dd/MMMM/yyyy HH:mm WITA` while storage remains
+  ISO/UTC.
+- [ ] Add expandable detail for Day Wise Header, Package/Booking ID, Service ID,
+  action type, rate provenance, destination, sender, Gmail IDs, evidence state,
+  last attempt/action, errors, reply state, and operational timestamps.
+- [ ] Default to `Needs Action`, ordered by action risk, unresolved age,
+  service date, Supplier, Customer Code, and stable Service ID.
+- [ ] Add free-text search across Code, Client, Supplier, Product/service, Day
+  Wise Header, channel, status, destination, and booking reference.
+- [ ] Support status/action preset, channel, Supplier, service-date range,
+  Sent-date range, evidence, and reply filters.
+- [ ] Provide sort by Action Priority, Status, Supplier, Customer Code, Client,
+  service date, Sent time, Product, channel, or last updated.
+- [ ] Show active filter chips, Clear Filters, result count, and Needs Action
+  count.
+- [ ] Add one authoritative contextual action area per item. Actions include
+  Open Generate, Review & Send, Cancel Generate, Recheck Gmail, Retry Sync,
+  Reconcile Gmail, Delivery History, Open Gmail, Open Channel, Record Evidence,
+  Review Reply, Generate Again, and Prepare Amendment only when their state
+  permits.
+- [ ] Keep Send/Resend/Retry/Reconcile package safeguards. A row button resolves
+  the exact package and cannot bypass confirmation or linked-service review.
+- [ ] Keep Resend inside Delivery History, not as a one-click report action.
+- [ ] Preserve search, filters, sort, expanded rows, and scroll position during
+  affected-row refresh.
+- [ ] Support 100+ compact rows with sticky headings and 50/100 pagination or
+  equivalent virtualization.
+- [ ] Show explicit loading, empty, offline, stale, and refresh-failed states.
+
+### 14.5 Generated Batch List after Generate
+
+Phase status: `PHASE 5 CONFIRMED — IMPLEMENTATION PAUSED`
+
+- [ ] After Generate, open the maximized communication popup on a compact
+  spreadsheet-style list rather than an arbitrary package detail.
+- [ ] Use one primary row per supplier package with sequence, Code, Client,
+  Supplier, channel, item count, service-date range, package status, action
+  needed, and Open/Review.
+- [ ] Expand a package row to show Day, service date, Product/service, Day Wise
+  Header, rate state, item state, and per-item Cancel Generate.
+- [ ] Use standard 11–12px text, compact row height, sticky headings, selected
+  row highlight, and horizontal/vertical scrolling.
+- [ ] Add `Back to Preparation`, `Open / Review selected`, `Next Pending`, and
+  `Close` in list mode.
+- [ ] Add `Back to List`, `Previous Package`, `Package X of N`, `Next Package`,
+  and `Next Pending` in communication-detail mode.
+- [ ] Preserve selected row, expanded packages, scroll, filter, and sort when
+  moving between List and Detail.
+- [ ] Use deterministic Generate/Resume order for Previous/Next.
+- [ ] Canceling one item refreshes only that package row/count.
+- [ ] Canceling the last item removes only the empty package and selects a
+  predictable adjacent package.
+- [ ] Resume generated drafts opens the batch list first.
+
+### 14.6 Required UAT gates
+
+- [ ] Posted Program headings populate matching empty Day Wise Headers.
+- [ ] Manual Day Wise Header survives Rebuild Dates.
+- [ ] Hour-only time input becomes `HH:00`; entered minutes remain unchanged.
+- [ ] UI shows full-month dates while SQLite retains ISO dates.
+- [ ] Day 0 persists across rebuild and sorts before Day 1 by operational
+  date/time.
+- [ ] Add Day 0 cannot create a duplicate Day 0.
+- [ ] Delete Day 0 removes only Day 0; canceling its confirmation preserves all
+  Day 0 content.
+- [ ] Deleting a populated Day 0 clearly warns about its date/time/detail and
+  Micro Split impact before removal.
+- [ ] Arrival/departure date and time match the posted itinerary extraction.
+- [ ] Total Pax accepts and preserves a direct manual value without being
+  overwritten by itinerary extraction or Rebuild Dates.
+- [ ] Existing Adult/Child/Infant values remain intact while the future
+  relationship to manual Total Pax is awaiting owner review.
+- [ ] Compact tree remains readable at desktop minimum width and 125% Windows
+  display scaling.
+- [ ] Standard tree text remains readable without oversized headings and Day
+  Wise Header renders in solid black in normal, selected, and disabled rows.
+- [ ] All four channel options and their destination readiness are visible.
+- [ ] Default channel matches the stored Supplier Master/SOP value.
+- [ ] Email shows TO/CC, WhatsApp shows name/number, Portal shows URL/account
+  reference, and Other shows its instruction/reference.
+- [ ] A channel lacking required destination data remains visible and is
+  clearly marked `DATA MISSING`.
+- [ ] Selecting `DATA MISSING` opens the correct inline completion fields
+  without losing tree selection or scroll position.
+- [ ] Save locally changes the channel to
+  `READY — LOCAL PENDING ONLINE`, preserves the chosen channel, and creates one
+  idempotent online-publish queue item.
+- [ ] Repeated Save clicks do not create duplicate SOP/Recipient drafts or
+  duplicate online queue items.
+- [ ] Successful online publication changes the channel to `SYNCED`; offline,
+  failed, and conflict states preserve the local value and remain visible.
+- [ ] Generate using locally completed data records local provenance and never
+  claims that the Supplier Master detail is already online.
+- [ ] Switching channels cannot carry stale Email/WhatsApp/Portal data.
+- [ ] Cancel Generate creates no Send Attempt and releases only the one selected
+  Service ID.
+- [ ] Every generated/not-sent service child row in the maximized popup has its
+  own visible Cancel Generate action; Sent and ambiguous-delivery rows do not.
+- [ ] Canceling one item preserves its sibling services and adjacent packages.
+- [ ] The remaining package preview/body/hash excludes the canceled item.
+- [ ] The released service row is selectable again for correction and Generate
+  in the main preparation workspace.
+- [ ] Canceling the last service closes only that empty generated package.
+- [ ] Canceled generated history survives application restart.
+- [ ] Sent or ambiguous-delivery packages cannot use Cancel Generate.
+- [ ] Delivery Report uses one row per stable Service ID and shows exact shared
+  package references.
+- [ ] Free-word search such as `dinner` returns matching Product and Day Header
+  rows.
+- [ ] Status/Supplier/date filters and all approved sorts compose
+  deterministically.
+- [ ] Sent date/time is visible in WITA.
+- [ ] Each row exposes only actions valid for its authoritative state.
+- [ ] Report action refresh preserves current search/filter/sort/position.
+- [ ] 100+ report rows remain compact and usable.
+- [ ] Generate lands on the compact batch list and does not silently select an
+  arbitrary package detail.
+- [ ] Expandable package rows expose exact service items and per-item Cancel.
+- [ ] List/Detail Back, Previous, Next, and Next Pending navigation preserves
+  deterministic position and view context.
+- [ ] Batch grid remains usable with 100+ service items.
