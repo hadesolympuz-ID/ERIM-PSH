@@ -1,6 +1,6 @@
 # Vendor Booking v1.1.13 Base Plan
 
-Status: `OWNER-CONFIRMED BASE PLAN — READY FOR NEXT IMPLEMENTATION STEP`
+Status: `IMPLEMENTED AND PACKAGED IN v1.1.13 — LIVE APPS SCRIPT/UAT GATE PENDING`
 Recorded: 2026-07-30
 Target version: `v1.1.13`
 Branch: `agent/desktop-v1`
@@ -13,6 +13,20 @@ compiles the confirmed owner feedback previously recorded in Section 14 of
 No feature in this document is considered implemented until its acceptance
 gate passes. Recording this plan does not authorize sending a real email,
 publishing test Supplier data, or claiming an online sync that did not occur.
+
+Implementation result (2026-07-30):
+
+- Desktop schema, New Itinerary, compact Generate preparation, four-channel
+  completion, per-Service Cancel Generate, generated batch grid, delivery
+  report, IPC contracts, and Apps Script source changes are implemented.
+- All 60 automated tests, desktop syntax checks, diff hygiene, packaged ASAR
+  inspection, and the isolated eight-second executable smoke gate pass.
+- NSIS installer `v1.1.13` is built. Real supplier delivery and representative
+  Supplier online mutation were not used for verification.
+- Apps Script source deployment is still pending because this workstation has
+  no authenticated Apps Script deployment binding. Do not describe Day 0 or
+  manual Total Pax as centrally live until that deployment and health check
+  pass.
 
 ---
 

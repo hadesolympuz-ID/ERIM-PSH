@@ -26,6 +26,7 @@ const state = {
   vendorCommunicationBatch: [],
   vendorCommunicationIndex: -1,
   vendorCommunicationBaseline: "",
+  vendorGeneratedCancelTarget: null,
   vendorGmailReadiness: null,
   vendorExpandedClients: new Set(),
   vendorExpandedDays: new Set(),
@@ -155,6 +156,45 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatVendorDate(value) {
+  if (!value) return "";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC", day: "2-digit", month: "long", year: "numeric",
+  }).formatToParts(date);
+  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${fields.day}/${fields.month}/${fields.year}`;
+}
+
+function formatWita(value) {
+  if (!value) return "—";
+  return `${new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Makassar", day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(new Date(value))} WITA`;
+}
+
+function normalizeHourTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const hourOnly = text.match(/^([01]?\d|2[0-3])$/);
+  if (hourOnly) return `${hourOnly[1].padStart(2, "0")}:00`;
+  const full = text.match(/^([01]?\d|2[0-3])[:.]([0-5]\d)$/);
+  return full ? `${full[1].padStart(2, "0")}:${full[2]}` : text;
+}
+
+function refreshVendorDateDisplays(root = document) {
+  root.querySelectorAll("[data-date-display-for]").forEach((node) => {
+    const input = root.querySelector(`[name="${node.dataset.dateDisplayFor}"]`);
+    node.textContent = formatVendorDate(input?.value);
+  });
+  root.querySelectorAll("[data-vendor-date-display]").forEach((node) => {
+    const input = node.closest("label")?.querySelector('input[type="date"]');
+    node.textContent = formatVendorDate(input?.value);
+  });
 }
 
 function statusClass(status) {
@@ -341,6 +381,64 @@ function renderVendorInboxLegacy() {
 }
 
 function renderVendorInbox() {
+  const reportSearch = String($("#vendor-delivery-report-search")?.value || "").trim().toLowerCase();
+  const reportStatus = $("#vendor-delivery-report-status")?.value || "";
+  const reportChannel = $("#vendor-delivery-report-channel")?.value || "";
+  const reportSupplier = String($("#vendor-delivery-report-supplier")?.value || "").trim().toLowerCase();
+  const reportServiceDate = $("#vendor-delivery-report-service-date")?.value || "";
+  const reportSentDate = $("#vendor-delivery-report-sent-date")?.value || "";
+  const reportEvidence = $("#vendor-delivery-report-evidence")?.value || "";
+  const reportSort = $("#vendor-delivery-report-sort")?.value || "LATEST";
+  const deliveryReport = [...(state.vendorOperational.deliveryReport || [])]
+    .filter((item) => !reportStatus
+      || (reportStatus === "NEEDS_ACTION"
+        ? item.communicationStatus !== "SENT"
+          || item.officialSyncStatus === "PENDING_SYNC"
+          || item.replyReviewStatus === "REVIEW_REQUIRED"
+        : item.communicationStatus === reportStatus))
+    .filter((item) => !reportChannel || item.channel === reportChannel)
+    .filter((item) => !reportSupplier || item.supplierName.toLowerCase().includes(reportSupplier))
+    .filter((item) => !reportServiceDate || item.serviceDate === reportServiceDate)
+    .filter((item) => !reportSentDate || String(item.sentAt || "").slice(0, 10) === reportSentDate)
+    .filter((item) => !reportEvidence
+      || (reportEvidence === "PENDING"
+        ? ["EMAIL_ID_NOT_CREATED", "RECORDED_SYNC_PENDING", "OUTCOME_UNKNOWN"].includes(item.deliveryEvidenceStatus)
+        : reportEvidence === "RECORDED"
+          ? ["RECORDED_SYNCED", "NON_EMAIL_CHANNEL"].includes(item.deliveryEvidenceStatus)
+          : item.replyReviewStatus === "REVIEW_REQUIRED"))
+    .filter((item) => !reportSearch || [
+      item.customerCode, item.customerName, item.supplierName, item.productName,
+      item.channel, item.communicationStatus, item.externalReference,
+    ].join(" ").toLowerCase().includes(reportSearch))
+    .sort((left, right) => {
+      if (reportSort === "SUPPLIER") return left.supplierName.localeCompare(right.supplierName);
+      if (reportSort === "DATE") return String(left.serviceDate).localeCompare(String(right.serviceDate));
+      if (reportSort === "CODE") return left.customerCode.localeCompare(right.customerCode);
+      return String(right.sentAt || right.updatedAt).localeCompare(String(left.sentAt || left.updatedAt));
+    });
+  $("#vendor-delivery-report-count").textContent = deliveryReport.length;
+  $("#vendor-delivery-report-grid").innerHTML = deliveryReport.length ? `
+    <div class="vendor-report-row vendor-report-head">
+      <span>Code / Name</span><span>Date / Day</span><span>Product</span><span>Supplier</span>
+      <span>Channel</span><span>Booking status</span><span>Sent</span><span>Action</span>
+    </div>
+    ${deliveryReport.map((item) => `<div class="vendor-report-row">
+      <span><strong>${escapeHtml(item.customerCode)}</strong><small>${escapeHtml(item.customerName)}</small></span>
+      <span>${escapeHtml(formatVendorDate(item.serviceDate) || "—")}<small>Day ${Number(item.dayNumber || 0)}</small></span>
+      <span>${escapeHtml(item.productName || "Package record")}</span>
+      <span>${escapeHtml(item.supplierName)}</span>
+      <span>${escapeHtml(item.channel)}</span>
+      <span>${statusPill(item.communicationStatus)}<small>${escapeHtml(item.officialSyncStatus || "")}</small></span>
+      <span>${escapeHtml(formatWita(item.sentAt))}</span>
+      <span class="vendor-report-actions">
+        <button class="button ghost small" type="button" data-open-vendor-history="${escapeHtml(item.bookingId)}">Open</button>
+        ${item.gmailThreadId ? `<button class="button ghost small" type="button" data-open-gmail-thread="${escapeHtml(item.gmailThreadId)}">Gmail</button>` : ""}
+        ${item.communicationStatus === "SENT_PENDING_SYNC" && item.latestAttemptId
+          ? `<button class="button danger small" type="button" data-retry-vendor-sync="${escapeHtml(item.latestAttemptId)}">Retry sync</button>` : ""}
+      </span>
+    </div>`).join("")}
+  ` : `<div class="empty-notifications">No service-level delivery record matches the filters.</div>`;
+
   const search = String($("#vendor-register-search")?.value || "").trim().toLowerCase();
   const stateFilter = $("#vendor-register-state")?.value || "";
   const channelFilter = $("#vendor-register-channel")?.value || "";
@@ -747,7 +845,7 @@ async function prepareSelectedVendorServices() {
     state.vendorCommunicationIndex = 0;
     renderVendorBookingQueue();
     $("#vendor-communication-dialog").showModal();
-    await openVendorCommunicationPackage(0);
+    showVendorCommunicationBatchList();
     toast(`${state.selectedVendorServiceIds.size} service(s) generated into ${groups.size} supplier package(s). Nothing was sent.`);
   } catch (error) {
     toast(error.message, true);
@@ -789,7 +887,7 @@ async function resumeVendorGeneratedDrafts(preferredBookingId = "") {
     renderVendorBookingQueue();
     const dialog = $("#vendor-communication-dialog");
     if (!dialog.open) dialog.showModal();
-    await openVendorCommunicationPackage(state.vendorCommunicationIndex);
+    showVendorCommunicationBatchList();
     toast(`${batch.length} generated draft(s) restored. Nothing is marked Sent until delivery succeeds.`);
   } catch (error) {
     toast(error.message, true);
@@ -879,10 +977,17 @@ function renderVendorPreparationDetails() {
     <article class="vendor-prep-card white">
       <span>One delivery channel</span>
       <div class="vendor-prep-channel-list">
-        ${preview.availableChannels.map((channel) => `<label>
-          <input type="radio" name="vendor-prep-channel" data-vendor-prep-channel="${escapeHtml(channel)}"
-            ${channel === preview.channel ? "checked" : ""} />
-          ${escapeHtml(channel)}
+        ${(preview.channelOptions || ["EMAIL", "WHATSAPP", "PORTAL", "OTHERS"].map((channel) => ({
+          channel, configured: preview.availableChannels.includes(channel), destinations: [],
+        }))).map((option) => `<label class="${option.configured ? "ready" : "attention"}">
+          <input type="radio" name="vendor-prep-channel" data-vendor-prep-channel="${escapeHtml(option.channel)}"
+            data-vendor-channel-configured="${option.configured ? "true" : "false"}"
+            ${option.channel === preview.channel ? "checked" : ""} />
+          <span>${escapeHtml(option.channel)}
+            <small>${option.configured
+              ? escapeHtml(option.destinations.join(" · ") || "Ready")
+              : "Missing destination — select to complete"}</small>
+          </span>
         </label>`).join("")}
       </div>
     </article>
@@ -938,6 +1043,98 @@ function vendorCommunicationBooking(entry) {
     || null;
 }
 
+function showVendorCommunicationBatchList() {
+  $("#vendor-communication-batch-view").hidden = false;
+  $("#vendor-communication-work-view").hidden = true;
+  $("#vendor-communication-back-list").hidden = true;
+  renderVendorCommunicationQueue();
+  renderVendorCommunicationBatchGrid();
+}
+
+function showVendorCommunicationWorkView() {
+  $("#vendor-communication-batch-view").hidden = true;
+  $("#vendor-communication-work-view").hidden = false;
+  $("#vendor-communication-back-list").hidden = false;
+}
+
+function renderVendorCommunicationBatchGrid() {
+  const grid = $("#vendor-communication-batch-grid");
+  const batch = state.vendorCommunicationBatch || [];
+  grid.innerHTML = batch.length ? `
+    <div class="vendor-batch-row vendor-batch-head">
+      <span>Code / Client</span><span>Channel</span><span>Supplier</span>
+      <span>Items</span><span>Status</span><span>Action</span>
+    </div>
+    ${batch.map((entry, index) => {
+      const booking = vendorCommunicationBooking(entry);
+      const services = (booking?.services || []).filter((service) =>
+        entry.serviceIds.includes(service.serviceId)
+      );
+      return `<details class="vendor-batch-package" open>
+        <summary class="vendor-batch-row">
+          <span><strong>${escapeHtml(entry.customerCode)}</strong><small>${escapeHtml(booking?.customerName || "")}</small></span>
+          <span>${escapeHtml(entry.channel)}</span>
+          <span>${escapeHtml(entry.supplierName)}</span>
+          <span>${services.length}</span>
+          <span>${statusPill(booking?.communicationStatus || "NOT_GENERATED")}</span>
+          <span><button class="button primary small" type="button" data-vendor-batch-review="${index}">Review</button></span>
+        </summary>
+        <div class="vendor-batch-services">
+          ${services.map((service) => `<div class="vendor-batch-service-row">
+            <span>└─ Day ${Number(service.dayNumber || 0)}</span>
+            <span>${escapeHtml(formatVendorDate(service.serviceDate) || service.serviceDate || "Date pending")}</span>
+            <strong>${escapeHtml(service.productName || service.activityText || "Service")}</strong>
+            <span>${escapeHtml(service.rateStatus || "")}</span>
+            <button class="button ghost small" type="button"
+              data-cancel-generated-service="${escapeHtml(service.serviceId)}"
+              data-cancel-generated-booking="${escapeHtml(booking?.bookingId || entry.bookingId)}">Cancel Generate</button>
+          </div>`).join("") || `<div class="empty-notifications">No active generated service remains.</div>`}
+        </div>
+      </details>`;
+    }).join("")}
+  ` : `<div class="empty-notifications">No generated package in this batch.</div>`;
+}
+
+async function cancelVendorGeneratedService(bookingId, serviceId) {
+  state.vendorGeneratedCancelTarget = { bookingId, serviceId };
+  $("#vendor-generated-cancel-form").elements.reason.value = "";
+  $("#vendor-generated-cancel-dialog").showModal();
+}
+
+async function submitVendorGeneratedServiceCancel(event) {
+  event.preventDefault();
+  const target = state.vendorGeneratedCancelTarget;
+  const reason = event.currentTarget.elements.reason.value.trim();
+  if (!target || !reason) return;
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const result = await window.erim.vendor.cancelGeneratedService({
+      ...target, reason,
+    });
+    [state.vendorBookingQueue, state.vendorBookings] = await Promise.all([
+      window.erim.vendor.listBookingQueue(),
+      window.erim.vendor.listBookings(),
+    ]);
+    state.vendorCommunicationBatch = (state.vendorCommunicationBatch || []).map((entry) =>
+      entry.bookingId === target.bookingId
+        ? { ...entry, serviceIds: entry.serviceIds.filter((id) => id !== target.serviceId) }
+        : entry
+    ).filter((entry) => entry.serviceIds.length);
+    state.vendorGeneratedCancelTarget = null;
+    $("#vendor-generated-cancel-dialog").close();
+    renderVendorBookingQueue();
+    showVendorCommunicationBatchList();
+    toast(result.remainingServiceCount
+      ? "One item returned to NOT GENERATED. The remaining package snapshot was rebuilt."
+      : "Final item returned to NOT GENERATED. The package is no longer generated.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderVendorCommunicationQueue() {
   const list = $("#vendor-communication-queue-list");
   const batch = state.vendorCommunicationBatch || [];
@@ -968,6 +1165,7 @@ async function openVendorCommunicationPackage(index) {
   const batch = state.vendorCommunicationBatch || [];
   if (!batch.length) return;
   state.vendorCommunicationIndex = Math.max(0, Math.min(index, batch.length - 1));
+  showVendorCommunicationWorkView();
   const entry = batch[state.vendorCommunicationIndex];
   await openVendorBookingPackage(entry.packageKey, {
     serviceIds: entry.serviceIds,
@@ -3295,8 +3493,12 @@ function vendorDateRange(arrivalDate, departureDate, existingDays = []) {
   const start = new Date(`${arrivalDate || ""}T00:00:00Z`);
   const end = new Date(`${departureDate || ""}T00:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
-  const existingByDate = new Map(existingDays.map((day) => [day.serviceDate, day]));
+  const dayZero = existingDays.find((day) => Number(day.dayNumber) === 0);
+  const existingByDate = new Map(existingDays
+    .filter((day) => Number(day.dayNumber) !== 0)
+    .map((day) => [day.serviceDate, day]));
   const rows = [];
+  if (dayZero) rows.push({ ...dayZero, dayNumber: 0 });
   for (let cursor = start.getTime(), dayNumber = 1; cursor <= end.getTime(); cursor += 86_400_000, dayNumber += 1) {
     const serviceDate = new Date(cursor).toISOString().slice(0, 10);
     const existing = existingByDate.get(serviceDate) || {};
@@ -3320,8 +3522,8 @@ function renderVendorHotels(hotels = []) {
     <div class="hotel-row" data-hotel-stay-id="${escapeHtml(hotel.hotelStayId || "")}">
       <span class="hotel-sequence">#${index + 1}</span>
       <label>Hotel<input data-vendor-hotel-field="hotelName" value="${escapeHtml(hotel.hotelName || "")}" placeholder="Hotel name" /></label>
-      <label>Check-in date<input data-vendor-hotel-field="checkInDate" type="date" value="${escapeHtml(hotel.checkInDate || "")}" /></label>
-      <label>Check-out date<input data-vendor-hotel-field="checkOutDate" type="date" value="${escapeHtml(hotel.checkOutDate || "")}" /></label>
+      <label>Check-in date<input data-vendor-hotel-field="checkInDate" type="date" value="${escapeHtml(hotel.checkInDate || "")}" /><small data-vendor-date-display>${escapeHtml(formatVendorDate(hotel.checkInDate))}</small></label>
+      <label>Check-out date<input data-vendor-hotel-field="checkOutDate" type="date" value="${escapeHtml(hotel.checkOutDate || "")}" /><small data-vendor-date-display>${escapeHtml(formatVendorDate(hotel.checkOutDate))}</small></label>
       <button class="button ghost small" type="button" data-remove-vendor-hotel="${index}">Remove</button>
     </div>
   `).join("") : `<div class="empty-notifications">No hotel extracted. Add hotel manually if required.</div>`;
@@ -3818,6 +4020,7 @@ function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
           <label class="vendor-day-date">
             <span>Date</span>
             <input data-vendor-day-field="serviceDate" type="date" value="${escapeHtml(day.serviceDate || "")}" />
+            <small data-vendor-date-display>${escapeHtml(formatVendorDate(day.serviceDate))}</small>
           </label>
           <label class="vendor-day-title">
             <span>Day Wise Header</span>
@@ -3829,11 +4032,11 @@ function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
         <div class="vendor-day-times">
           <label class="vendor-day-time">
             <span>Start time</span>
-            <input data-vendor-day-field="startTime" type="time" value="${escapeHtml(day.startTime || "")}" />
+            <input data-vendor-day-field="startTime" inputmode="numeric" placeholder="HH:MM" data-hour-time value="${escapeHtml(day.startTime || "")}" />
           </label>
           <label class="vendor-day-time">
             <span>Finish time</span>
-            <input data-vendor-day-field="finishTime" type="time" value="${escapeHtml(day.finishTime || "")}" />
+            <input data-vendor-day-field="finishTime" inputmode="numeric" placeholder="HH:MM" data-hour-time value="${escapeHtml(day.finishTime || "")}" />
           </label>
         </div>
       </div>
@@ -3844,6 +4047,8 @@ function renderVendorDays(days = [], hotels = collectVendorHotelRows()) {
       <div data-vendor-split-store hidden>${(day.splits || []).map(vendorSplitRow).join("")}</div>
     </article>
   `).join("") : `<div class="empty-notifications">Arrival and departure dates must form a valid range.</div>`;
+  $("#add-vendor-day-zero").hidden = days.some((day) => Number(day.dayNumber) === 0);
+  $("#delete-vendor-day-zero").hidden = !days.some((day) => Number(day.dayNumber) === 0);
   resizeVendorTextareas();
 }
 
@@ -3923,6 +4128,7 @@ function collectVendorIntake() {
     customerCode: form.elements.customerCode.value.trim().toUpperCase(),
     customerName: form.elements.customerName.value.trim(),
     clientTag: form.elements.clientTag.value.trim().toUpperCase(),
+    totalPax: Number(form.elements.totalPax.value || 0),
     adultPax: Number(form.elements.adultPax.value || 0),
     childPax: Number(form.elements.childPax.value || 0),
     infantPax: Number(form.elements.infantPax.value || 0),
@@ -3936,19 +4142,19 @@ function collectVendorIntake() {
     arrivalDate: form.elements.arrivalDate.value,
     arrivalFlight: form.elements.arrivalFlight.value.trim(),
     arrivalSector: form.elements.arrivalSector.value.trim(),
-    arrivalTime: form.elements.arrivalTime.value,
+    arrivalTime: normalizeHourTime(form.elements.arrivalTime.value),
     departureDate: form.elements.departureDate.value,
     departureFlight: form.elements.departureFlight.value.trim(),
     departureSector: form.elements.departureSector.value.trim(),
-    departureTime: form.elements.departureTime.value,
+    departureTime: normalizeHourTime(form.elements.departureTime.value),
     hotels: collectVendorHotelRows(),
     days: $$("#vendor-day-list .vendor-day-card").map((card) => ({
       tourDayId: card.dataset.tourDayId || "",
       dayNumber: Number(card.dataset.dayNumber),
       serviceDate: card.querySelector('[data-vendor-day-field="serviceDate"]').value,
       dayTitle: card.querySelector('[data-vendor-day-field="dayTitle"]').value.trim(),
-      startTime: card.querySelector('[data-vendor-day-field="startTime"]').value,
-      finishTime: card.querySelector('[data-vendor-day-field="finishTime"]').value,
+      startTime: normalizeHourTime(card.querySelector('[data-vendor-day-field="startTime"]').value),
+      finishTime: normalizeHourTime(card.querySelector('[data-vendor-day-field="finishTime"]').value),
       daywiseText: card.querySelector('[data-vendor-day-field="daywiseText"]').value,
       status: "DRAFT",
       splits: collectVendorSplitRows(card.querySelector("[data-vendor-split-store]")),
@@ -3976,13 +4182,14 @@ function populateVendorIntake(context) {
   const scalarFields = [
     "vendorDraftId", "customerCode", "customerName", "clientTag", "tourId", "sourcePublicationId",
     "sourceRecordVersion", "sourceRevisionId", "driveFileId", "driveFileName", "driveFileUrl",
-    "adultPax", "childPax", "infantPax",
+    "totalPax", "adultPax", "childPax", "infantPax",
     "arrivalDate", "arrivalFlight", "arrivalSector", "arrivalTime",
     "departureDate", "departureFlight", "departureSector", "departureTime",
   ];
   scalarFields.forEach((field) => {
     if (form.elements[field]) form.elements[field].value = context[field] ?? "";
   });
+  refreshVendorDateDisplays(form);
   form.hidden = false;
   $("#vendor-extraction-status").textContent = context.extractionStatus || "NEEDS REVIEW";
   $("#vendor-itinerary-name").textContent = context.driveFileName || "Posted itinerary";
@@ -4189,9 +4396,9 @@ async function saveVendorIntake(publish = false) {
   if (!payload.customerName || !payload.arrivalDate || !payload.departureDate) {
     return toast("Customer Name, Arrival Date, and Departure Date are required.", true);
   }
-  if (![payload.adultPax, payload.childPax, payload.infantPax]
+  if (![payload.totalPax, payload.adultPax, payload.childPax, payload.infantPax]
     .every((value) => Number.isInteger(value) && value >= 0)) {
-    return toast("Adult, Child, and Infant must be whole numbers starting from 0.", true);
+    return toast("Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.", true);
   }
   const button = publish ? $("#post-vendor-intake") : $("#save-vendor-draft");
   button.disabled = true;
@@ -4837,19 +5044,98 @@ function bindEvents() {
     const item = event.target.closest("[data-vendor-communication-index]");
     if (item) openVendorCommunicationFromQueue(Number(item.dataset.vendorCommunicationIndex));
   });
+  $("#vendor-communication-back-list").addEventListener("click", async () => {
+    if (await confirmVendorCommunicationNavigation()) showVendorCommunicationBatchList();
+  });
+  $("#vendor-communication-batch-grid").addEventListener("click", (event) => {
+    const review = event.target.closest("[data-vendor-batch-review]");
+    if (review) {
+      event.preventDefault();
+      return openVendorCommunicationPackage(Number(review.dataset.vendorBatchReview));
+    }
+    const cancel = event.target.closest("[data-cancel-generated-service]");
+    if (cancel) {
+      event.preventDefault();
+      return cancelVendorGeneratedService(
+        cancel.dataset.cancelGeneratedBooking,
+        cancel.dataset.cancelGeneratedService,
+      );
+    }
+  });
   $("#vendor-prep-supplier-detail").addEventListener("change", (event) => {
     const channel = event.target.closest("[data-vendor-prep-channel]");
     if (!channel) return;
     state.vendorPackageChannels.set(state.selectedVendorPackageKey, channel.dataset.vendorPrepChannel);
+    if (channel.dataset.vendorChannelConfigured !== "true"
+      && channel.dataset.vendorPrepChannel !== "OTHERS") {
+      const form = $("#vendor-channel-form");
+      form.elements.supplierId.value = state.vendorBookingPreview?.supplierId || "";
+      form.elements.channel.value = channel.dataset.vendorPrepChannel;
+      form.elements.destination.value = "";
+      $("#vendor-channel-notice").textContent =
+        `${channel.dataset.vendorPrepChannel} is selectable, but its destination is incomplete. Save creates a local Supplier Master draft queued for approved online sync.`;
+      $("#vendor-channel-destination-help").textContent =
+        channel.dataset.vendorPrepChannel === "EMAIL" ? "Supplier booking email (TO)"
+          : channel.dataset.vendorPrepChannel === "WHATSAPP" ? "Supplier WhatsApp number"
+            : "Portal HTTPS address";
+      form.elements.destination.placeholder =
+        channel.dataset.vendorPrepChannel === "EMAIL" ? "booking@supplier.com"
+          : channel.dataset.vendorPrepChannel === "WHATSAPP" ? "+62..."
+            : "https://portal.supplier.com";
+      $("#vendor-channel-dialog").showModal();
+      return;
+    }
     openVendorBookingPackage(state.selectedVendorPackageKey, {
       serviceIds: [state.selectedVendorInspectionServiceId],
       channel: channel.dataset.vendorPrepChannel,
     });
   });
+  $("#close-vendor-channel").addEventListener("click", () => $("#vendor-channel-dialog").close());
+  $("#cancel-vendor-channel").addEventListener("click", () => $("#vendor-channel-dialog").close());
+  $("#vendor-channel-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await window.erim.vendor.saveChannelCompletion({
+        supplierId: form.elements.supplierId.value,
+        channel: form.elements.channel.value,
+        destination: form.elements.destination.value.trim(),
+      });
+      $("#vendor-channel-dialog").close();
+      await openVendorBookingPackage(state.selectedVendorPackageKey, {
+        serviceIds: [state.selectedVendorInspectionServiceId],
+        channel: form.elements.channel.value,
+      });
+      toast("Channel saved locally and queued for Supplier Master online approval.");
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#close-vendor-generated-cancel").addEventListener("click", () => {
+    state.vendorGeneratedCancelTarget = null;
+    $("#vendor-generated-cancel-dialog").close();
+  });
+  $("#cancel-vendor-generated-cancel").addEventListener("click", () => {
+    state.vendorGeneratedCancelTarget = null;
+    $("#vendor-generated-cancel-dialog").close();
+  });
+  $("#vendor-generated-cancel-form").addEventListener("submit", submitVendorGeneratedServiceCancel);
   $("#vendor-register-search").addEventListener("input", renderVendorInbox);
   $("#vendor-register-state").addEventListener("change", renderVendorInbox);
   $("#vendor-register-channel").addEventListener("change", renderVendorInbox);
   $("#vendor-register-sort").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-search").addEventListener("input", renderVendorInbox);
+  $("#vendor-delivery-report-status").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-channel").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-supplier").addEventListener("input", renderVendorInbox);
+  $("#vendor-delivery-report-service-date").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-sent-date").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-evidence").addEventListener("change", renderVendorInbox);
+  $("#vendor-delivery-report-sort").addEventListener("change", renderVendorInbox);
   $("#load-vendor-itinerary-check").addEventListener("click", () => loadVendorItineraryCheck());
   $("#vendor-itinerary-check-code").addEventListener("change", () => loadVendorItineraryCheck());
   $("#vendor-booking-action").addEventListener("change", () =>
@@ -4894,6 +5180,38 @@ function bindEvents() {
     state.vendorIntake = payload;
     renderVendorDays(payload.days);
     toast(`${payload.days.length} Day Wise rows prepared.`);
+  });
+  $("#add-vendor-day-zero").addEventListener("click", () => {
+    const payload = collectVendorIntake();
+    if (payload.days.some((day) => day.dayNumber === 0)) return;
+    const arrival = new Date(`${payload.arrivalDate || ""}T00:00:00Z`);
+    const serviceDate = Number.isNaN(arrival.getTime())
+      ? ""
+      : new Date(arrival.getTime() - 86_400_000).toISOString().slice(0, 10);
+    payload.days.unshift({
+      tourDayId: "", dayNumber: 0, serviceDate, dayTitle: "Pre-arrival operation",
+      startTime: "23:59", finishTime: "", daywiseText: "", status: "DRAFT", splits: [],
+    });
+    state.vendorIntake = payload;
+    renderVendorDays(payload.days);
+    toast("Day 0 added before Day 1. Review date, time, and transport split.");
+  });
+  $("#delete-vendor-day-zero").addEventListener("click", () => {
+    const payload = collectVendorIntake();
+    const dayZero = payload.days.find((day) => day.dayNumber === 0);
+    if (!dayZero) return;
+    const hasWork = Boolean(
+      dayZero.dayTitle || dayZero.daywiseText || dayZero.startTime || dayZero.finishTime
+      || (dayZero.splits || []).length
+    );
+    const warning = hasWork
+      ? `Day 0 contains details or ${dayZero.splits.length} Micro Split item(s).\n\nDelete Day 0 and all of its local work?`
+      : "Delete the empty Day 0 record?";
+    if (!window.confirm(warning)) return;
+    payload.days = payload.days.filter((day) => day.dayNumber !== 0);
+    state.vendorIntake = payload;
+    renderVendorDays(payload.days);
+    toast("Day 0 removed.");
   });
 
   document.body.addEventListener("click", async (event) => {
@@ -5055,6 +5373,7 @@ function bindEvents() {
     if (event.target.matches("#vendor-day-list textarea[data-auto-grow]")) autoGrowTextarea(event.target);
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {
       updateVendorDayHotels();
+      refreshVendorDateDisplays(event.target.closest("form") || document);
     }
     if (event.target.matches("input[data-flexible-input]")) {
       event.target.size = flexibleInputSize(
@@ -5074,6 +5393,16 @@ function bindEvents() {
     )) {
       updateVendorManualRatePreview(event.target.closest(".vendor-split-row"));
     }
+  });
+  document.body.addEventListener("change", (event) => {
+    if (event.target.matches('input[type="date"]')) {
+      refreshVendorDateDisplays(event.target.closest("form") || document);
+    }
+  });
+  document.body.addEventListener("focusout", (event) => {
+    if (!event.target.matches("[data-hour-time]")) return;
+    const normalized = normalizeHourTime(event.target.value);
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) event.target.value = normalized;
   });
   document.body.addEventListener("change", (event) => {
     if (event.target.matches("[data-vendor-hotel-field], [data-vendor-day-field=\"serviceDate\"]")) {

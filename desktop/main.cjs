@@ -162,6 +162,12 @@ function registerIpc() {
     googleWorkspace.vendorGmailPreflight(details || {}));
   ipcMain.handle("vendor:booking-preview", (_event, details) => database.getVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-generate", (_event, details) => database.saveVendorBookingPreview(details || {}));
+  ipcMain.handle("vendor:booking-generated-service-cancel", (_event, details) =>
+    database.cancelVendorGeneratedService(details || {}));
+  ipcMain.handle("vendor:booking-delivery-report", () =>
+    database.getVendorBookingDeliveryReport());
+  ipcMain.handle("vendor:booking-channel-completion-save", (_event, details) =>
+    database.saveVendorChannelCompletion(details || {}));
   ipcMain.handle("vendor:booking-email-send", (_event, details) =>
     googleWorkspace.sendVendorBookingEmail(details || {}));
   ipcMain.handle("vendor:booking-external-sent", (_event, details) =>

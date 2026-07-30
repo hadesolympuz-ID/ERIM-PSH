@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld("erim", {
     gmailPreflight: (details) => ipcRenderer.invoke("vendor:gmail-preflight", details),
     getBookingPreview: (details) => ipcRenderer.invoke("vendor:booking-preview", details),
     generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
+    cancelGeneratedService: (details) =>
+      ipcRenderer.invoke("vendor:booking-generated-service-cancel", details),
+    getDeliveryReport: () => ipcRenderer.invoke("vendor:booking-delivery-report"),
+    saveChannelCompletion: (details) =>
+      ipcRenderer.invoke("vendor:booking-channel-completion-save", details),
     sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),
     recordExternalSent: (details) => ipcRenderer.invoke("vendor:booking-external-sent", details),
     refreshPortalEvidence: (bookingId) =>

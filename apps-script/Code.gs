@@ -908,6 +908,7 @@ function saveVendorIntake_(request, actor) {
       pax_adult: Number(intake.adultPax || 0),
       pax_child: Number(intake.childPax || 0),
       pax_infant: Number(intake.infantPax || 0),
+      pax_total_manual: Number(intake.totalPax || 0),
       arrival_date: intake.arrivalDate || "",
       arrival_flight: intake.arrivalFlight || "",
       arrival_sector: intake.arrivalSector || "",
@@ -1071,10 +1072,10 @@ function validateVendorIntakePayload_(intake) {
   if (String(intake.departureDate) < String(intake.arrivalDate)) {
     throw apiError_("VALIDATION_ERROR", "Departure date cannot be earlier than arrival date.");
   }
-  ["adultPax", "childPax", "infantPax"].forEach((field) => {
+  ["totalPax", "adultPax", "childPax", "infantPax"].forEach((field) => {
     const value = Number(intake[field] ?? 0);
     if (!Number.isInteger(value) || value < 0) {
-      throw apiError_("VALIDATION_ERROR", "Adult, Child, and Infant must be whole numbers starting from 0.");
+      throw apiError_("VALIDATION_ERROR", "Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.");
     }
   });
   ensureSupplierMasterSchema_();
@@ -1084,8 +1085,8 @@ function validateVendorIntakePayload_(intake) {
   const dayNumbers = {};
   (intake.days || []).forEach((day) => {
     const number = Number(day.dayNumber);
-    if (!Number.isInteger(number) || number < 1 || dayNumbers[number]) {
-      throw apiError_("VALIDATION_ERROR", "Day Wise numbers must be unique positive integers.");
+    if (!Number.isInteger(number) || number < 0 || dayNumbers[number]) {
+      throw apiError_("VALIDATION_ERROR", "Day Wise numbers must be unique integers starting from Day 0.");
     }
     dayNumbers[number] = true;
     const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -1140,7 +1141,7 @@ function validateVendorSource_(request) {
 
 function ensureVendorSchema_() {
   ensureHeaders_("TOURS", [
-    "client_tag", "pax_adult", "pax_child", "pax_infant",
+    "client_tag", "pax_adult", "pax_child", "pax_infant", "pax_total_manual",
     "arrival_flight", "arrival_sector", "arrival_time",
     "departure_flight", "departure_sector", "departure_time",
   ]);

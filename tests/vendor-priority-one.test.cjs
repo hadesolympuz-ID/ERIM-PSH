@@ -152,6 +152,81 @@ test("backend rejects an empty TO before inserting a Send Attempt", () =>
     assert.equal(database.getVendorBooking(booking.bookingId).lastSendAttemptId, "");
   }));
 
+test("Day 0 and manual Total Pax persist independently", () =>
+  withDatabase((database) => {
+    const saved = database.saveVendorIntakeDraft({
+      customerCode: "ND/DAY-ZERO",
+      customerName: "Midnight Arrival",
+      totalPax: 4,
+      adultPax: 2,
+      childPax: 1,
+      infantPax: 1,
+      arrivalDate: "2026-08-10",
+      departureDate: "2026-08-11",
+      arrivalTime: "00:10",
+      days: [{
+        dayNumber: 0, serviceDate: "2026-08-09", dayTitle: "Pre-arrival transport",
+        startTime: "23:59", splits: [],
+      }, {
+        dayNumber: 1, serviceDate: "2026-08-10", dayTitle: "Arrival", splits: [],
+      }],
+    });
+    assert.equal(saved.totalPax, 4);
+    assert.deepEqual(saved.days.map((day) => day.dayNumber), [0, 1]);
+    assert.equal(saved.days[0].startTime, "23:59");
+  }));
+
+test("Cancel Generate returns only one service and rebuilds the remaining snapshot", () =>
+  withDatabase((database) => {
+    seedVendorCatalog(database, { channel: "EMAIL" });
+    database.saveVendorIntakeDraft({
+      customerCode: "ND/CANCEL-ONE",
+      customerName: "Controlled Revision",
+      arrivalDate: "2026-08-10",
+      departureDate: "2026-08-11",
+      days: [{
+        dayNumber: 1, serviceDate: "2026-08-10",
+        splits: [{
+          serviceType: "VENDOR", supplierId: "SUP-EKA", productId: "PROD-EKA-OUT",
+          vendorName: "Eka Jaya Fastboat", activityText: "Outbound", rateStatus: "PENDING_RATE",
+        }],
+      }, {
+        dayNumber: 2, serviceDate: "2026-08-11",
+        splits: [{
+          serviceType: "VENDOR", supplierId: "SUP-EKA", productId: "PROD-EKA-RETURN",
+          vendorName: "Eka Jaya Fastboat", activityText: "Return", rateStatus: "PENDING_RATE",
+        }],
+      }],
+    });
+    const packageItem = database.listVendorBookingQueue()[0];
+    const booking = database.saveVendorBookingPreview({
+      packageKey: packageItem.packageKey, channel: "EMAIL",
+    });
+    const [canceled, remaining] = booking.services;
+    const beforeHash = booking.currentSnapshotHash;
+    const result = database.cancelVendorGeneratedService({
+      bookingId: booking.bookingId,
+      serviceId: canceled.serviceId,
+      reason: "Correct passenger detail",
+    });
+    assert.equal(result.remainingServiceCount, 1);
+    assert.deepEqual(result.booking.services.map((service) => service.serviceId), [remaining.serviceId]);
+    assert.notEqual(result.booking.currentSnapshotHash, beforeHash);
+    const queue = database.listVendorBookingQueue()[0];
+    assert.equal(queue.services.find((service) => service.serviceId === canceled.serviceId).workflowStatus, "NOT_GENERATED");
+    assert.equal(queue.services.find((service) => service.serviceId === remaining.serviceId).workflowStatus, "GENERATED");
+    const event = database.db.prepare(`
+      SELECT event_type, reason FROM local_vendor_generation_events WHERE booking_id = ?
+    `).get(booking.bookingId);
+    assert.deepEqual(event, {
+      event_type: "GENERATE_ITEM_CANCELED", reason: "Correct passenger detail",
+    });
+    const report = database.getVendorBookingDeliveryReport();
+    assert.equal(report.length, 1);
+    assert.equal(report[0].serviceId, remaining.serviceId);
+    assert.equal(report[0].communicationStatus, "GENERATED");
+  }));
+
 test("Gmail preflight verifies the exact staff profile and reports central readiness separately", async () =>
   withDatabase(async (database) => {
     database.saveSettings({ apiBaseUrl: "https://api.example.test/exec" });

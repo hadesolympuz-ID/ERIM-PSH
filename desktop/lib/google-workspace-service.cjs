@@ -1052,7 +1052,7 @@ class GoogleWorkspaceService {
       departureSector: extracted.departureSector || "",
       departureTime: extracted.departureTime || "",
       hotels: extracted.hotels || [],
-      days: buildVendorDays(extracted.arrivalDate, extracted.departureDate),
+      days: buildVendorDays(extracted.arrivalDate, extracted.departureDate, extracted.programDays),
       extractionStatus: "NEEDS_REVIEW",
       localStatus: "LOCAL_DRAFT",
       conversionWarnings: itinerary.conversionWarnings,
@@ -1720,17 +1720,20 @@ class GoogleWorkspaceService {
   }
 }
 
-function buildVendorDays(arrivalDate, departureDate) {
+function buildVendorDays(arrivalDate, departureDate, programDays = []) {
   const start = new Date(`${arrivalDate || ""}T00:00:00Z`);
   const end = new Date(`${departureDate || ""}T00:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
   const days = [];
+  const programByDay = new Map((programDays || []).map((day) => [Number(day.dayNumber), day]));
   for (let cursor = start.getTime(), dayNumber = 1; cursor <= end.getTime(); cursor += 86_400_000, dayNumber += 1) {
+    const program = programByDay.get(dayNumber) || {};
     days.push({
       tourDayId: "",
       dayNumber,
       serviceDate: new Date(cursor).toISOString().slice(0, 10),
-      daywiseText: "",
+      dayTitle: program.dayTitle || "",
+      daywiseText: program.dayTitle || "",
       status: "DRAFT",
       splits: [],
     });

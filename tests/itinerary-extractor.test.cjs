@@ -46,3 +46,19 @@ test("normalizes month variants and dotted time", () => {
   assert.equal(normalizeDate("01 Jul 2026"), "2026-07-01");
   assert.equal(normalizeTime("13.35"), "13:35");
 });
+
+test("extracts Day Wise Program headers from the posted itinerary", () => {
+  const html = `
+    <table>
+      <tr><td>Day 1 :</td><td>Date :</td><td>02 OCT 2026</td></tr>
+      <tr><td>Programs :</td><td>ARRIVAL AND ULUWATU SUNSET</td></tr>
+      <tr><td>Day 2 :</td><td>Date :</td><td>03 OCT 2026</td></tr>
+      <tr><td>Programs :</td><td>FULL DAY UBUD TOUR</td></tr>
+    </table>`;
+  const result = extractItineraryFromHtml(html);
+  assert.deepEqual(result.programDays, [{
+    dayNumber: 1, serviceDate: "2026-10-02", dayTitle: "ARRIVAL AND ULUWATU SUNSET",
+  }, {
+    dayNumber: 2, serviceDate: "2026-10-03", dayTitle: "FULL DAY UBUD TOUR",
+  }]);
+});

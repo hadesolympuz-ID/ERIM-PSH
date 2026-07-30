@@ -165,6 +165,20 @@
 
           <section id="vendor-inbox-view" class="view">
             <div class="vendor-inbox-layout">
+              <section class="panel vendor-delivery-report">
+                <div class="panel-heading"><div><p class="eyebrow">Service-level evidence</p><h2>Booking Delivery Report</h2></div><span id="vendor-delivery-report-count" class="inbox-count">0</span></div>
+                <div class="vendor-delivery-report-filters">
+                  <input id="vendor-delivery-report-search" type="search" placeholder="Code, name, supplier, product, dinner..." />
+                  <select id="vendor-delivery-report-status"><option value="NEEDS_ACTION">Needs Action</option><option value="">All statuses</option><option>GENERATED</option><option>SENT_PENDING_SYNC</option><option>SENT</option><option>SEND_OUTCOME_UNKNOWN</option></select>
+                  <select id="vendor-delivery-report-channel"><option value="">All channels</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option><option>OTHERS</option></select>
+                  <input id="vendor-delivery-report-supplier" placeholder="Supplier name" />
+                  <label>Service date<input id="vendor-delivery-report-service-date" type="date" /></label>
+                  <label>Sent date<input id="vendor-delivery-report-sent-date" type="date" /></label>
+                  <select id="vendor-delivery-report-evidence"><option value="">All evidence</option><option value="PENDING">Evidence pending</option><option value="RECORDED">Evidence recorded</option><option value="REPLY">Reply review</option></select>
+                  <select id="vendor-delivery-report-sort"><option value="LATEST">Latest activity</option><option value="SUPPLIER">Supplier</option><option value="DATE">Service date</option><option value="CODE">Customer Code</option></select>
+                </div>
+                <div id="vendor-delivery-report-grid" class="vendor-delivery-report-grid"></div>
+              </section>
               <section class="panel vendor-booking-register">
                 <div class="panel-heading"><div><p class="eyebrow">Booking history</p><h2>Booking Register</h2></div><span id="vendor-booking-register-count" class="inbox-count">0</span></div>
                 <div class="vendor-register-filters">
@@ -218,6 +232,7 @@
                     <label>Customer Code<input name="customerCode" readonly /></label>
                     <label>Customer Name<input name="customerName" required /></label>
                     <label>Client Tag / Occasion<input name="clientTag" placeholder="HONEYMOONERS" /></label>
+                    <label>Total Pax<input name="totalPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
                     <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
@@ -225,16 +240,16 @@
                   <div class="vendor-travel-fields">
                     <div class="vendor-travel-group">
                       <strong>Arrival</strong>
-                      <label>Date<input name="arrivalDate" type="date" required /></label>
+                      <label>Date<input name="arrivalDate" type="date" required /><small data-date-display-for="arrivalDate"></small></label>
                       <label>Flight<input name="arrivalFlight" /></label>
-                      <label>Time<input name="arrivalTime" type="time" /></label>
+                      <label>Time<input name="arrivalTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
                       <label>Sector<input name="arrivalSector" /></label>
                     </div>
                     <div class="vendor-travel-group">
                       <strong>Departure</strong>
-                      <label>Date<input name="departureDate" type="date" required /></label>
+                      <label>Date<input name="departureDate" type="date" required /><small data-date-display-for="departureDate"></small></label>
                       <label>Flight<input name="departureFlight" /></label>
-                      <label>Time<input name="departureTime" type="time" /></label>
+                      <label>Time<input name="departureTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
                       <label>Sector<input name="departureSector" /></label>
                     </div>
                   </div>
@@ -248,7 +263,12 @@
                 </section>
                 <section class="vendor-daywise-section">
                   <div class="section-heading">
-                    <div><p class="eyebrow">Arrival to departure</p><h3>Day Wise & micro split</h3></div>
+                    <div><p class="eyebrow">Arrival to departure</p><h3>Day Wise & micro split</h3>
+                      <div class="vendor-day-zero-actions">
+                        <button id="add-vendor-day-zero" class="button ghost small" type="button">+ Add Day 0</button>
+                        <button id="delete-vendor-day-zero" class="button ghost small" type="button" hidden>Delete Day 0</button>
+                      </div>
+                    </div>
                     <button id="rebuild-vendor-days" class="button ghost small" type="button">Rebuild dates</button>
                   </div>
                   <div class="vendor-work-columns">
@@ -309,11 +329,19 @@
               <header class="vendor-communication-header">
                 <div><p class="eyebrow">Controlled communication workspace</p><h2>Generate & Send Supplier Booking</h2></div>
                 <div class="vendor-communication-header-actions">
+                  <button id="vendor-communication-back-list" class="button ghost" type="button" hidden>Back to list</button>
                   <div id="vendor-communication-progress" class="vendor-communication-progress">0 Packages</div>
                   <button id="close-vendor-communication" class="button ghost" type="button">Close</button>
                 </div>
               </header>
-              <div class="vendor-communication-layout">
+              <section id="vendor-communication-batch-view" class="vendor-communication-batch-view">
+                <div class="vendor-batch-toolbar">
+                  <div><p class="eyebrow">Generated batch</p><h2>Review items before delivery</h2></div>
+                  <small>Generate only creates local snapshots. No item is Sent until its channel action succeeds.</small>
+                </div>
+                <div id="vendor-communication-batch-grid" class="vendor-communication-batch-grid"></div>
+              </section>
+              <div id="vendor-communication-work-view" class="vendor-communication-layout" hidden>
                 <aside class="vendor-communication-queue">
                   <div class="panel-heading compact"><div><p class="eyebrow">Outgoing queue</p><h2>Supplier packages</h2></div></div>
                   <div id="vendor-communication-queue-list" class="vendor-communication-queue-list"></div>
@@ -357,6 +385,46 @@
                 </aside>
               </div>
             </div>
+          </dialog>
+
+          <dialog id="vendor-channel-dialog" class="compact-dialog vendor-channel-dialog">
+            <form id="vendor-channel-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Local Supplier Master update</p><h2>Complete delivery channel</h2></div>
+                <button id="close-vendor-channel" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-channel-content">
+                <input name="supplierId" type="hidden" />
+                <input name="channel" type="hidden" />
+                <div id="vendor-channel-notice" class="maintenance-warning"></div>
+                <label>Destination
+                  <input name="destination" autocomplete="off" required />
+                  <small id="vendor-channel-destination-help"></small>
+                </label>
+                <small>No password is stored here. Portal credentials stay in the approved local/browser password manager.</small>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-channel" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Save locally & queue online</button>
+              </div>
+            </form>
+          </dialog>
+
+          <dialog id="vendor-generated-cancel-dialog" class="compact-dialog vendor-generated-cancel-dialog">
+            <form id="vendor-generated-cancel-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Per-service revision control</p><h2>Cancel Generate for this item</h2></div>
+                <button id="close-vendor-generated-cancel" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-channel-content">
+                <div class="maintenance-warning">Only this service returns to NOT GENERATED. Sibling services remain generated and their package snapshot is rebuilt.</div>
+                <label>Revision reason<textarea name="reason" rows="4" required placeholder="What must be corrected before Generate again?"></textarea></label>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-generated-cancel" class="button ghost" type="button">Keep generated</button>
+                <button class="button danger" type="submit">Cancel Generate item</button>
+              </div>
+            </form>
           </dialog>
 
           <dialog id="vendor-resend-dialog" class="compact-dialog vendor-resend-dialog">

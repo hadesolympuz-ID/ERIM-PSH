@@ -265,6 +265,7 @@ class LocalDatabase {
         adult_pax INTEGER NOT NULL DEFAULT 0,
         child_pax INTEGER NOT NULL DEFAULT 0,
         infant_pax INTEGER NOT NULL DEFAULT 0,
+        total_pax_manual INTEGER NOT NULL DEFAULT 0,
         tour_id TEXT,
         source_publication_id TEXT,
         source_record_version INTEGER,
@@ -376,6 +377,7 @@ class LocalDatabase {
         gmail_message_id TEXT NOT NULL DEFAULT '',
         official_sync_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED',
         last_send_attempt_id TEXT NOT NULL DEFAULT '',
+        current_snapshot_hash TEXT NOT NULL DEFAULT '',
         reply_review_status TEXT NOT NULL DEFAULT 'NONE',
         latest_inbound_message_id TEXT NOT NULL DEFAULT '',
         latest_inbound_at TEXT NOT NULL DEFAULT '',
@@ -402,6 +404,22 @@ class LocalDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_local_vendor_booking_service_booking
         ON local_vendor_booking_services(booking_id, service_id);
+
+      CREATE TABLE IF NOT EXISTS local_vendor_generation_events (
+        event_id TEXT PRIMARY KEY,
+        booking_id TEXT NOT NULL,
+        service_id TEXT NOT NULL DEFAULT '',
+        event_type TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        before_hash TEXT NOT NULL DEFAULT '',
+        after_hash TEXT NOT NULL DEFAULT '',
+        actor_employee_id TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(booking_id) REFERENCES local_vendor_bookings(booking_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_generation_event_booking
+        ON local_vendor_generation_events(booking_id, created_at);
 
       CREATE TABLE IF NOT EXISTS local_vendor_send_attempts (
         send_attempt_id TEXT PRIMARY KEY,
@@ -614,6 +632,7 @@ class LocalDatabase {
     this.ensureColumn("vendor_intake_drafts", "adult_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "child_pax", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "infant_pax", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("vendor_intake_drafts", "total_pax_manual", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("vendor_intake_drafts", "client_tag", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "day_title", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("vendor_day_drafts", "start_time", "TEXT NOT NULL DEFAULT ''");
@@ -621,6 +640,7 @@ class LocalDatabase {
     this.ensureColumn("vendor_service_splits", "infant_rate_idr", "REAL");
     this.ensureColumn("local_vendor_bookings", "official_sync_status", "TEXT NOT NULL DEFAULT 'NOT_REQUIRED'");
     this.ensureColumn("local_vendor_bookings", "last_send_attempt_id", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_bookings", "current_snapshot_hash", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("local_vendor_bookings", "reply_review_status", "TEXT NOT NULL DEFAULT 'NONE'");
     this.ensureColumn("local_vendor_bookings", "latest_inbound_message_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("local_vendor_bookings", "latest_inbound_at", "TEXT NOT NULL DEFAULT ''");
@@ -2181,6 +2201,7 @@ class LocalDatabase {
       adultPax: Number(draft.adult_pax || 0),
       childPax: Number(draft.child_pax || 0),
       infantPax: Number(draft.infant_pax || 0),
+      totalPax: Number(draft.total_pax_manual || 0),
       tourId: draft.tour_id || "",
       sourcePublicationId: draft.source_publication_id || "",
       sourceRecordVersion: Number(draft.source_record_version || 0),
@@ -2267,9 +2288,10 @@ class LocalDatabase {
       adultPax: Number(input.adultPax ?? 0),
       childPax: Number(input.childPax ?? 0),
       infantPax: Number(input.infantPax ?? 0),
+      totalPax: Number(input.totalPax ?? 0),
     };
     if (!Object.values(pax).every((value) => Number.isInteger(value) && value >= 0)) {
-      throw new Error("Adult, Child, and Infant must be whole numbers starting from 0.");
+      throw new Error("Total Pax, Adult, Child, and Infant must be whole numbers starting from 0.");
     }
     const draftId = existing?.vendorDraftId || input.vendorDraftId || this.id("VDR");
     const now = this.now();
@@ -2279,8 +2301,8 @@ class LocalDatabase {
     const dayNumbers = new Set();
     days.forEach((day) => {
       const dayNumber = Number(day.dayNumber);
-      if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumbers.has(dayNumber)) {
-        throw new Error("Each Day Wise row must have a unique positive day number.");
+      if (!Number.isInteger(dayNumber) || dayNumber < 0 || dayNumbers.has(dayNumber)) {
+        throw new Error("Each Day Wise row must have a unique positive day number, with optional Day 0.");
       }
       dayNumbers.add(dayNumber);
       const cachedSupplierTypes = this.getSupplierMasterCatalog().supplierTypes
@@ -2349,7 +2371,7 @@ class LocalDatabase {
       this.db.prepare(`
         INSERT INTO vendor_intake_drafts (
           vendor_draft_id, customer_code, customer_name, client_tag,
-          adult_pax, child_pax, infant_pax, tour_id,
+          adult_pax, child_pax, infant_pax, total_pax_manual, tour_id,
           source_publication_id, source_record_version, source_revision_id,
           itinerary_drive_file_id, itinerary_drive_file_name, itinerary_drive_file_url,
           document_html, arrival_date, arrival_flight, arrival_sector, arrival_time,
@@ -2357,7 +2379,7 @@ class LocalDatabase {
           extraction_status, local_status, owner_employee_id, created_at, updated_at
         ) VALUES (
           @vendorDraftId, @customerCode, @customerName, @clientTag,
-          @adultPax, @childPax, @infantPax, @tourId,
+          @adultPax, @childPax, @infantPax, @totalPax, @tourId,
           @sourcePublicationId, @sourceRecordVersion, @sourceRevisionId,
           @driveFileId, @driveFileName, @driveFileUrl,
           @documentHtml, @arrivalDate, @arrivalFlight, @arrivalSector, @arrivalTime,
@@ -2367,7 +2389,8 @@ class LocalDatabase {
         ON CONFLICT(customer_code) DO UPDATE SET
           customer_name=excluded.customer_name, client_tag=excluded.client_tag,
           adult_pax=excluded.adult_pax,
-          child_pax=excluded.child_pax, infant_pax=excluded.infant_pax, tour_id=excluded.tour_id,
+          child_pax=excluded.child_pax, infant_pax=excluded.infant_pax,
+          total_pax_manual=excluded.total_pax_manual, tour_id=excluded.tour_id,
           source_publication_id=excluded.source_publication_id,
           source_record_version=excluded.source_record_version,
           source_revision_id=excluded.source_revision_id,
@@ -2389,6 +2412,7 @@ class LocalDatabase {
         adultPax: pax.adultPax,
         childPax: pax.childPax,
         infantPax: pax.infantPax,
+        totalPax: pax.totalPax,
         tourId: input.tourId || "",
         sourcePublicationId: input.sourcePublicationId || "",
         sourceRecordVersion: Number(input.sourceRecordVersion || 0),
@@ -2530,6 +2554,7 @@ class LocalDatabase {
               adultPax: Number(intake.adultPax || 0),
               childPax: Number(intake.childPax || 0),
               infantPax: Number(intake.infantPax || 0),
+              totalPax: Number(intake.totalPax || 0),
               updatedAt: intake.updatedAt || "",
               supplierId,
               supplierName,
@@ -2570,13 +2595,15 @@ class LocalDatabase {
       ORDER BY updated_at DESC LIMIT 1
     `);
     const serviceStateStatement = this.db.prepare(`
-      SELECT s.service_id, b.booking_id, b.action_type, b.communication_status,
+      SELECT s.service_id, s.service_status, b.booking_id, b.action_type, b.communication_status,
         b.supplier_result, b.official_sync_status, b.gmail_thread_id,
         b.external_reference, b.generated_at, b.sent_at, b.updated_at
       FROM local_vendor_booking_services s
       JOIN local_vendor_bookings b ON b.booking_id = s.booking_id
       WHERE b.package_key = ?
-      ORDER BY b.updated_at DESC, s.created_at DESC
+      ORDER BY b.updated_at DESC,
+        CASE WHEN s.service_status = 'GENERATE_ITEM_CANCELED' THEN 1 ELSE 0 END DESC,
+        s.created_at DESC
     `);
     return [...packages.values()].map((item) => {
       const latest = latestStatement.get(item.packageKey);
@@ -2592,7 +2619,9 @@ class LocalDatabase {
           ...service,
           bookingId: bookingState?.booking_id || "",
           actionType: bookingState?.action_type || "NEW",
-          workflowStatus: bookingState?.communication_status || "NOT_GENERATED",
+          workflowStatus: bookingState?.service_status === "GENERATE_ITEM_CANCELED"
+            ? "NOT_GENERATED"
+            : (bookingState?.communication_status || "NOT_GENERATED"),
           supplierResult: bookingState?.supplier_result || "PENDING",
           officialSyncStatus: bookingState?.official_sync_status || "NOT_REQUIRED",
           gmailThreadId: bookingState?.gmail_thread_id || "",
@@ -2662,6 +2691,25 @@ class LocalDatabase {
       .filter((row) => active(row) && row.supplierId === item.supplierId && String(row.address || "").trim());
     const contacts = (catalog.contacts || []).filter((row) => active(row) && row.supplierId === item.supplierId);
     const sop = sops[0] || {};
+    const channelOptions = ["EMAIL", "WHATSAPP", "PORTAL", "OTHERS"].map((option) => {
+      const optionRecipients = recipients.filter((row) =>
+        String(row.channel || "").toUpperCase() === option
+      );
+      const contactDestinations = contacts.flatMap((row) => option === "EMAIL"
+        ? [row.email]
+        : option === "WHATSAPP" ? [row.whatsapp] : []
+      ).filter(Boolean);
+      const destinations = option === "PORTAL"
+        ? [sop.portalUrl].filter(Boolean)
+        : [...optionRecipients.map((row) => row.address), ...contactDestinations]
+          .map((value) => String(value || "").trim()).filter(Boolean);
+      return {
+        channel: option,
+        configured: option === "OTHERS" || destinations.length > 0,
+        destinations: [...new Set(destinations)],
+        isDefault: String((sop.bookingChannels || [])[0] || "").toUpperCase() === option,
+      };
+    });
     const availableChannels = [...new Set([
       ...(sop.bookingChannels || []),
       ...recipients.map((row) => row.channel),
@@ -2701,6 +2749,7 @@ class LocalDatabase {
       adult_pax: item.adultPax,
       child_pax: item.childPax,
       infant_pax: item.infantPax,
+      total_pax: item.totalPax,
     };
     const applyTemplate = (template) => String(template || "").replace(
       /\{\{\s*([a-z_]+)\s*\}\}/gi,
@@ -2733,7 +2782,7 @@ class LocalDatabase {
       `Please ${actionType === "CANCEL" ? "cancel all services" : actionType === "AMEND" ? "revise the booking" : "arrange the following booking"} for:`,
       `Customer: ${item.customerName}`,
       `Customer Code: ${item.customerCode}`,
-      `Pax: ${item.adultPax} adult, ${item.childPax} child, ${item.infantPax} infant`,
+      `Pax: ${item.totalPax || item.adultPax + item.childPax + item.infantPax} total (${item.adultPax} adult, ${item.childPax} child, ${item.infantPax} infant)`,
       "",
       serviceLines,
       "",
@@ -2798,6 +2847,7 @@ class LocalDatabase {
       rateStatus: selectedPendingRateCount ? "PENDING_RATE" : "RATE_READY",
       actionType,
       availableChannels,
+      channelOptions,
       channel,
       recipients: selectedRecipients,
       subject,
@@ -2830,9 +2880,71 @@ class LocalDatabase {
     };
   }
 
+  saveVendorChannelCompletion(input = {}) {
+    const supplierId = String(input.supplierId || "").trim();
+    const channel = String(input.channel || "").trim().toUpperCase();
+    const destination = String(input.destination || "").trim();
+    if (!supplierId) throw new Error("Link the service to Supplier Master first.");
+    if (!["EMAIL", "WHATSAPP", "PORTAL", "OTHERS"].includes(channel)) {
+      throw new Error("Unsupported delivery channel.");
+    }
+    if (channel !== "OTHERS" && !destination) throw new Error(`${channel} destination is required.`);
+    if (channel === "EMAIL" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(destination)) {
+      throw new Error("Enter a valid supplier email address.");
+    }
+    if (channel === "PORTAL" && !/^https:\/\//i.test(destination)) {
+      throw new Error("Portal address must use HTTPS.");
+    }
+    const catalog = this.getSupplierMasterCatalog();
+    const supplier = (catalog.suppliers || []).find((row) => row.supplierId === supplierId);
+    if (!supplier) throw new Error("Supplier Master record was not found in the local cache.");
+    const contacts = (catalog.contacts || []).filter((row) => row.supplierId === supplierId);
+    const recipients = (catalog.recipients || []).filter((row) => row.supplierId === supplierId);
+    const currentSop = (catalog.sops || []).find((row) => row.supplierId === supplierId) || {};
+    const nextRecipients = recipients.filter((row) =>
+      !(String(row.channel || "").toUpperCase() === channel
+        && String(row.recipientType || "").toUpperCase() === (channel === "EMAIL" ? "TO" : channel))
+    );
+    if (channel !== "PORTAL" && channel !== "OTHERS") {
+      nextRecipients.push({
+        supplierId,
+        channel,
+        recipientType: channel === "EMAIL" ? "TO" : "WHATSAPP",
+        address: destination,
+        purpose: "BOOKING",
+        status: "ACTIVE",
+        active: true,
+      });
+    }
+    const bookingChannels = [
+      channel,
+      ...(currentSop.bookingChannels || []).map((value) => String(value || "").toUpperCase()),
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
+    return this.saveSupplierMasterDraft("SUPPLIER", {
+      ...supplier,
+      contacts,
+      recipients: nextRecipients,
+      sop: {
+        ...currentSop,
+        supplierId,
+        bookingChannels,
+        portalUrl: channel === "PORTAL" ? destination : (currentSop.portalUrl || ""),
+        status: "ACTIVE",
+        active: true,
+      },
+    });
+  }
+
   saveVendorBookingPreview(input = {}) {
     const preview = this.getVendorBookingPreview(input);
     const now = this.now();
+    const generatedSnapshotHash = crypto.createHash("sha256").update(JSON.stringify({
+      serviceIds: preview.selectedServiceIds,
+      channel: preview.channel,
+      recipients: input.recipients || preview.recipients,
+      subject: String(input.subject || preview.subject),
+      body: String(input.body || preview.body),
+    })).digest("hex");
     const requestedId = String(
       input.bookingId
       || (preview.latestBooking?.actionType === preview.actionType
@@ -2853,13 +2965,13 @@ class LocalDatabase {
           booking_id, package_key, customer_code, tour_id, supplier_id, supplier_name,
           supplier_type, action_type, channel, booking_status, communication_status,
           supplier_result, rate_status, subject, body, recipients_json,
-          source_revision_id, cancellation_reason, external_evidence_json,
+          source_revision_id, cancellation_reason, external_evidence_json, current_snapshot_hash,
           generated_at, created_at, updated_at
         ) VALUES (
           @bookingId, @packageKey, @customerCode, @tourId, @supplierId, @supplierName,
           @supplierType, @actionType, @channel, 'READY', 'GENERATED',
           'PENDING', @rateStatus, @subject, @body, @recipientsJson,
-          @sourceRevisionId, @cancellationReason, @externalEvidenceJson,
+          @sourceRevisionId, @cancellationReason, @externalEvidenceJson, @generatedSnapshotHash,
           @now, @now, @now
         )
         ON CONFLICT(booking_id) DO UPDATE SET
@@ -2869,6 +2981,7 @@ class LocalDatabase {
           recipients_json=excluded.recipients_json,
           cancellation_reason=excluded.cancellation_reason,
           external_evidence_json=excluded.external_evidence_json,
+          current_snapshot_hash=excluded.current_snapshot_hash,
           generated_at=excluded.generated_at, updated_at=excluded.updated_at
       `).run({
         ...preview,
@@ -2880,6 +2993,7 @@ class LocalDatabase {
           portalTransaction: preview.portalTransaction || null,
           generatedServiceIds: preview.selectedServiceIds,
         }),
+        generatedSnapshotHash,
         now,
       });
       this.db.prepare("DELETE FROM local_vendor_booking_services WHERE booking_id = ?").run(bookingId);
@@ -2910,9 +3024,13 @@ class LocalDatabase {
     return {
       ...this.vendorBookingRow(row),
       services: this.db.prepare(`
-        SELECT service_snapshot_json FROM local_vendor_booking_services
-        WHERE booking_id = ? ORDER BY created_at
-      `).all(bookingId).map((item) => JSON.parse(item.service_snapshot_json)),
+        SELECT service_snapshot_json, service_status FROM local_vendor_booking_services
+        WHERE booking_id = ? AND service_status <> 'GENERATE_ITEM_CANCELED'
+        ORDER BY created_at
+      `).all(bookingId).map((item) => ({
+        ...JSON.parse(item.service_snapshot_json),
+        generationStatus: item.service_status,
+      })),
       deliveryAttempts: this.listVendorSendAttempts(bookingId),
       replyEvidence: this.db.prepare(`
         SELECT * FROM local_vendor_reply_evidence
@@ -2927,10 +3045,82 @@ class LocalDatabase {
     };
   }
 
+  cancelVendorGeneratedService(input = {}) {
+    const bookingId = String(input.bookingId || "").trim();
+    const serviceId = String(input.serviceId || "").trim();
+    const reason = String(input.reason || "").trim();
+    if (!bookingId || !serviceId) throw new Error("Booking and service are required.");
+    if (!reason) throw new Error("A revision reason is required.");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking) throw new Error("Generated booking was not found.");
+    if (booking.communicationStatus !== "GENERATED") {
+      throw new Error("Only a generated, not-sent booking item can be returned for revision.");
+    }
+    if (booking.deliveryAttempts.length) {
+      throw new Error("This booking already has a delivery attempt and cannot be changed.");
+    }
+    const target = booking.services.find((service) => service.serviceId === serviceId);
+    if (!target) throw new Error("The selected generated service was not found.");
+    const remainingServiceIds = booking.services
+      .filter((service) => service.serviceId !== serviceId)
+      .map((service) => service.serviceId);
+    const row = this.db.prepare(`
+      SELECT current_snapshot_hash FROM local_vendor_bookings WHERE booking_id = ?
+    `).get(bookingId);
+    const beforeHash = String(row?.current_snapshot_hash || "");
+    const now = this.now();
+    if (remainingServiceIds.length) {
+      this.saveVendorBookingPreview({
+        bookingId,
+        packageKey: booking.packageKey,
+        serviceIds: remainingServiceIds,
+        actionType: booking.actionType,
+        channel: booking.channel,
+        cancellationReason: booking.cancellationReason,
+      });
+    } else {
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET booking_status='DRAFT', communication_status='GENERATE_CANCELED',
+          subject='', body='', recipients_json='[]', current_snapshot_hash='',
+          generated_at=NULL, updated_at=?
+        WHERE booking_id=?
+      `).run(now, bookingId);
+      this.db.prepare("DELETE FROM local_vendor_booking_services WHERE booking_id = ?").run(bookingId);
+    }
+    this.db.prepare(`
+      INSERT INTO local_vendor_booking_services (
+        booking_service_id, booking_id, service_id, service_snapshot_json, service_status, created_at
+      ) VALUES (?, ?, ?, ?, 'GENERATE_ITEM_CANCELED', ?)
+    `).run(this.id("VBS"), bookingId, serviceId, JSON.stringify(target), now);
+    const afterRow = this.db.prepare(`
+      SELECT current_snapshot_hash FROM local_vendor_bookings WHERE booking_id = ?
+    `).get(bookingId);
+    this.db.prepare(`
+      INSERT INTO local_vendor_generation_events (
+        event_id, booking_id, service_id, event_type, reason,
+        before_hash, after_hash, actor_employee_id, created_at
+      ) VALUES (?, ?, ?, 'GENERATE_ITEM_CANCELED', ?, ?, ?, ?, ?)
+    `).run(
+      this.id("VGE"), bookingId, serviceId, reason, beforeHash,
+      String(afterRow?.current_snapshot_hash || ""),
+      this.settings().employee_id || "DEV-USER", now,
+    );
+    this.log("GENERATE_ITEM_CANCELED", "VENDOR_BOOKING", bookingId, {
+      serviceId, reason, remainingServiceCount: remainingServiceIds.length,
+    });
+    return {
+      booking: this.getVendorBooking(bookingId),
+      canceledServiceId: serviceId,
+      remainingServiceCount: remainingServiceIds.length,
+    };
+  }
+
   listVendorBookings() {
     const serviceStatement = this.db.prepare(`
-      SELECT service_snapshot_json FROM local_vendor_booking_services
-      WHERE booking_id = ? ORDER BY created_at
+      SELECT service_snapshot_json, service_status FROM local_vendor_booking_services
+      WHERE booking_id = ? AND service_status <> 'GENERATE_ITEM_CANCELED'
+      ORDER BY created_at
     `);
     return this.db.prepare(`
       SELECT b.*, i.customer_name, i.adult_pax, i.child_pax, i.infant_pax,
@@ -2946,9 +3136,10 @@ class LocalDatabase {
       infantPax: Number(row.infant_pax || 0),
       arrivalDate: row.arrival_date || "",
       departureDate: row.departure_date || "",
-      services: serviceStatement.all(row.booking_id).map((item) =>
-        JSON.parse(item.service_snapshot_json || "{}")
-      ),
+      services: serviceStatement.all(row.booking_id).map((item) => ({
+        ...JSON.parse(item.service_snapshot_json || "{}"),
+        generationStatus: item.service_status,
+      })),
     }));
   }
 
@@ -3443,8 +3634,47 @@ class LocalDatabase {
           row.communicationStatus,
         )
       ),
+      deliveryReport: this.getVendorBookingDeliveryReport(),
       workInbox,
     };
+  }
+
+  getVendorBookingDeliveryReport() {
+    return this.listVendorBookings().flatMap((booking) => {
+      const latestAttempt = booking.deliveryAttempts?.[0] || null;
+      const services = booking.services?.length ? booking.services : [{}];
+      return services.map((service) => ({
+        bookingId: booking.bookingId,
+        packageKey: booking.packageKey,
+        serviceId: service.serviceId || "",
+        customerCode: booking.customerCode,
+        customerName: booking.customerName || "",
+        serviceDate: service.serviceDate || "",
+        dayNumber: Number(service.dayNumber || 0),
+        productName: service.productName || service.activityText || "",
+        supplierName: booking.supplierName,
+        channel: booking.channel,
+        bookingStatus: booking.bookingStatus,
+        communicationStatus: booking.communicationStatus,
+        supplierResult: booking.supplierResult,
+        officialSyncStatus: booking.officialSyncStatus,
+        deliveryEvidenceStatus: booking.deliveryEvidenceStatus,
+        replyReviewStatus: booking.replyReviewStatus,
+        gmailThreadId: booking.gmailThreadId,
+        gmailMessageId: booking.gmailMessageId,
+        externalReference: booking.externalReference,
+        generatedAt: booking.generatedAt,
+        sentAt: booking.sentAt,
+        latestAttemptStatus: latestAttempt?.status || "",
+        latestAttemptId: latestAttempt?.sendAttemptId || "",
+        updatedAt: booking.updatedAt,
+      }));
+    }).sort((left, right) =>
+      String(right.sentAt || right.updatedAt).localeCompare(String(left.sentAt || left.updatedAt))
+      || left.customerCode.localeCompare(right.customerCode)
+      || left.supplierName.localeCompare(right.supplierName)
+      || Number(left.dayNumber) - Number(right.dayNumber)
+    );
   }
 
   vendorBookingRow(row) {
@@ -3484,6 +3714,7 @@ class LocalDatabase {
       deliveryEvidenceStatus,
       officialSyncStatus: row.official_sync_status || "NOT_REQUIRED",
       lastSendAttemptId: row.last_send_attempt_id || "",
+      currentSnapshotHash: row.current_snapshot_hash || "",
       replyReviewStatus: row.reply_review_status || "NONE",
       latestInboundMessageId: row.latest_inbound_message_id || "",
       latestInboundAt: row.latest_inbound_at || "",

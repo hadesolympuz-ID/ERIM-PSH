@@ -58,6 +58,35 @@ function normalizeTime(value) {
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
 }
 
+function extractProgramDays(tables) {
+  const result = new Map();
+  for (const rows of tables) {
+    let currentDay = 0;
+    let currentDate = "";
+    for (const row of rows) {
+      const cells = uniqueAdjacent(row).map((cell) => String(cell || "").trim()).filter(Boolean);
+      const joined = cells.join(" | ");
+      const dayMatch = joined.match(/\bDAY\s*(\d+)\b/i);
+      if (dayMatch) {
+        currentDay = Number(dayMatch[1]);
+        currentDate = normalizeDate(joined) || currentDate;
+      }
+      const dateInRow = normalizeDate(joined);
+      if (currentDay && dateInRow) currentDate = dateInRow;
+      const programIndex = cells.findIndex((cell) => /\bPROGRAMS?\b/i.test(cell));
+      if (!currentDay || programIndex < 0) continue;
+      const program = cells.slice(programIndex + 1).join(" ").replace(/^[:\s-]+/, "").trim();
+      if (!program) continue;
+      result.set(currentDay, {
+        dayNumber: currentDay,
+        serviceDate: currentDate,
+        dayTitle: program,
+      });
+    }
+  }
+  return [...result.values()].sort((left, right) => left.dayNumber - right.dayNumber);
+}
+
 function extractItineraryFromHtml(html) {
   const tables = tableRows(html);
   const allRows = tables.flat();
@@ -108,6 +137,7 @@ function extractItineraryFromHtml(html) {
     departureSector: fieldValue(allRows, "DEPARTURE SECTOR") || departure[2] || "",
     departureTime: normalizeTime(fieldValue(allRows, "DEPARTURE TIME") || departure[3]),
     hotels,
+    programDays: extractProgramDays(tables),
   };
 }
 
@@ -115,5 +145,6 @@ module.exports = {
   extractItineraryFromHtml,
   normalizeDate,
   normalizeTime,
+  extractProgramDays,
   tableRows,
 };
