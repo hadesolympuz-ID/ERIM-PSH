@@ -530,3 +530,239 @@ main Generate tree context.
 - A batch with 50 selected services can be completed without returning to the
   top of the tree between packages.
 - Closing/reopening the popup preserves package states and main-tree context.
+
+## 12. Generate-to-Email real-flow audit and follow-up checklist
+
+Status: `AUDITED BY LOCAL END-TO-END SIMULATION — FOLLOW-UP ITEMS RECORDED`
+
+This section is the authoritative checklist for the audit performed after the
+v1.1.11 generated-draft recovery hotfix. The audit executed the real database,
+Generate, Send Attempt, Gmail MIME, Gmail-acceptance, evidence-sync, resend, and
+sync-retry application paths. Gmail and Apps Script responses were simulated
+locally so no external email or official record was created.
+
+### 12.1 Generate source records
+
+- [x] Read Customer and itinerary identity from the local Vendor Intake:
+  Customer Code, Customer Name, Client Tag, pax, Tour ID, source revision,
+  arrival, and departure.
+- [x] Read Day and Micro Split records from the local structured itinerary.
+- [x] Include only normalized Micro Split Type `VENDOR`.
+- [x] Exclude Additional Service, Transport, TOC, Luggage Van, and every other
+  Type from Vendor Generate.
+- [x] Read active Supplier, Product, SOP, Contact, and Recipient records from
+  the Supplier Master cache.
+- [x] Match Supplier by stable Supplier ID first.
+- [x] Use Supplier Name only as a legacy fallback when a stable ID is absent.
+- [x] Build one package key from `Customer Code + Supplier identity`.
+- [x] Preserve every selected stable Service ID in the generated snapshot.
+- [x] Use Product Master name when linked; use Micro Split Activity Text only
+  as the fallback service name.
+
+### 12.2 Field-by-field processing
+
+| Field | Source | Current Generate result | Follow-up |
+| --- | --- | --- | --- |
+| Customer Code | Vendor Intake | Package key, Subject, body, ledger, official evidence | Keep |
+| Customer Name | Vendor Intake | Subject and body | Keep |
+| Client Tag / Occasion | Vendor Intake | Subject | Keep |
+| Adult / Child / Infant | Vendor Intake | Body and immutable snapshot | Keep |
+| Tour ID | Vendor Intake | Send snapshot and evidence | Keep |
+| Source Revision ID | Vendor Intake | Send snapshot and evidence | Keep |
+| Day number | Day Wise | Service line and snapshot | Keep |
+| Service date | Day Wise | Service line and snapshot | Keep |
+| Day Wise Header | Day Wise | Tree/detail and snapshot, not standard email body | Decide whether to add to standard body |
+| Start Time | Day Wise | Not used by Generate or standard email | Keep optional; decide whether Email should display it only when present |
+| Finish Time | Day Wise | Not used by Generate or standard email | Keep optional; decide whether Email should display it only when present |
+| Hotel on this Day | itinerary/hotel stay | Visible in Micro Split context, not standard email body | Decide whether to add to standard body |
+| Supplier ID | Micro Split / Supplier Master | Package identity and evidence | Keep authoritative |
+| Supplier Name | Supplier Master | Subject, greeting, queue, evidence | Keep |
+| Product ID | Micro Split | Snapshot and focused correction | Keep |
+| Product Name | Product Master | Standard email service line | Keep |
+| Activity Text | Micro Split | Product-name fallback | Keep |
+| Quantity | Micro Split | Added to service line only when not equal to one | Keep |
+| Price Basis | Micro Split / Rate | Snapshot and Product/Rate panel | Keep out of standard email unless template requests it |
+| Rate amounts | Rate / manual rate | Snapshot and Product/Rate panel | Keep out of standard supplier email |
+| Rate Status | Rate resolution | Readiness notice and evidence; Pending Rate does not block | Keep visibly separate |
+| Channel | Supplier SOP / Recipient / Contact | One active channel per package | Keep |
+| TO / CC / BCC | Supplier Recipient, Contact fallback, operator review | MIME headers and immutable Send Attempt snapshot | Keep |
+| SOP body template | Supplier SOP | Overrides the standard body when present | Keep |
+| SOP subject template | Supplier SOP | Not used; Subject remains standardized | Keep standardized |
+
+### 12.3 Standard Email generation result
+
+- [x] Standard Subject:
+
+  ```text
+  Booking {Customer Code} - {Customer Name} - {Client Tag} - {Supplier Name}
+  ```
+
+- [x] Remove empty Subject components without leaving repeated separators.
+- [x] Standard body includes greeting, Customer, Customer Code, pax, and each
+  selected Day/date/Product line.
+- [x] Quantity is included only when it is not one.
+- [x] A generated snapshot records `bookingStatus = READY`.
+- [x] A generated snapshot records `communicationStatus = GENERATED`.
+- [x] Generate leaves Gmail Message ID and Gmail Thread ID empty.
+- [x] Generate never calls Gmail and never creates Sent evidence.
+- [x] Generated work is labeled `DRAFT READY — NOT SENT`.
+- [x] Generated work can be restored with `Resume draft` or `Resume drafts`
+  after popup close or application restart.
+
+### 12.4 Email send pipeline
+
+- [x] Require explicit operator confirmation immediately before real Gmail
+  Send.
+- [x] Create an immutable Send Attempt before the Gmail request.
+- [x] Store actor, recipients, Subject, body, services, action type, rate
+  status, source revision, snapshot hash, and prepared time.
+- [x] Build a UTF-8 plain-text MIME message with TO, optional CC/BCC, encoded
+  Subject, and the frozen body.
+- [x] Send through Gmail API `users/me/messages/send`.
+- [x] Require Gmail to return both Message ID and Thread ID.
+- [x] Store returned Gmail IDs on the Send Attempt.
+- [x] Store the latest returned Gmail IDs on the booking.
+- [x] Change the booking to `SENT_PENDING_SYNC` immediately after proven Gmail
+  acceptance.
+- [x] Post the immutable evidence to Apps Script.
+- [x] Change the booking to `SENT` and attempt to `SYNCED` only after official
+  evidence sync succeeds.
+- [x] Reject a normal second Send after the booking is Sent.
+- [x] Treat a content or service change as Amendment, not Resend.
+
+### 12.5 Gmail ID evidence marks
+
+Add an automatic Email-evidence mark. It must be derived from the ledger and
+must never be a manually editable checkbox.
+
+- [ ] `EMAIL ID — NOT CREATED`: generated draft; Message ID and Thread ID are
+  empty.
+- [ ] `EMAIL ID — RECORDED / SYNC PENDING`: Gmail accepted and both IDs exist,
+  but official evidence has not synced.
+- [ ] `EMAIL ID — RECORDED / SYNCED`: both IDs exist and official evidence is
+  synced.
+- [ ] `EMAIL OUTCOME UNKNOWN`: Gmail outcome cannot be proven; block another
+  Send until reconciliation.
+- [ ] `NON-EMAIL CHANNEL`: use external evidence instead of Gmail ID.
+- [ ] Display Gmail Message ID, Thread ID, sender, recipients, accepted time,
+  and evidence-sync state in Delivery History.
+- [ ] Provide Copy Message ID and Open Gmail Thread actions where useful.
+
+### 12.6 Failure and anti-double-send branches
+
+- [x] If Gmail returns Message ID and Thread ID but Apps Script fails, retain
+  both IDs and use `SENT_PENDING_SYNC`.
+- [x] Retry only Apps Script evidence sync; never call Gmail again.
+- [x] Local simulation verified that the Gmail call count does not increase
+  during evidence-sync retry.
+- [x] An unresolved active Send Attempt blocks a new Send Attempt.
+- [x] An unknown Gmail outcome becomes `SEND_OUTCOME_UNKNOWN` and blocks
+  automatic retry.
+- [ ] Move the final TO-recipient invariant before Send Attempt insertion so a
+  malformed direct IPC/API request cannot leave a `PREPARED` attempt with no TO
+  recipient. The UI already validates TO, but the backend invariant should be
+  authoritative.
+- [ ] Add an automated test for the no-TO backend invariant and confirm that no
+  Send Attempt row is inserted on rejection.
+
+### 12.7 Intentional resend / alternate recipient
+
+- [x] Resend requires a proven earlier Gmail Send Attempt.
+- [x] Resend requires reviewed replacement recipients.
+- [x] Resend requires at least one TO recipient.
+- [x] Resend requires an operational reason.
+- [x] Resend requires final confirmation.
+- [x] Resend creates a new Send Attempt and idempotency key.
+- [x] Resend links `resend_of_attempt_id` to the immutable original attempt.
+- [x] Resend stores a new Gmail Message ID and Thread ID.
+- [x] Resend preserves the original attempt, IDs, recipients, snapshot, and
+  official evidence.
+- [x] Local simulation verified two separate synced attempts and two separate
+  Gmail ID pairs.
+
+### 12.8 Resend positioning gap
+
+The owner correctly identified that Resend is currently difficult to find
+after leaving the communication popup.
+
+Current condition:
+
+- [x] `Kirim ulang / Ganti penerima` appears in the right communication panel
+  only when Channel is Email and the latest booking status is `SENT`.
+- [x] The button is visible immediately after a successful Send while the
+  communication popup remains open.
+- [x] `Resume drafts` intentionally restores only `GENERATED` work.
+- [x] A Sent tree row currently exposes Gmail but has no route back to the Sent
+  communication package.
+- [x] Therefore Resend becomes effectively unreachable later from the normal
+  Generate working area.
+
+Required positioning:
+
+- [ ] Add `Delivery history / Resend` beside `Open Gmail` on a Sent Email
+  service in the Daywise tree.
+- [ ] Add the same action to the Booking Register / Vendor Inbox Sent row.
+- [ ] Open the full-screen communication workspace directly on the selected
+  Sent booking in read-only Delivery History mode.
+- [ ] Keep Subject/body/service snapshot read-only for Resend.
+- [ ] Position `Kirim ulang / Ganti penerima` under the original delivery
+  evidence in the right panel.
+- [ ] Do not show Resend for `GENERATED`.
+- [ ] Show `Retry evidence sync` instead of Resend for
+  `SENT_PENDING_SYNC`.
+- [ ] Show `Reconcile Gmail outcome` and block Resend for
+  `SEND_OUTCOME_UNKNOWN`.
+- [ ] Show `Amend booking` separately when content or services must change.
+
+### 12.9 Multi-attempt Gmail thread and reply detection gap
+
+- [x] The Send Attempt ledger preserves every original and resend Gmail Message
+  ID and Thread ID.
+- [x] The booking row stores only the latest Gmail Message ID and Thread ID.
+- [x] Current automatic reply detection scans only the booking's latest stored
+  Gmail thread.
+- [ ] Change reply detection to scan every proven Gmail thread in all synced or
+  Gmail-accepted Send Attempts for the booking.
+- [ ] Deduplicate thread IDs before Gmail reads.
+- [ ] Match each outbound Message ID inside its own Thread ID.
+- [ ] Ignore the connected employee's outbound messages.
+- [ ] Detect a supplier inbound message after the applicable outbound message.
+- [ ] Record which Send Attempt and Thread produced the inbound reply.
+- [ ] Preserve replies from the original thread even after an alternate-
+  recipient resend creates a newer thread.
+- [ ] Display every delivery/thread chronologically in Delivery History.
+
+### 12.10 Required implementation order
+
+1. Add the backend TO-recipient invariant before Send Attempt creation.
+2. Add the derived Email ID evidence-state helper.
+3. Expose Delivery History for any Sent Email booking.
+4. Add Daywise tree and Booking Register entry points.
+5. Position Resend inside Delivery History under the selected proven attempt.
+6. Add all-attempt Gmail thread scanning and attempt-aware reply evidence.
+7. Add explicit UI marks for Gmail ID and official sync state.
+8. Decide whether Day Wise Header, optional Start/Finish, and Hotel should
+   appear in the standard booking body.
+9. Run automated, packaged, and connected-account UAT before live deployment.
+
+### 12.11 UAT gates
+
+- [ ] Generate produces `GENERATED`, blank Gmail IDs, and a visible Not Sent
+  mark.
+- [ ] Closing and reopening restores the generated draft without creating a
+  second booking or Send Attempt.
+- [ ] One Send creates exactly one Send Attempt and one Gmail Message ID.
+- [ ] Gmail Message ID and Thread ID appear in Delivery History immediately
+  after Gmail acceptance.
+- [ ] Apps Script failure leaves `SENT_PENDING_SYNC` with Gmail IDs visible.
+- [ ] Retry Sync changes only evidence status and does not call Gmail.
+- [ ] A second normal Send is rejected.
+- [ ] A Sent row can reopen Delivery History after application restart.
+- [ ] Resend is reachable from both Daywise tree and Booking Register.
+- [ ] One intentional resend creates exactly one linked new attempt.
+- [ ] Original and resend Gmail IDs remain independently visible.
+- [ ] A reply on the original thread is detected after a resend.
+- [ ] A reply on the resend thread is detected.
+- [ ] No-TO backend rejection creates no Send Attempt.
+- [ ] `SEND_OUTCOME_UNKNOWN` blocks Send and Resend until reconciliation.
+- [ ] Amendment remains separate from Resend.
