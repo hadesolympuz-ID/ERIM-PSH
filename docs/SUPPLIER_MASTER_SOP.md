@@ -219,3 +219,19 @@ The detailed procedure and workbook schema are recorded in
 
 Hotel is not a Supplier Import Type. It will use a separate Hotel submenu and
 seasonal-rate model while reusing the common Excel mechanism.
+
+## 12. Local rate approval and sync
+
+A newly saved local Contract/Rate may be used immediately on the same PC when
+its operational fields, validity, source, and evidence are complete. It must
+remain visibly marked as a local rate and must not be represented as centrally
+approved or synced.
+
+The detailed operational status model, approval notice, maker-checker review,
+conflict behavior, booking snapshot rules, implementation checklist, and UAT
+gates are defined in:
+
+`docs/SUPPLIER_LOCAL_RATE_APPROVAL_SYNC_SOP.md`
+
+Publishing an unapproved local rate is prohibited by this SOP. Application
+enforcement for the approval-specific states remains an implementation item.
