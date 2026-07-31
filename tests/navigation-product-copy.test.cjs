@@ -47,6 +47,29 @@ test("Transport navigation exposes every prepared operational submenu", () => {
   assert.match(app, /TOC review data/);
 });
 
+test("Approval Center opens in the main window and remains visibly marked temporary", () => {
+  assert.match(html, /data-manager-action="approval-center">Approval Center · Temporary/);
+  assert.match(html, /id="approval-center-view"/);
+  assert.match(html, /Temporary single-window workflow/);
+  assert.match(html, /final approval workflow and layout are still pending owner review/);
+  assert.match(app, /"approval-center": \["Manager \/ Admin", "Approval Center \(Temporary\)"\]/);
+  assert.match(app, /showView\("approval-center", "MANAGER_ADMIN"\);\s*loadApprovalCenter\(\)/);
+  assert.match(app, /const activeTitle = titles\[view\] \|\|/);
+  assert.doesNotMatch(main, /approval-center[\s\S]{0,120}new BrowserWindow/);
+  assert.match(styles, /\.approval-center-temporary-note/);
+});
+
+test("Electron windows deny renderer-created navigation and keep OAuth secrets out of bootstrap", () => {
+  assert.match(main, /function secureWindowNavigation/);
+  assert.match(main, /setWindowOpenHandler/);
+  assert.match(main, /action:\s*"deny"/);
+  assert.match(main, /will-navigate/);
+  assert.match(main, /openControlledExternal/);
+  assert.match(main, /parsed = new URL\(value\)/);
+  assert.match(app, /googleClientSecretConfigured/);
+  assert.match(html, /stored value is never returned to this window/);
+});
+
 test("Product cards expose bulk duplicate workflow through the local pending bridge", () => {
   assert.match(app, /data-duplicate-supplier-product/);
   assert.match(app, /data-select-supplier-product/);

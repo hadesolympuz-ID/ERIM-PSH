@@ -368,6 +368,18 @@ class GoogleWorkspaceService {
     return { status: "SYNCED", approval: remote };
   }
 
+  async takeOverSupplierRateApproval(input = {}) {
+    const approvalId = String(input.approvalId || "");
+    const remote = await this.callAppsScript("supplier.rate.approval.list", {});
+    const approval = (remote || []).find((row) => row.approvalId === approvalId);
+    if (!approval) throw new Error("Approved central request was not found.");
+    const draft = this.database.stageApprovedSupplierRateTakeover(approval);
+    const publication = await this.publishSupplierMasterDrafts({
+      draftIds: [draft.draftId],
+    });
+    return { approval, publication };
+  }
+
   discardSupplierMasterDraft(draftId) {
     return this.database.discardSupplierMasterDraft(draftId);
   }
@@ -1176,22 +1188,22 @@ class GoogleWorkspaceService {
       gmailMessageId: payload.id,
       gmailThreadId: payload.threadId,
     });
-    let synced;
-    try {
-      synced = await this.syncVendorSendAttempt(sendAttempt.sendAttemptId);
-    } catch (error) {
-      this.database.recordVendorSendSyncResult(sendAttempt.sendAttemptId, {
-        ok: false,
-        error,
-      });
-      synced = this.database.getVendorSendAttempt(sendAttempt.sendAttemptId);
-    }
+    void this.syncVendorSendAttempt(sendAttempt.sendAttemptId).catch((error) => {
+      try {
+        this.database.recordVendorSendSyncResult(sendAttempt.sendAttemptId, {
+          ok: false,
+          error,
+        });
+      } catch (_recordError) {
+        // The local Gmail evidence already remains durable as SENT_PENDING_SYNC.
+      }
+    });
     return {
       booking: this.database.getVendorBooking(booking.bookingId),
-      sendAttempt: synced,
+      sendAttempt: accepted,
       gmailMessageId: accepted.gmailMessageId,
       gmailThreadId: accepted.gmailThreadId,
-      pendingSync: synced.status !== "SYNCED",
+      pendingSync: true,
     };
   }
 
@@ -1199,7 +1211,7 @@ class GoogleWorkspaceService {
     const attempt = this.database.getVendorSendAttempt(sendAttemptId);
     if (!attempt) throw new Error("Send attempt was not found.");
     if (attempt.status === "SYNCED") return attempt;
-    if (!["GMAIL_ACCEPTED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
+    if (!["GMAIL_ACCEPTED", "EXTERNAL_RECORDED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
       throw new Error(`Send attempt ${attempt.sendAttemptId} cannot sync from ${attempt.status}.`);
     }
     const snapshot = attempt.snapshot || {};
@@ -1214,6 +1226,8 @@ class GoogleWorkspaceService {
         supplierId: snapshot.supplierId,
         supplierName: snapshot.supplierName,
         actionType: snapshot.actionType,
+        channel: attempt.channel || snapshot.channel || "EMAIL",
+        evidenceSource: attempt.evidenceSource || snapshot.evidenceSource || "SYSTEM_GMAIL_SEND",
         resendOfAttemptId: attempt.resendOfAttemptId || "",
         resendReason: attempt.resendReason || "",
         recipients: snapshot.recipients || [],
@@ -1223,7 +1237,9 @@ class GoogleWorkspaceService {
         rateStatus: snapshot.rateStatus,
         gmailMessageId: attempt.gmailMessageId,
         gmailThreadId: attempt.gmailThreadId,
-        sentAt: attempt.gmailAcceptedAt,
+        externalReference: attempt.externalReference || snapshot.externalReference || "",
+        externalEvidence: attempt.externalEvidence || {},
+        sentAt: attempt.gmailAcceptedAt || attempt.actionRecordedAt,
       },
     });
     return this.database.recordVendorSendSyncResult(sendAttemptId, {
@@ -1239,6 +1255,119 @@ class GoogleWorkspaceService {
       this.database.recordVendorSendSyncResult(sendAttemptId, { ok: false, error });
       throw error;
     }
+  }
+
+  async recordVendorExternalAction(input = {}) {
+    const recorded = this.database.recordVendorBookingExternalAction(input);
+    void this.syncVendorSendAttempt(recorded.sendAttempt.sendAttemptId).catch((error) => {
+      try {
+        this.database.recordVendorSendSyncResult(recorded.sendAttempt.sendAttemptId, {
+          ok: false,
+          error,
+        });
+      } catch (_recordError) {
+        // Immutable local external evidence remains available for later retry.
+      }
+    });
+    return recorded;
+  }
+
+  async findVendorExternalEmailCandidates(bookingId) {
+    const booking = this.database.getVendorBooking(String(bookingId || ""));
+    if (!booking || booking.channel !== "EMAIL") {
+      throw new Error("Choose an Email booking before searching Sent Mail.");
+    }
+    const preflight = await this.vendorGmailPreflight({ checkCentral: false });
+    if (!preflight.ready) {
+      throw new Error(`Gmail search requires the connected sender: ${preflight.state}.`);
+    }
+    const generatedAt = new Date(booking.generatedAt || booking.createdAt || 0);
+    const earliest = Number.isNaN(generatedAt.getTime())
+      ? null
+      : new Date(generatedAt.getTime() - 86_400_000);
+    const after = earliest ? earliest.toISOString().slice(0, 10).replaceAll("-", "/") : "";
+    const query = `in:sent ${after ? `after:${after} ` : ""}subject:"${String(
+      booking.subject || "",
+    ).replaceAll('"', "")}"`;
+    const listed = await this.authorizedFetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=${encodeURIComponent(query)}`,
+    );
+    const expectedTo = (booking.recipients || [])
+      .filter((row) => String(row.recipientType || "").toUpperCase() === "TO")
+      .map((row) => String(row.address || "").toLowerCase());
+    const candidates = [];
+    for (const row of listed.messages || []) {
+      const message = await this.authorizedFetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(row.id)}`
+        + "?format=metadata&metadataHeaders=Subject&metadataHeaders=To&metadataHeaders=From&metadataHeaders=Date",
+      );
+      const headers = Object.fromEntries((message.payload?.headers || [])
+        .map((header) => [String(header.name || "").toLowerCase(), String(header.value || "")]));
+      const subjectMatches = headers.subject === String(booking.subject || "");
+      const toText = String(headers.to || "").toLowerCase();
+      const recipientsMatch = !expectedTo.length
+        || expectedTo.every((address) => toText.includes(address));
+      const internalDate = Number(message.internalDate || 0);
+      const timeMatches = !earliest || !internalDate || internalDate >= earliest.getTime();
+      if (subjectMatches && recipientsMatch && timeMatches) {
+        candidates.push({
+          gmailMessageId: message.id,
+          gmailThreadId: message.threadId,
+          subject: headers.subject,
+          to: headers.to || "",
+          from: headers.from || preflight.senderEmail || "",
+          sentAt: Number(message.internalDate || 0)
+            ? new Date(Number(message.internalDate)).toISOString()
+            : headers.date || "",
+        });
+      }
+    }
+    return {
+      bookingId: booking.bookingId,
+      subject: booking.subject,
+      senderEmail: preflight.senderEmail || "",
+      candidates,
+    };
+  }
+
+  async linkVendorExternalEmail(input = {}) {
+    const booking = this.database.getVendorBooking(String(input.bookingId || ""));
+    if (!booking || booking.channel !== "EMAIL") {
+      throw new Error("Choose an Email booking before linking Gmail evidence.");
+    }
+    const found = await this.findVendorExternalEmailCandidates(booking.bookingId);
+    const candidate = found.candidates.find((row) =>
+      row.gmailMessageId === String(input.gmailMessageId || "")
+      && row.gmailThreadId === String(input.gmailThreadId || "")
+    );
+    if (!candidate) {
+      throw new Error("The selected Gmail message no longer matches the exact Subject and recipients.");
+    }
+    const linked = this.database.recordVendorExternalEmailEvidence({
+      bookingId: booking.bookingId,
+      gmailMessageId: candidate.gmailMessageId,
+      gmailThreadId: candidate.gmailThreadId,
+      sentAt: candidate.sentAt,
+      actorEmail: found.senderEmail,
+      repeatReason: input.repeatReason || "",
+    });
+    if (!linked.alreadyLinked) {
+      void this.syncVendorSendAttempt(linked.sendAttempt.sendAttemptId).catch((error) => {
+        try {
+          this.database.recordVendorSendSyncResult(linked.sendAttempt.sendAttemptId, {
+            ok: false,
+            error,
+          });
+        } catch (_recordError) {
+          // Gmail IDs remain durable and can be synced later.
+        }
+      });
+    }
+    return {
+      ...linked,
+      candidate,
+      pendingSync: linked.sendAttempt.status !== "SYNCED",
+    };
   }
 
   async reconcileVendorSendAttempt(sendAttemptId) {
@@ -1516,58 +1645,122 @@ class GoogleWorkspaceService {
       throw new Error("The selected revised DOCX is no longer available.");
     }
     const content = fs.readFileSync(filePath);
-    await this.authorizedFetch(
-      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(driveFileId)}?uploadType=media&keepRevisionForever=true`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-        body: content,
-      },
-    );
-    const revisionPayload = await this.authorizedFetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}/revisions?fields=revisions(id,modifiedTime,keepForever)`,
-    );
-    const revisionNumber = Math.max(Number(input.currentRevision || 0) + 1, revisionPayload.revisions?.length || 1);
-    const revisionId = `REV-${crypto.randomUUID()}`;
-    const postedAt = new Date().toISOString();
-    await this.appendRevisionRecord({
-      revision_id: revisionId,
-      tour_id: input.tourId || "",
-      revision_number: revisionNumber,
-      revision_type: "ITINERARY_REVISION",
-      revision_notes: note,
-      affected_departments: "ALL",
-      drive_file_id: driveFileId,
-      drive_version_reference: String(revisionPayload.revisions?.at(-1)?.id || ""),
-      base_record_version: Number(input.currentRevision || 0),
-      revision_status: "PUBLISHED",
-      submitted_at: postedAt,
-      submitted_by: this.database.getPublicSettings().employeeId || "",
-      published_at: postedAt,
-      published_by: this.database.getPublicSettings().employeeId || "",
+    let job = this.database.getOrCreateItineraryRevisionJob({
+      ...input,
+      customerCode: code,
+      driveFileId,
+      filePath,
+      revisionNote: note,
+      fileHash: crypto.createHash("sha256").update(content).digest("hex"),
     });
-    let activityWarning = "";
-    try {
-      await this.recordItineraryEvent({
-        eventId: revisionId,
-        eventType: "REVISION",
-        customerCode: code,
-        tourId: input.tourId || "",
+    if (job.stage === "COMPLETE") {
+      return {
+        ok: true,
+        resumed: true,
+        revisionNumber: job.revisionNumber,
+        revisionId: job.revisionId,
+        revisionJobId: job.jobId,
         driveFileId,
-        driveFileName: path.basename(filePath),
-        revisionNumber,
-        note,
-      });
+        driveFileUrl: input.driveFileUrl || `https://drive.google.com/open?id=${driveFileId}`,
+      };
+    }
+    try {
+      if (job.stage === "PREPARED") {
+        await this.authorizedFetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(driveFileId)}?uploadType=media&keepRevisionForever=true`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            body: content,
+          },
+        );
+        const revisionPayload = await this.authorizedFetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}/revisions?fields=revisions(id,modifiedTime,keepForever)`,
+        );
+        job = this.database.updateItineraryRevisionJob(job.jobId, {
+          stage: "DRIVE_UPDATED",
+          revisionNumber: Math.max(
+            Number(input.currentRevision || 0) + 1,
+            revisionPayload.revisions?.length || 1,
+          ),
+          driveVersionReference: String(revisionPayload.revisions?.at(-1)?.id || ""),
+        });
+      }
+      if (job.stage === "DRIVE_UPDATED") {
+        const postedAt = new Date().toISOString();
+        await this.appendRevisionRecord({
+          revision_id: job.revisionId,
+          tour_id: input.tourId || "",
+          revision_number: job.revisionNumber,
+          revision_type: "ITINERARY_REVISION",
+          revision_notes: note,
+          affected_departments: "ALL",
+          drive_file_id: driveFileId,
+          drive_version_reference: job.driveVersionReference,
+          base_record_version: Number(input.currentRevision || 0),
+          revision_status: "PUBLISHED",
+          submitted_at: postedAt,
+          submitted_by: this.database.getPublicSettings().employeeId || "",
+          published_at: postedAt,
+          published_by: this.database.getPublicSettings().employeeId || "",
+        });
+        job = this.database.updateItineraryRevisionJob(job.jobId, {
+          stage: "REVISION_RECORDED",
+        });
+      }
+      if (job.stage === "REVISION_RECORDED") {
+        await this.recordItineraryEvent({
+          eventId: job.revisionId,
+          eventType: "REVISION",
+          customerCode: code,
+          tourId: input.tourId || "",
+          driveFileId,
+          driveFileName: path.basename(filePath),
+          revisionNumber: job.revisionNumber,
+          note,
+        });
+        job = this.database.updateItineraryRevisionJob(job.jobId, {
+          stage: "EVENT_RECORDED",
+        });
+      }
+      if (job.stage === "EVENT_RECORDED") {
+        const followup = this.database.startReservationFollowup({
+          customerCode: code,
+          tourId: input.tourId || "",
+          sourceType: "ITINERARY_REVISION",
+          sourceReferenceId: driveFileId,
+        });
+        job = this.database.updateItineraryRevisionJob(job.jobId, {
+          stage: "FOLLOWUP_STARTED",
+          followupId: followup.followup_id,
+        });
+      }
+      job = this.database.updateItineraryRevisionJob(job.jobId, { stage: "COMPLETE" });
     } catch (error) {
-      activityWarning = `Revision posted, but notification/log delivery needs attention: ${error.message}`;
+      job = this.database.updateItineraryRevisionJob(job.jobId, {
+        stage: job.stage,
+        errorCode: error.code || "REVISION_STAGE_FAILED",
+        errorMessage: error.message,
+      });
+      return {
+        ok: false,
+        recoverable: true,
+        revisionNumber: job.revisionNumber,
+        revisionId: job.revisionId,
+        revisionJobId: job.jobId,
+        stage: job.stage,
+        driveUpdated: job.stage !== "PREPARED",
+        activityWarning: `Revision paused at ${job.stage}. Retry continues from this stage without uploading Drive twice: ${error.message}`,
+      };
     }
     return {
       ok: true,
-      revisionNumber,
-      revisionId,
+      revisionNumber: job.revisionNumber,
+      revisionId: job.revisionId,
+      revisionJobId: job.jobId,
       driveFileId,
       driveFileUrl: input.driveFileUrl || `https://drive.google.com/open?id=${driveFileId}`,
-      activityWarning,
+      activityWarning: "",
     };
   }
 

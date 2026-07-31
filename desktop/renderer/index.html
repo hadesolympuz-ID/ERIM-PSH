@@ -64,6 +64,7 @@
             <button class="nav-collapse-control" data-menu-toggle="manager" type="button" aria-controls="manager-submenu" aria-expanded="true">Hide</button>
           </div>
           <div id="manager-submenu" class="nav-submenu" data-menu-content="manager" aria-label="Manager and Admin actions">
+            <button class="nav-subitem" data-manager-action="approval-center">Approval Center · Temporary</button>
             <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
             <button class="nav-subitem" data-manager-action="supplier-excel">Import / Export Data</button>
           </div>
@@ -272,7 +273,10 @@
                         <button id="delete-vendor-day-zero" class="button ghost small" type="button" hidden>Delete Day 0</button>
                       </div>
                     </div>
-                    <button id="rebuild-vendor-days" class="button ghost small" type="button">Rebuild dates</button>
+                    <div class="vendor-daywise-toolbar">
+                      <button id="reset-vendor-daywise" class="button danger small" type="button">Reset Daywise</button>
+                      <button id="rebuild-vendor-days" class="button ghost small" type="button">Rebuild dates</button>
+                    </div>
                   </div>
                   <div class="vendor-work-columns">
                     <div id="vendor-day-list" class="vendor-day-list"></div>
@@ -308,6 +312,8 @@
                   <button id="vendor-tree-clear" class="button ghost small" type="button">Clear</button>
                   <span id="vendor-tree-selected-count">0 selected</span>
                   <button id="vendor-tree-resume" class="button ghost small" type="button" disabled>Resume drafts</button>
+                  <button id="vendor-tree-recover-batch" class="button ghost small" type="button" hidden>Retry interrupted batch</button>
+                  <button id="vendor-tree-skip-batch" class="button ghost small" type="button" hidden>Skip failed packages</button>
                   <button id="vendor-tree-prepare" class="button primary small" type="button" disabled>Generate Booking</button>
                 </div>
                 <div id="vendor-booking-queue-list" class="vendor-booking-queue-list"></div>
@@ -339,7 +345,10 @@
               <section id="vendor-communication-batch-view" class="vendor-communication-batch-view">
                 <div class="vendor-batch-toolbar">
                   <div><p class="eyebrow">Generated batch</p><h2>Review items before delivery</h2></div>
-                  <small>Generate only creates local snapshots. No item is Sent until its channel action succeeds.</small>
+                  <div class="vendor-batch-toolbar-actions">
+                    <small>Generate only creates local snapshots. No item is Sent until its channel action succeeds.</small>
+                    <button id="vendor-communication-process" class="button primary" type="button">Process</button>
+                  </div>
                 </div>
                 <div id="vendor-communication-batch-grid" class="vendor-communication-batch-grid"></div>
               </section>
@@ -437,6 +446,32 @@
             </form>
           </dialog>
 
+          <dialog id="vendor-external-email-dialog" class="compact-dialog">
+            <form id="vendor-external-email-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Gmail evidence recovery</p><h2>Link email sent outside system</h2></div>
+                <button id="close-vendor-external-email" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-resend-content">
+                <div class="maintenance-warning">
+                  <strong>Exact generated Subject</strong>
+                  <span id="vendor-external-email-subject"></span>
+                </div>
+                <label>Sent Mail candidate
+                  <select id="vendor-external-email-candidate"></select>
+                  <small>Subject discovers candidates only. The selected Gmail Message ID and Thread ID become the evidence.</small>
+                </label>
+                <label>Reason / note
+                  <textarea id="vendor-external-email-reason" rows="3" placeholder="Example: staff sent directly from Gmail after a system problem"></textarea>
+                </label>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-external-email" class="button ghost" type="button">Cancel</button>
+                <button id="confirm-vendor-external-email" class="button primary" type="submit">Link selected Gmail evidence</button>
+              </div>
+            </form>
+          </dialog>
+
           <section id="vendor-revise-itinerary-view" class="view vendor-placeholder-view">
             <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Revise memakai workspace itinerary dan Micro Split yang sama agar detail lama tidak perlu diketik ulang.</p></div></div>
             <div class="panel vendor-revise-launch"><div><strong>Load current itinerary, edit only the affected day/service, then save.</strong><p class="muted-text">Setelah revisi tersimpan, buka Generate dan pilih Amendment untuk supplier yang terdampak.</p></div><button id="open-vendor-revise-workspace" class="button primary" type="button">Open revise workspace</button></div>
@@ -472,6 +507,41 @@
                 <small id="transport-operation-note" class="muted-text">Detailed rules will be activated after the Transport workflow discussion.</small>
               </div>
               <div id="transport-operation-cards" class="transport-operation-grid"></div>
+            </div>
+          </section>
+
+          <section id="approval-center-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Approval Center</h2>
+                <p>Cross-PC inbox for local Contract/Rate sync requests. Approval never changes a generated or sent booking snapshot.</p>
+              </div>
+              <button id="refresh-approval-center" class="button ghost" type="button">Refresh approvals</button>
+            </div>
+            <div class="approval-center-temporary-note" role="status">
+              <strong>Temporary single-window workflow</strong>
+              <span>This Approval Center stays inside the main ERIM window. Its final approval workflow and layout are still pending owner review.</span>
+            </div>
+            <div class="panel approval-center-panel">
+              <div class="approval-center-toolbar">
+                <input id="approval-center-search" type="search" placeholder="Supplier, contract, maker, or reason" />
+                <select id="approval-center-status">
+                  <option value="">All statuses</option>
+                  <option value="APPROVAL_REQUESTED">Approval requested</option>
+                  <option value="APPROVED_TO_SYNC">Approved to sync</option>
+                  <option value="CHANGES_REQUESTED">Changes requested</option>
+                  <option value="REJECTED">Rejected</option>
+                </select>
+                <span id="approval-center-summary" class="status">Not loaded</span>
+              </div>
+              <div class="approval-center-table">
+                <div class="approval-center-row approval-center-head">
+                  <span>Supplier / Contract</span><span>Maker</span><span>Requested</span>
+                  <span>Reason / Evidence</span><span>Status</span><span>Action</span>
+                </div>
+                <div id="approval-center-list"></div>
+              </div>
             </div>
           </section>
 
@@ -837,7 +907,7 @@
                 <label class="wide">Apps Script API URL<input name="apiBaseUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" /></label>
                 <div id="google-settings" class="wide form-grid" hidden>
                   <label class="wide">Google Desktop OAuth Client ID<input name="googleClientId" placeholder="...apps.googleusercontent.com" /></label>
-                  <label class="wide">Google Desktop OAuth Client Secret (legacy; not required)<input name="googleClientSecret" type="password" autocomplete="off" /></label>
+                  <label class="wide">Google Desktop OAuth Client Secret (legacy; not required)<input name="googleClientSecret" type="password" autocomplete="new-password" /><small>The stored value is never returned to this window. Leave blank to keep the existing local value.</small></label>
                   <label class="wide">Google Spreadsheet ID<input name="spreadsheetId" placeholder="1abc..." /></label>
                   <label class="wide">Google Drive DEV Folder ID<input name="driveFolderId" placeholder="Optional folder ID" /></label>
                 </div>

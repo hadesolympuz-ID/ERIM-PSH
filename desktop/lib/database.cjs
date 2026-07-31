@@ -132,10 +132,27 @@ function calendarLeadDays(fromDate, toDate) {
   return Math.floor((finish - start) / 86_400_000);
 }
 
+function formatVendorDisplayDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return String(value || "");
+  const month = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ][Number(match[2])];
+  return month ? `${match[3]}/${month}/${match[1]}` : String(value || "");
+}
+
 function stripLegacyVendorDaywiseHeaders(body) {
   return String(body || "").replace(
     /^(\s*-\s*Day\s+\d+\s*\|\s*[^|\r\n]+)\s*\|\s*Header:[^\r\n]*(\r?)$/gim,
     "$1$2",
+  );
+}
+
+function normalizeVendorGeneratedBody(body) {
+  return stripLegacyVendorDaywiseHeaders(body).replace(
+    /^(\s*-\s*Day\s+\d+\s*\|\s*)(\d{4}-\d{2}-\d{2})(\s*(?:\||$))/gim,
+    (_match, prefix, date, suffix) => `${prefix}${formatVendorDisplayDate(date)}${suffix}`,
   );
 }
 
@@ -182,6 +199,30 @@ class LocalDatabase {
         ON local_drafts(customer_code);
       CREATE INDEX IF NOT EXISTS idx_local_drafts_module_status
         ON local_drafts(module, local_status);
+
+      CREATE TABLE IF NOT EXISTS local_itinerary_revision_jobs (
+        revision_job_id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        customer_code TEXT NOT NULL,
+        tour_id TEXT NOT NULL DEFAULT '',
+        drive_file_id TEXT NOT NULL,
+        local_file_path TEXT NOT NULL,
+        file_hash TEXT NOT NULL,
+        revision_note TEXT NOT NULL,
+        stage TEXT NOT NULL DEFAULT 'PREPARED',
+        revision_id TEXT NOT NULL,
+        revision_number INTEGER NOT NULL DEFAULT 0,
+        drive_version_reference TEXT NOT NULL DEFAULT '',
+        followup_id TEXT NOT NULL DEFAULT '',
+        last_error_code TEXT NOT NULL DEFAULT '',
+        last_error_message TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_itinerary_revision_job_stage
+        ON local_itinerary_revision_jobs(stage, updated_at);
 
       CREATE TABLE IF NOT EXISTS local_source_snapshots (
         snapshot_id TEXT PRIMARY KEY,
@@ -295,6 +336,24 @@ class LocalDatabase {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS local_vendor_intake_revisions (
+        intake_revision_id TEXT PRIMARY KEY,
+        vendor_draft_id TEXT NOT NULL,
+        customer_code TEXT NOT NULL,
+        previous_source_revision_id TEXT NOT NULL DEFAULT '',
+        proposed_source_revision_id TEXT NOT NULL DEFAULT '',
+        affected_service_ids_json TEXT NOT NULL DEFAULT '[]',
+        affected_booking_ids_json TEXT NOT NULL DEFAULT '[]',
+        previous_snapshot_json TEXT NOT NULL,
+        proposed_snapshot_json TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        actor_employee_id TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_intake_revision_customer
+        ON local_vendor_intake_revisions(customer_code, created_at);
 
       CREATE TABLE IF NOT EXISTS local_vendor_process_events (
         process_event_id TEXT PRIMARY KEY,
@@ -442,9 +501,45 @@ class LocalDatabase {
       CREATE INDEX IF NOT EXISTS idx_vendor_generation_event_booking
         ON local_vendor_generation_events(booking_id, created_at);
 
+      CREATE TABLE IF NOT EXISTS local_vendor_generate_batches (
+        generate_batch_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'PREPARED',
+        total_packages INTEGER NOT NULL DEFAULT 0,
+        generated_packages INTEGER NOT NULL DEFAULT 0,
+        failed_packages INTEGER NOT NULL DEFAULT 0,
+        skipped_packages INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS local_vendor_generate_batch_items (
+        generate_batch_id TEXT NOT NULL,
+        package_key TEXT NOT NULL,
+        sequence_no INTEGER NOT NULL,
+        request_json TEXT NOT NULL,
+        booking_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_error_code TEXT NOT NULL DEFAULT '',
+        last_error_message TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(generate_batch_id, package_key),
+        FOREIGN KEY(generate_batch_id) REFERENCES local_vendor_generate_batches(generate_batch_id)
+          ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vendor_generate_batch_status
+        ON local_vendor_generate_batches(status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_vendor_generate_batch_item_status
+        ON local_vendor_generate_batch_items(generate_batch_id, status, sequence_no);
+
       CREATE TABLE IF NOT EXISTS local_vendor_send_attempts (
         send_attempt_id TEXT PRIMARY KEY,
         booking_id TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'EMAIL',
+        evidence_source TEXT NOT NULL DEFAULT 'SYSTEM_GMAIL_SEND',
         resend_of_attempt_id TEXT NOT NULL DEFAULT '',
         resend_reason TEXT NOT NULL DEFAULT '',
         snapshot_json TEXT NOT NULL,
@@ -453,12 +548,15 @@ class LocalDatabase {
         status TEXT NOT NULL,
         gmail_message_id TEXT NOT NULL DEFAULT '',
         gmail_thread_id TEXT NOT NULL DEFAULT '',
+        external_reference TEXT NOT NULL DEFAULT '',
+        external_evidence_json TEXT NOT NULL DEFAULT '{}',
         official_evidence_id TEXT NOT NULL DEFAULT '',
         sync_attempts INTEGER NOT NULL DEFAULT 0,
         last_error_code TEXT NOT NULL DEFAULT '',
         last_error_message TEXT NOT NULL DEFAULT '',
         prepared_at TEXT NOT NULL,
         gmail_accepted_at TEXT,
+        action_recorded_at TEXT,
         synced_at TEXT,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(booking_id) REFERENCES local_vendor_bookings(booking_id)
@@ -668,6 +766,11 @@ class LocalDatabase {
     this.ensureColumn("local_vendor_bookings", "external_evidence_json", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("local_vendor_send_attempts", "resend_of_attempt_id", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("local_vendor_send_attempts", "resend_reason", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_send_attempts", "channel", "TEXT NOT NULL DEFAULT 'EMAIL'");
+    this.ensureColumn("local_vendor_send_attempts", "evidence_source", "TEXT NOT NULL DEFAULT 'SYSTEM_GMAIL_SEND'");
+    this.ensureColumn("local_vendor_send_attempts", "external_reference", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("local_vendor_send_attempts", "external_evidence_json", "TEXT NOT NULL DEFAULT '{}'");
+    this.ensureColumn("local_vendor_send_attempts", "action_recorded_at", "TEXT");
   }
 
   migrateVendorServiceSplits() {
@@ -1335,6 +1438,65 @@ class LocalDatabase {
     return this.supplierRateApprovalRow(
       this.db.prepare("SELECT * FROM local_supplier_rate_approvals WHERE draft_id = ?").get(draftId),
     );
+  }
+
+  stageApprovedSupplierRateTakeover(input = {}) {
+    if (String(input.status || "") !== "APPROVED_TO_SYNC") {
+      throw new Error("Only an approved central Contract/Rate request can be taken over.");
+    }
+    const settings = this.getPublicSettings();
+    if (settings.department !== "MANAGER_ADMIN" && settings.environment !== "ADMIN_DEV") {
+      throw new Error("Only Manager/Admin may take over an approved Supplier Rate sync.");
+    }
+    const payload = input.payload || {};
+    if (!payload.contractId || !(payload.rates || []).length) {
+      throw new Error("The approved central request does not contain a complete Contract/Rate snapshot.");
+    }
+    const snapshotHash = crypto.createHash("sha256")
+      .update(JSON.stringify(payload)).digest("hex");
+    if (snapshotHash !== String(input.snapshotHash || "")) {
+      throw new Error("Approved payload hash mismatch. Refresh Approval Center before takeover.");
+    }
+    const result = this.saveSupplierMasterDraft("CONTRACT", payload);
+    const draft = result.draft;
+    if (!draft || draft.entityId !== String(input.entityId || payload.contractId)) {
+      throw new Error("The approved Contract/Rate could not be staged safely on this PC.");
+    }
+    const stagedHash = crypto.createHash("sha256")
+      .update(JSON.stringify(draft.payload)).digest("hex");
+    if (stagedHash !== snapshotHash) {
+      throw new Error("Local normalization changed the approved payload. Takeover stopped before publication.");
+    }
+    const now = this.now();
+    this.db.prepare(`
+      INSERT INTO local_supplier_rate_approvals (
+        approval_id, draft_id, entity_id, supplier_id, snapshot_hash, status,
+        maker_employee_id, maker_email, request_reason, evidence_reference,
+        requested_at, reviewer_employee_id, reviewer_email, review_reason,
+        reviewed_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'APPROVED_TO_SYNC', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(draft_id) DO UPDATE SET
+        approval_id=excluded.approval_id, snapshot_hash=excluded.snapshot_hash,
+        status='APPROVED_TO_SYNC', maker_employee_id=excluded.maker_employee_id,
+        maker_email=excluded.maker_email, request_reason=excluded.request_reason,
+        evidence_reference=excluded.evidence_reference, requested_at=excluded.requested_at,
+        reviewer_employee_id=excluded.reviewer_employee_id,
+        reviewer_email=excluded.reviewer_email, review_reason=excluded.review_reason,
+        reviewed_at=excluded.reviewed_at, updated_at=excluded.updated_at
+    `).run(
+      String(input.approvalId || ""), draft.draftId, draft.entityId,
+      String(input.supplierId || payload.supplierId || ""), snapshotHash,
+      String(input.makerEmployeeId || ""), String(input.makerEmail || ""),
+      String(input.requestReason || ""), String(input.evidenceReference || ""),
+      input.requestedAt || null, String(input.reviewerEmployeeId || ""),
+      String(input.reviewerEmail || ""), String(input.reviewReason || ""),
+      input.reviewedAt || null, input.createdAt || now, now,
+    );
+    this.log("SUPPLIER_RATE_APPROVED_SYNC_TAKEOVER_STAGED", "CONTRACT", draft.entityId, {
+      approvalId: input.approvalId, draftId: draft.draftId, snapshotHash,
+    });
+    return this.listSupplierMasterDrafts()
+      .find((row) => row.draftId === draft.draftId);
   }
 
   saveSupplierMasterDraft(entityKind, details = {}) {
@@ -2062,10 +2224,18 @@ class LocalDatabase {
       department: values.department,
       apiBaseUrl: values.api_base_url,
       googleClientId: values.google_client_id,
-      googleClientSecret: values.google_client_secret,
+      googleClientSecretConfigured: Boolean(values.google_client_secret),
       spreadsheetId: values.spreadsheet_id,
       driveFolderId: values.drive_folder_id,
       environment: values.environment,
+    };
+  }
+
+  getPrivateSettings() {
+    const values = this.settings();
+    return {
+      ...this.getPublicSettings(),
+      googleClientSecret: values.google_client_secret || "",
     };
   }
 
@@ -2094,6 +2264,9 @@ class LocalDatabase {
     const now = this.now();
     this.db.transaction(() => {
       for (const [input, key] of Object.entries(allowed)) {
+        if (input === "googleClientSecret"
+          && values[input] === ""
+          && this.settings().google_client_secret) continue;
         if (values[input] !== undefined) statement.run(key, String(values[input]), now);
       }
     })();
@@ -2145,6 +2318,99 @@ class LocalDatabase {
       sourceType: input.sourceType,
     });
     return this.getReservationFollowup(followupId);
+  }
+
+  getOrCreateItineraryRevisionJob(input = {}) {
+    const code = String(input.customerCode || "").trim().toUpperCase();
+    const driveFileId = String(input.driveFileId || "").trim();
+    const fileHash = String(input.fileHash || "").trim();
+    const note = String(input.revisionNote || "").trim();
+    if (!code || !driveFileId || !fileHash || !note) {
+      throw new Error("Revision job requires Customer Code, Drive file, file hash, and note.");
+    }
+    const idempotencyKey = crypto.createHash("sha256")
+      .update(JSON.stringify({ code, driveFileId, fileHash, note }))
+      .digest("hex");
+    const existing = this.db.prepare(`
+      SELECT revision_job_id FROM local_itinerary_revision_jobs WHERE idempotency_key = ?
+    `).get(idempotencyKey);
+    if (existing) return this.getItineraryRevisionJob(existing.revision_job_id);
+    const now = this.now();
+    const jobId = this.id("IRJ");
+    const revisionId = this.id("REV");
+    this.db.prepare(`
+      INSERT INTO local_itinerary_revision_jobs (
+        revision_job_id, idempotency_key, customer_code, tour_id,
+        drive_file_id, local_file_path, file_hash, revision_note,
+        stage, revision_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?, ?)
+    `).run(
+      jobId,
+      idempotencyKey,
+      code,
+      String(input.tourId || ""),
+      driveFileId,
+      String(input.filePath || ""),
+      fileHash,
+      note,
+      revisionId,
+      now,
+      now,
+    );
+    return this.getItineraryRevisionJob(jobId);
+  }
+
+  updateItineraryRevisionJob(jobId, input = {}) {
+    const current = this.getItineraryRevisionJob(jobId);
+    if (!current) throw new Error("Itinerary revision job was not found.");
+    const now = this.now();
+    const stage = String(input.stage || current.stage);
+    this.db.prepare(`
+      UPDATE local_itinerary_revision_jobs
+      SET stage=?, revision_number=?, drive_version_reference=?, followup_id=?,
+        last_error_code=?, last_error_message=?, updated_at=?,
+        completed_at=CASE WHEN ?='COMPLETE' THEN ? ELSE completed_at END
+      WHERE revision_job_id=?
+    `).run(
+      stage,
+      Number(input.revisionNumber ?? current.revisionNumber),
+      String(input.driveVersionReference ?? current.driveVersionReference),
+      String(input.followupId ?? current.followupId),
+      String(input.errorCode || ""),
+      String(input.errorMessage || ""),
+      now,
+      stage,
+      now,
+      jobId,
+    );
+    return this.getItineraryRevisionJob(jobId);
+  }
+
+  getItineraryRevisionJob(jobId) {
+    const row = this.db.prepare(`
+      SELECT * FROM local_itinerary_revision_jobs WHERE revision_job_id=?
+    `).get(String(jobId || ""));
+    if (!row) return null;
+    return {
+      jobId: row.revision_job_id,
+      idempotencyKey: row.idempotency_key,
+      customerCode: row.customer_code,
+      tourId: row.tour_id,
+      driveFileId: row.drive_file_id,
+      filePath: row.local_file_path,
+      fileHash: row.file_hash,
+      revisionNote: row.revision_note,
+      stage: row.stage,
+      revisionId: row.revision_id,
+      revisionNumber: Number(row.revision_number || 0),
+      driveVersionReference: row.drive_version_reference,
+      followupId: row.followup_id,
+      lastErrorCode: row.last_error_code,
+      lastErrorMessage: row.last_error_message,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at || "",
+    };
   }
 
   getReservationFollowup(id) {
@@ -2389,7 +2655,74 @@ class LocalDatabase {
       });
     });
 
+    const serviceSignature = (day, split) => ({
+      dayNumber: Number(day.dayNumber),
+      serviceDate: day.serviceDate || "",
+      serviceType: normalizeVendorSplitType(split.serviceType),
+      activityText: String(split.activityText || "").trim(),
+      supplierId: split.supplierId || split.vendorId || "",
+      productId: split.productId || split.serviceMasterId || "",
+      contractId: split.contractId || "",
+      contractRateId: split.contractRateId || "",
+      priceBasis: String(split.priceBasis || "PER_SERVICE").toUpperCase(),
+      quantity: Number(split.quantity || 1),
+    });
+    const existingServiceMap = new Map();
+    (existing?.days || []).forEach((day) => (day.splits || []).forEach((split) => {
+      existingServiceMap.set(split.serviceId, serviceSignature(day, split));
+    }));
+    const proposedServiceMap = new Map();
+    days.forEach((day) => (day.splits || []).forEach((split) => {
+      if (split.serviceId) proposedServiceMap.set(split.serviceId, serviceSignature(day, split));
+    }));
+    const referenced = existing ? this.db.prepare(`
+      SELECT DISTINCT bs.service_id, b.booking_id
+      FROM local_vendor_booking_services bs
+      JOIN local_vendor_bookings b ON b.booking_id = bs.booking_id
+      WHERE b.customer_code = ?
+        AND bs.service_status <> 'GENERATE_ITEM_CANCELED'
+        AND b.communication_status <> 'GENERATE_CANCELED'
+    `).all(code) : [];
+    const affectedRows = referenced.filter((row) => {
+      const before = existingServiceMap.get(row.service_id);
+      const after = proposedServiceMap.get(row.service_id);
+      return !before || !after || JSON.stringify(before) !== JSON.stringify(after);
+    });
+    const affectedServiceIds = [...new Set(affectedRows.map((row) => row.service_id))];
+    const affectedBookingIds = [...new Set(affectedRows.map((row) => row.booking_id))];
+    const intakeRevisionId = affectedServiceIds.length ? this.id("VIR") : "";
+
     this.db.transaction(() => {
+      if (intakeRevisionId) {
+        this.db.prepare(`
+          INSERT INTO local_vendor_intake_revisions (
+            intake_revision_id, vendor_draft_id, customer_code,
+            previous_source_revision_id, proposed_source_revision_id,
+            affected_service_ids_json, affected_booking_ids_json,
+            previous_snapshot_json, proposed_snapshot_json, reason,
+            actor_employee_id, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          intakeRevisionId,
+          draftId,
+          code,
+          existing?.sourceRevisionId || "",
+          input.sourceRevisionId || "",
+          JSON.stringify(affectedServiceIds),
+          JSON.stringify(affectedBookingIds),
+          JSON.stringify(existing),
+          JSON.stringify({ ...input, documentHtml: input.documentHtml ? "[ACTIVE DRAFT DOCUMENT]" : "" }),
+          String(input.revisionReason || "Vendor Intake changed after booking generation/delivery"),
+          owner,
+          now,
+        );
+        const markBooking = this.db.prepare(`
+          UPDATE local_vendor_bookings
+          SET booking_status = 'AMENDMENT_REQUIRED', updated_at = ?
+          WHERE booking_id = ?
+        `);
+        affectedBookingIds.forEach((bookingId) => markBooking.run(now, bookingId));
+      }
       this.db.prepare(`
         INSERT INTO vendor_intake_drafts (
           vendor_draft_id, customer_code, customer_name, client_tag,
@@ -2531,8 +2864,19 @@ class LocalDatabase {
       hotelCount: saved.hotels.length,
       dayCount: saved.days.length,
       splitCount: saved.days.reduce((sum, day) => sum + day.splits.length, 0),
+      intakeRevisionId,
+      affectedServiceIds,
+      affectedBookingIds,
     });
-    return saved;
+    return {
+      ...saved,
+      revisionImpact: {
+        intakeRevisionId,
+        affectedServiceIds,
+        affectedBookingIds,
+        amendmentRequired: Boolean(intakeRevisionId),
+      },
+    };
   }
 
   recordVendorProcessEvent(input = {}) {
@@ -2577,6 +2921,106 @@ class LocalDatabase {
       requiredAction: row.required_action,
       createdAt: row.created_at,
     }));
+  }
+
+  inspectVendorDaywiseReset(customerCode) {
+    const code = String(customerCode || "").trim().toUpperCase();
+    const intake = this.getVendorIntakeDraftByCode(code);
+    if (!intake) throw new Error("Load a saved Vendor itinerary before resetting Daywise.");
+    const bookings = this.db.prepare(`
+      SELECT booking_id, communication_status, gmail_message_id, gmail_thread_id,
+        external_reference, external_evidence_json
+      FROM local_vendor_bookings WHERE customer_code = ?
+    `).all(code);
+    const attempts = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM local_vendor_send_attempts a
+      JOIN local_vendor_bookings b ON b.booking_id = a.booking_id
+      WHERE b.customer_code = ?
+    `).get(code);
+    const protectedBooking = bookings.find((row) => {
+      const evidence = JSON.parse(row.external_evidence_json || "{}");
+      return ["SENT", "SENT_PENDING_SYNC", "SEND_OUTCOME_UNKNOWN"].includes(row.communication_status)
+        || Boolean(row.gmail_message_id || row.gmail_thread_id || row.external_reference)
+        || Boolean(evidence.externalReference || evidence.gmailMessageId || evidence.gmailThreadId);
+    });
+    const blocked = Boolean(protectedBooking || Number(attempts?.total || 0));
+    return {
+      customerCode: code,
+      dayCount: intake.days.length,
+      splitCount: intake.days.reduce((sum, day) => sum + day.splits.length, 0),
+      generatedBookingCount: bookings.filter((row) => row.communication_status === "GENERATED").length,
+      sendAttemptCount: Number(attempts?.total || 0),
+      blocked,
+      blockedReason: blocked
+        ? "Reset is blocked because at least one booking has delivery evidence or a send attempt."
+        : "",
+    };
+  }
+
+  resetVendorDaywise(customerCode) {
+    const preview = this.inspectVendorDaywiseReset(customerCode);
+    if (preview.blocked) throw new Error(preview.blockedReason);
+    const intake = this.getVendorIntakeDraftByCode(preview.customerCode);
+    const now = this.now();
+    this.db.transaction(() => {
+      const generated = this.db.prepare(`
+        SELECT booking_id FROM local_vendor_bookings
+        WHERE customer_code = ? AND communication_status = 'GENERATED'
+      `).all(preview.customerCode);
+      const cancelServices = this.db.prepare(`
+        UPDATE local_vendor_booking_services
+        SET service_status = 'GENERATE_ITEM_CANCELED'
+        WHERE booking_id = ? AND service_status <> 'GENERATE_ITEM_CANCELED'
+      `);
+      const cancelBooking = this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET booking_status='DRAFT', communication_status='GENERATE_CANCELED',
+          subject='', body='', recipients_json='[]', current_snapshot_hash='',
+          generated_at=NULL, updated_at=?
+        WHERE booking_id=?
+      `);
+      const generationEvent = this.db.prepare(`
+        INSERT INTO local_vendor_generation_events (
+          event_id, booking_id, service_id, event_type, reason,
+          before_hash, after_hash, actor_employee_id, created_at
+        ) VALUES (?, ?, '', 'DAYWISE_RESET', 'FULL_DAYWISE_RESET_BEFORE_SEND',
+          '', '', ?, ?)
+      `);
+      generated.forEach((row) => {
+        cancelServices.run(row.booking_id);
+        cancelBooking.run(now, row.booking_id);
+        generationEvent.run(
+          this.id("VGE"), row.booking_id,
+          this.settings().employee_id || "DEV-USER", now,
+        );
+      });
+      this.db.prepare(`
+        DELETE FROM vendor_service_splits WHERE tour_day_id IN (
+          SELECT tour_day_id FROM vendor_day_drafts WHERE vendor_draft_id = ?
+        )
+      `).run(intake.vendorDraftId);
+      this.db.prepare("DELETE FROM vendor_day_drafts WHERE vendor_draft_id = ?")
+        .run(intake.vendorDraftId);
+      this.db.prepare(`
+        UPDATE vendor_intake_drafts
+        SET local_status='LOCAL_DAYWISE_RESET', updated_at=?
+        WHERE vendor_draft_id=?
+      `).run(now, intake.vendorDraftId);
+    })();
+    this.recordVendorProcessEvent({
+      customerCode: preview.customerCode,
+      customerName: intake.customerName,
+      sourceAction: "RESET_DAYWISE",
+      processState: "LOCAL_DAYWISE_RESET",
+      resultMessage: `${preview.dayCount} day(s) and ${preview.splitCount} Micro Split item(s) reset locally.`,
+      requiredAction: "REBUILD_AND_POST",
+    });
+    this.log("VENDOR_DAYWISE_RESET", "VENDOR_INTAKE", intake.vendorDraftId, preview);
+    return {
+      ...preview,
+      intake: this.getVendorIntakeDraftByCode(preview.customerCode),
+    };
   }
 
   markVendorIntakePublished(customerCode) {
@@ -2832,7 +3276,7 @@ class LocalDatabase {
     const serviceLines = selectedServices.map((service) => {
       const dayContext = [
         `Day ${service.dayNumber}`,
-        service.serviceDate || "date pending",
+        service.serviceDate ? formatVendorDisplayDate(service.serviceDate) : "date pending",
       ].filter(Boolean).join(" | ");
       const operationalContext = [
         service.hotelOnDay ? `Hotel: ${service.hotelOnDay}` : "",
@@ -3091,10 +3535,152 @@ class LocalDatabase {
     return this.getVendorBooking(bookingId);
   }
 
+  startVendorGenerateBatch(items = []) {
+    if (!Array.isArray(items) || !items.length) {
+      throw new Error("At least one prepared supplier package is required.");
+    }
+    const batchId = this.id("VGB");
+    const now = this.now();
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_vendor_generate_batches (
+          generate_batch_id, status, total_packages, created_by, created_at, updated_at
+        ) VALUES (?, 'PREPARED', ?, ?, ?, ?)
+      `).run(
+        batchId,
+        items.length,
+        this.settings().employee_id || "DEV-USER",
+        now,
+        now,
+      );
+      const insert = this.db.prepare(`
+        INSERT INTO local_vendor_generate_batch_items (
+          generate_batch_id, package_key, sequence_no, request_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `);
+      items.forEach((item, index) => {
+        const packageKey = String(item.packageKey || "").trim();
+        if (!packageKey) throw new Error("Every Generate batch item requires a Package Key.");
+        insert.run(batchId, packageKey, index + 1, JSON.stringify(item), now);
+      });
+    })();
+    this.log("VENDOR_GENERATE_BATCH_PREPARED", "VENDOR_GENERATE_BATCH", batchId, {
+      totalPackages: items.length,
+    });
+    return this.getVendorGenerateBatch(batchId);
+  }
+
+  updateVendorGenerateBatchItem(input = {}) {
+    const batchId = String(input.batchId || "").trim();
+    const packageKey = String(input.packageKey || "").trim();
+    const status = String(input.status || "").trim().toUpperCase();
+    if (!batchId || !packageKey || !["GENERATED", "FAILED", "SKIPPED", "PENDING"].includes(status)) {
+      throw new Error("Generate batch item update is invalid.");
+    }
+    const now = this.now();
+    const changed = this.db.prepare(`
+      UPDATE local_vendor_generate_batch_items
+      SET status = ?, booking_id = ?,
+        attempt_count = attempt_count + CASE WHEN ? IN ('GENERATED','FAILED') THEN 1 ELSE 0 END,
+        last_error_code = ?, last_error_message = ?, updated_at = ?
+      WHERE generate_batch_id = ? AND package_key = ?
+    `).run(
+      status,
+      String(input.bookingId || ""),
+      status,
+      String(input.errorCode || ""),
+      String(input.errorMessage || ""),
+      now,
+      batchId,
+      packageKey,
+    );
+    if (!changed.changes) throw new Error("Generate batch item was not found.");
+    this.refreshVendorGenerateBatch(batchId);
+    this.log("VENDOR_GENERATE_BATCH_ITEM_UPDATED", "VENDOR_GENERATE_BATCH", batchId, {
+      packageKey,
+      status,
+      bookingId: String(input.bookingId || ""),
+      errorCode: String(input.errorCode || ""),
+      errorMessage: String(input.errorMessage || ""),
+    });
+    return this.getVendorGenerateBatch(batchId);
+  }
+
+  refreshVendorGenerateBatch(batchId) {
+    const counts = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN status='GENERATED' THEN 1 ELSE 0 END) AS generated,
+        SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) AS failed,
+        SUM(CASE WHEN status='SKIPPED' THEN 1 ELSE 0 END) AS skipped,
+        SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END) AS pending
+      FROM local_vendor_generate_batch_items WHERE generate_batch_id = ?
+    `).get(batchId);
+    const pending = Number(counts?.pending || 0);
+    const failed = Number(counts?.failed || 0);
+    const status = pending ? "IN_PROGRESS" : failed ? "NEEDS_ATTENTION" : "COMPLETED";
+    const now = this.now();
+    this.db.prepare(`
+      UPDATE local_vendor_generate_batches
+      SET status=?, generated_packages=?, failed_packages=?, skipped_packages=?,
+        updated_at=?, completed_at=CASE WHEN ?='COMPLETED' THEN ? ELSE NULL END
+      WHERE generate_batch_id=?
+    `).run(
+      status,
+      Number(counts?.generated || 0),
+      failed,
+      Number(counts?.skipped || 0),
+      now,
+      status,
+      now,
+      batchId,
+    );
+  }
+
+  getVendorGenerateBatch(batchId) {
+    const row = this.db.prepare(`
+      SELECT * FROM local_vendor_generate_batches WHERE generate_batch_id = ?
+    `).get(String(batchId || ""));
+    if (!row) return null;
+    return {
+      batchId: row.generate_batch_id,
+      status: row.status,
+      totalPackages: Number(row.total_packages || 0),
+      generatedPackages: Number(row.generated_packages || 0),
+      failedPackages: Number(row.failed_packages || 0),
+      skippedPackages: Number(row.skipped_packages || 0),
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at || "",
+      items: this.db.prepare(`
+        SELECT * FROM local_vendor_generate_batch_items
+        WHERE generate_batch_id = ? ORDER BY sequence_no
+      `).all(row.generate_batch_id).map((item) => ({
+        packageKey: item.package_key,
+        sequenceNo: Number(item.sequence_no),
+        request: JSON.parse(item.request_json || "{}"),
+        bookingId: item.booking_id,
+        status: item.status,
+        attemptCount: Number(item.attempt_count || 0),
+        lastErrorCode: item.last_error_code,
+        lastErrorMessage: item.last_error_message,
+        updatedAt: item.updated_at,
+      })),
+    };
+  }
+
+  listRecoverableVendorGenerateBatches() {
+    return this.db.prepare(`
+      SELECT generate_batch_id FROM local_vendor_generate_batches
+      WHERE status IN ('PREPARED','IN_PROGRESS','NEEDS_ATTENTION')
+      ORDER BY updated_at DESC
+    `).all().map((row) => this.getVendorGenerateBatch(row.generate_batch_id));
+  }
+
   getVendorBooking(bookingId) {
     let row = this.db.prepare("SELECT * FROM local_vendor_bookings WHERE booking_id = ?").get(bookingId);
     if (!row) return null;
-    const cleanedBody = stripLegacyVendorDaywiseHeaders(row.body);
+    const cleanedBody = normalizeVendorGeneratedBody(row.body);
     if (row.communication_status === "GENERATED" && cleanedBody !== row.body) {
       const deliveryAttempt = this.db.prepare(`
         SELECT 1 FROM local_vendor_send_attempts WHERE booking_id = ? LIMIT 1
@@ -3120,7 +3706,7 @@ class LocalDatabase {
           WHERE booking_id = ? AND communication_status = 'GENERATED'
         `).run(cleanedBody, migratedHash, now, bookingId);
         this.log("VENDOR_GENERATED_BODY_MIGRATED", "VENDOR_BOOKING", bookingId, {
-          reason: "LEGACY_DAYWISE_HEADER_REMOVED",
+          reason: "LEGACY_BOOKING_BODY_PRESENTATION_NORMALIZED",
           serviceCount: serviceIds.length,
           previousSnapshotHash: row.current_snapshot_hash || "",
           migratedSnapshotHash: migratedHash,
@@ -3139,6 +3725,9 @@ class LocalDatabase {
       `).all(bookingId).map((item) => ({
         ...JSON.parse(item.service_snapshot_json),
         generationStatus: item.service_status,
+      })).map((service) => ({
+        ...service,
+        parentIntegrity: this.vendorServiceParentIntegrity(service),
       })),
       deliveryAttempts: this.listVendorSendAttempts(bookingId),
       replyEvidence: this.db.prepare(`
@@ -3154,12 +3743,105 @@ class LocalDatabase {
     };
   }
 
+  vendorServiceParentIntegrity(service = {}) {
+    const active = (row) => row && row.active !== false
+      && !["ARCHIVED", "CANCELLED", "SUPERSEDED", "INACTIVE"].includes(
+        String(row.status || "").toUpperCase(),
+      );
+    if (service.serviceId) {
+      const source = this.db.prepare(
+        "SELECT service_id FROM vendor_service_splits WHERE service_id = ?",
+      ).get(String(service.serviceId));
+      if (!source) {
+        return { ready: false, code: "SERVICE_SOURCE_MISSING", message: "Micro Split source is missing." };
+      }
+    }
+    const catalog = this.getSupplierMasterCatalog();
+    if (service.supplierId) {
+      const row = (catalog.suppliers || []).find((item) => item.supplierId === service.supplierId);
+      if (!row) return { ready: false, code: "SUPPLIER_MISSING", message: "Supplier parent is missing." };
+      if (!active(row)) return { ready: false, code: "SUPPLIER_ARCHIVED", message: "Supplier parent is archived." };
+    }
+    if (service.productId) {
+      const row = (catalog.products || []).find((item) => item.productId === service.productId);
+      if (!row) return { ready: false, code: "PRODUCT_MISSING", message: "Product parent is missing." };
+      if (!active(row)) return { ready: false, code: "PRODUCT_ARCHIVED", message: "Product parent is archived." };
+      if (service.supplierId && row.supplierId && row.supplierId !== service.supplierId) {
+        return { ready: false, code: "PARENT_RELATION_CHANGED", message: "Product now belongs to another Supplier." };
+      }
+    }
+    if (service.contractId) {
+      const row = (catalog.contracts || []).find((item) => item.contractId === service.contractId);
+      if (!row) return { ready: false, code: "CONTRACT_MISSING", message: "Contract parent is missing." };
+      if (!active(row)) return { ready: false, code: "CONTRACT_ARCHIVED", message: "Contract parent is archived." };
+    }
+    if (service.contractRateId) {
+      const row = (catalog.rates || []).find((item) => item.contractRateId === service.contractRateId);
+      if (!row) return { ready: false, code: "RATE_MISSING", message: "Contract Rate parent is missing." };
+      if (!active(row)) return { ready: false, code: "RATE_ARCHIVED", message: "Contract Rate parent is archived." };
+    }
+    return { ready: true, code: "READY", message: "" };
+  }
+
+  vendorStoredBookingBody(booking, services) {
+    const intake = this.db.prepare(`
+      SELECT customer_name, adult_pax, child_pax, infant_pax
+      FROM vendor_intake_drafts WHERE customer_code = ?
+    `).get(booking.customerCode) || {};
+    const action = String(booking.actionType || "NEW").toUpperCase();
+    const serviceLines = services.map((service) => {
+      const context = [
+        `Day ${Number(service.dayNumber || 0)}`,
+        service.serviceDate ? formatVendorDisplayDate(service.serviceDate) : "date pending",
+      ].join(" | ");
+      const operations = [
+        service.hotelOnDay ? `Hotel: ${service.hotelOnDay}` : "",
+        service.startTime ? `Start: ${service.startTime}` : "",
+        service.finishTime ? `Finish: ${service.finishTime}` : "",
+      ].filter(Boolean).join(" | ");
+      return `- ${context}\n  ${service.productName || service.activityText || "Service"}`
+        + `${service.quantity && Number(service.quantity) !== 1 ? ` | qty ${service.quantity}` : ""}`
+        + `${operations ? `\n  ${operations}` : ""}`;
+    }).join("\n");
+    return [
+      `Dear ${booking.supplierName} Team,`,
+      "",
+      `Please ${action === "CANCEL" ? "cancel all services" : action === "AMEND" ? "revise the booking" : "arrange the following booking"} for:`,
+      `Customer: ${intake.customer_name || booking.customerCode}`,
+      `Customer Code: ${booking.customerCode}`,
+      `Pax: ${Number(intake.adult_pax || 0)} adult, ${Number(intake.child_pax || 0)} child, ${Number(intake.infant_pax || 0)} infant`,
+      "",
+      serviceLines,
+      "",
+      action === "CANCEL" && booking.cancellationReason
+        ? `Cancellation reason: ${booking.cancellationReason}`
+        : "Please confirm availability and booking reference.",
+      "",
+      "Regards,",
+      "Peak Season Holidays",
+    ].join("\n");
+  }
+
   cancelVendorGeneratedService(input = {}) {
     const bookingId = String(input.bookingId || "").trim();
     const serviceId = String(input.serviceId || "").trim();
     const reason = String(input.reason || "").trim();
     if (!bookingId || !serviceId) throw new Error("Booking and service are required.");
     if (!reason) throw new Error("A revision reason is required.");
+    const alreadyCanceled = this.db.prepare(`
+      SELECT 1 FROM local_vendor_booking_services
+      WHERE booking_id = ? AND service_id = ? AND service_status = 'GENERATE_ITEM_CANCELED'
+      LIMIT 1
+    `).get(bookingId, serviceId);
+    if (alreadyCanceled) {
+      const existing = this.getVendorBooking(bookingId);
+      return {
+        booking: existing,
+        canceledServiceId: serviceId,
+        remainingServiceCount: existing?.services?.length || 0,
+        alreadyCanceled: true,
+      };
+    }
     const booking = this.getVendorBooking(bookingId);
     if (!booking) throw new Error("Generated booking was not found.");
     if (booking.communicationStatus !== "GENERATED") {
@@ -3170,51 +3852,62 @@ class LocalDatabase {
     }
     const target = booking.services.find((service) => service.serviceId === serviceId);
     if (!target) throw new Error("The selected generated service was not found.");
-    const remainingServiceIds = booking.services
-      .filter((service) => service.serviceId !== serviceId)
-      .map((service) => service.serviceId);
+    const remainingServices = booking.services
+      .filter((service) => service.serviceId !== serviceId);
+    const remainingServiceIds = remainingServices.map((service) => service.serviceId);
     const row = this.db.prepare(`
       SELECT current_snapshot_hash FROM local_vendor_bookings WHERE booking_id = ?
     `).get(bookingId);
     const beforeHash = String(row?.current_snapshot_hash || "");
     const now = this.now();
-    if (remainingServiceIds.length) {
-      this.saveVendorBookingPreview({
-        bookingId,
-        packageKey: booking.packageKey,
-        serviceIds: remainingServiceIds,
-        actionType: booking.actionType,
-        channel: booking.channel,
-        cancellationReason: booking.cancellationReason,
-      });
-    } else {
+    let afterHash = "";
+    this.db.transaction(() => {
       this.db.prepare(`
-        UPDATE local_vendor_bookings
-        SET booking_status='DRAFT', communication_status='GENERATE_CANCELED',
-          subject='', body='', recipients_json='[]', current_snapshot_hash='',
-          generated_at=NULL, updated_at=?
-        WHERE booking_id=?
-      `).run(now, bookingId);
-      this.db.prepare("DELETE FROM local_vendor_booking_services WHERE booking_id = ?").run(bookingId);
-    }
-    this.db.prepare(`
-      INSERT INTO local_vendor_booking_services (
-        booking_service_id, booking_id, service_id, service_snapshot_json, service_status, created_at
-      ) VALUES (?, ?, ?, ?, 'GENERATE_ITEM_CANCELED', ?)
-    `).run(this.id("VBS"), bookingId, serviceId, JSON.stringify(target), now);
-    const afterRow = this.db.prepare(`
-      SELECT current_snapshot_hash FROM local_vendor_bookings WHERE booking_id = ?
-    `).get(bookingId);
-    this.db.prepare(`
-      INSERT INTO local_vendor_generation_events (
-        event_id, booking_id, service_id, event_type, reason,
-        before_hash, after_hash, actor_employee_id, created_at
-      ) VALUES (?, ?, ?, 'GENERATE_ITEM_CANCELED', ?, ?, ?, ?, ?)
-    `).run(
-      this.id("VGE"), bookingId, serviceId, reason, beforeHash,
-      String(afterRow?.current_snapshot_hash || ""),
-      this.settings().employee_id || "DEV-USER", now,
-    );
+        UPDATE local_vendor_booking_services
+        SET service_status = 'GENERATE_ITEM_CANCELED'
+        WHERE booking_id = ? AND service_id = ? AND service_status <> 'GENERATE_ITEM_CANCELED'
+      `).run(bookingId, serviceId);
+      if (remainingServiceIds.length) {
+        const body = this.vendorStoredBookingBody(booking, remainingServices);
+        const recipients = booking.recipients || [];
+        afterHash = crypto.createHash("sha256").update(JSON.stringify({
+          serviceIds: remainingServiceIds,
+          channel: booking.channel,
+          recipients,
+          subject: booking.subject,
+          body,
+        })).digest("hex");
+        const evidence = {
+          ...(booking.externalEvidence || {}),
+          generatedServiceIds: remainingServiceIds,
+        };
+        const rateStatus = remainingServices.some((service) => service.rateStatus !== "RATE_READY")
+          ? "PENDING_RATE" : "RATE_READY";
+        this.db.prepare(`
+          UPDATE local_vendor_bookings
+          SET body = ?, rate_status = ?, external_evidence_json = ?,
+            current_snapshot_hash = ?, updated_at = ?
+          WHERE booking_id = ?
+        `).run(body, rateStatus, JSON.stringify(evidence), afterHash, now, bookingId);
+      } else {
+        this.db.prepare(`
+          UPDATE local_vendor_bookings
+          SET booking_status='DRAFT', communication_status='GENERATE_CANCELED',
+            subject='', body='', recipients_json='[]', current_snapshot_hash='',
+            generated_at=NULL, updated_at=?
+          WHERE booking_id=?
+        `).run(now, bookingId);
+      }
+      this.db.prepare(`
+        INSERT INTO local_vendor_generation_events (
+          event_id, booking_id, service_id, event_type, reason,
+          before_hash, after_hash, actor_employee_id, created_at
+        ) VALUES (?, ?, ?, 'GENERATE_ITEM_CANCELED', ?, ?, ?, ?, ?)
+      `).run(
+        this.id("VGE"), bookingId, serviceId, reason, beforeHash, afterHash,
+        this.settings().employee_id || "DEV-USER", now,
+      );
+    })();
     this.log("GENERATE_ITEM_CANCELED", "VENDOR_BOOKING", bookingId, {
       serviceId, reason, remainingServiceCount: remainingServiceIds.length,
     });
@@ -3222,6 +3915,7 @@ class LocalDatabase {
       booking: this.getVendorBooking(bookingId),
       canceledServiceId: serviceId,
       remainingServiceCount: remainingServiceIds.length,
+      alreadyCanceled: false,
     };
   }
 
@@ -3248,6 +3942,9 @@ class LocalDatabase {
       services: serviceStatement.all(row.booking_id).map((item) => ({
         ...JSON.parse(item.service_snapshot_json || "{}"),
         generationStatus: item.service_status,
+      })).map((service) => ({
+        ...service,
+        parentIntegrity: this.vendorServiceParentIntegrity(service),
       })),
     }));
   }
@@ -3256,34 +3953,223 @@ class LocalDatabase {
     const bookingId = String(input.bookingId || "");
     const booking = this.getVendorBooking(bookingId);
     if (!booking) throw new Error("Generated booking was not found.");
+    const channel = String(booking.channel || "").toUpperCase();
+    if (!["WHATSAPP", "PORTAL", "OTHERS", "OTHER"].includes(channel)) {
+      throw new Error("External evidence is only valid for WhatsApp, Portal, or Other channels.");
+    }
+    if (!["GENERATED", "SENT", "SENT_PENDING_SYNC"].includes(booking.communicationStatus)) {
+      throw new Error(`External action cannot be recorded while status is ${booking.communicationStatus}.`);
+    }
+    if (booking.bookingStatus === "AMENDMENT_REQUIRED") {
+      throw new Error("This booking source was revised. Regenerate an Amendment before recording delivery.");
+    }
+    if (booking.communicationStatus === "GENERATED") {
+      const changedParent = booking.services.find((service) => service.parentIntegrity?.ready === false);
+      if (changedParent) {
+        throw new Error(
+          `PARENT CHANGED — REVIEW REQUIRED: ${changedParent.productName || changedParent.activityText || changedParent.serviceId}. `
+          + changedParent.parentIntegrity.message,
+        );
+      }
+    }
     const reference = String(input.externalReference || "").trim();
     if (!reference) throw new Error("External booking reference or evidence note is required.");
     const now = this.now();
     const canceled = booking.actionType === "CANCEL";
+    const previousAttempts = this.listVendorSendAttempts(bookingId);
+    const sendAttemptId = this.id("VEXT");
+    const snapshot = {
+      sendAttemptId,
+      bookingId,
+      packageKey: booking.packageKey,
+      customerCode: booking.customerCode,
+      tourId: booking.tourId,
+      sourceRevisionId: booking.sourceRevisionId,
+      supplierId: booking.supplierId,
+      supplierName: booking.supplierName,
+      actionType: booking.actionType,
+      channel,
+      recipients: booking.recipients,
+      subject: booking.subject,
+      body: booking.body,
+      services: booking.services,
+      rateStatus: booking.rateStatus,
+      externalReference: reference,
+      evidenceSource: "MANUAL_EXTERNAL_ACTION",
+      attemptNumber: previousAttempts.length + 1,
+      actorEmployeeId: this.settings().employee_id || "DEV-USER",
+      preparedAt: now,
+    };
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotHash = crypto.createHash("sha256").update(snapshotJson).digest("hex");
     const evidence = {
       ...(booking.externalEvidence || {}),
       externalReference: reference,
-      channel: booking.channel,
+      channel,
       recordedAt: now,
       serviceIds: booking.services.map((service) => service.serviceId).filter(Boolean),
+      latestAttemptId: sendAttemptId,
+      deliveryAttemptCount: previousAttempts.length + 1,
     };
-    this.db.prepare(`
-      UPDATE local_vendor_bookings
-      SET booking_status = ?, communication_status = 'SENT',
-        external_reference = ?, external_evidence_json = ?, sent_at = ?, updated_at = ?
-      WHERE booking_id = ?
-    `).run(
-      canceled ? "CANCELED" : "ACTIVE",
-      reference,
-      JSON.stringify(evidence),
-      now,
-      now,
-      bookingId,
-    );
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_vendor_send_attempts (
+          send_attempt_id, booking_id, channel, evidence_source,
+          resend_of_attempt_id, resend_reason, snapshot_json, snapshot_hash,
+          actor_email, status, external_reference, external_evidence_json,
+          prepared_at, action_recorded_at, updated_at
+        ) VALUES (?, ?, ?, 'MANUAL_EXTERNAL_ACTION', ?, ?, ?, ?, ?,
+          'EXTERNAL_RECORDED', ?, ?, ?, ?, ?)
+      `).run(
+        sendAttemptId,
+        bookingId,
+        channel,
+        previousAttempts[0]?.sendAttemptId || "",
+        String(input.repeatReason || ""),
+        snapshotJson,
+        snapshotHash,
+        this.settings().employee_id || "DEV-USER",
+        reference,
+        JSON.stringify(evidence),
+        now,
+        now,
+        now,
+      );
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET booking_status = ?, communication_status = 'SENT_PENDING_SYNC',
+          official_sync_status = 'PENDING', last_send_attempt_id = ?,
+          external_reference = ?, external_evidence_json = ?, sent_at = ?, updated_at = ?
+        WHERE booking_id = ?
+      `).run(
+        canceled ? "CANCELED" : "ACTIVE",
+        sendAttemptId,
+        reference,
+        JSON.stringify(evidence),
+        now,
+        now,
+        bookingId,
+      );
+    })();
     this.log("VENDOR_BOOKING_EXTERNAL_SENT", "VENDOR_BOOKING", bookingId, {
-      channel: booking.channel, externalReference: reference,
+      channel, externalReference: reference, sendAttemptId,
+      attemptNumber: previousAttempts.length + 1,
     });
-    return this.getVendorBooking(bookingId);
+    const updatedBooking = this.getVendorBooking(bookingId);
+    return {
+      ...updatedBooking,
+      booking: updatedBooking,
+      sendAttempt: this.getVendorSendAttempt(sendAttemptId),
+      pendingSync: true,
+    };
+  }
+
+  recordVendorExternalEmailEvidence(input = {}) {
+    const bookingId = String(input.bookingId || "");
+    const booking = this.getVendorBooking(bookingId);
+    if (!booking || booking.channel !== "EMAIL") {
+      throw new Error("Generated Email booking was not found.");
+    }
+    if (!["GENERATED", "SENT", "SENT_PENDING_SYNC"].includes(booking.communicationStatus)) {
+      throw new Error(`External Gmail evidence cannot be linked while status is ${booking.communicationStatus}.`);
+    }
+    if (booking.bookingStatus === "AMENDMENT_REQUIRED") {
+      throw new Error("This booking source was revised. Regenerate an Amendment before linking delivery.");
+    }
+    const gmailMessageId = String(input.gmailMessageId || "").trim();
+    const gmailThreadId = String(input.gmailThreadId || "").trim();
+    if (!gmailMessageId || !gmailThreadId) {
+      throw new Error("Gmail Message ID and Thread ID are required.");
+    }
+    const duplicate = this.db.prepare(`
+      SELECT send_attempt_id, booking_id FROM local_vendor_send_attempts
+      WHERE gmail_message_id = ? LIMIT 1
+    `).get(gmailMessageId);
+    if (duplicate) {
+      if (duplicate.booking_id === bookingId) {
+        return {
+          booking,
+          sendAttempt: this.getVendorSendAttempt(duplicate.send_attempt_id),
+          alreadyLinked: true,
+        };
+      }
+      throw new Error("This Gmail Message ID is already linked to another booking.");
+    }
+    const now = this.now();
+    const previousAttempts = this.listVendorSendAttempts(bookingId);
+    const sendAttemptId = this.id("VSEND");
+    const snapshot = {
+      sendAttemptId,
+      bookingId,
+      packageKey: booking.packageKey,
+      customerCode: booking.customerCode,
+      tourId: booking.tourId,
+      sourceRevisionId: booking.sourceRevisionId,
+      supplierId: booking.supplierId,
+      supplierName: booking.supplierName,
+      actionType: booking.actionType,
+      channel: "EMAIL",
+      recipients: booking.recipients,
+      subject: booking.subject,
+      body: booking.body,
+      services: booking.services,
+      rateStatus: booking.rateStatus,
+      actorEmail: String(input.actorEmail || "").trim().toLowerCase(),
+      evidenceSource: "EXTERNAL_GMAIL_LINK",
+      attemptNumber: previousAttempts.length + 1,
+      preparedAt: now,
+    };
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotHash = crypto.createHash("sha256").update(snapshotJson).digest("hex");
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO local_vendor_send_attempts (
+          send_attempt_id, booking_id, channel, evidence_source,
+          resend_of_attempt_id, resend_reason, snapshot_json, snapshot_hash,
+          actor_email, status, gmail_message_id, gmail_thread_id,
+          prepared_at, gmail_accepted_at, action_recorded_at, updated_at
+        ) VALUES (?, ?, 'EMAIL', 'EXTERNAL_GMAIL_LINK', ?, ?, ?, ?, ?,
+          'GMAIL_ACCEPTED', ?, ?, ?, ?, ?, ?)
+      `).run(
+        sendAttemptId,
+        bookingId,
+        previousAttempts[0]?.sendAttemptId || "",
+        String(input.repeatReason || "Email sent outside ERIM and linked from Gmail"),
+        snapshotJson,
+        snapshotHash,
+        snapshot.actorEmail,
+        gmailMessageId,
+        gmailThreadId,
+        now,
+        String(input.sentAt || now),
+        String(input.sentAt || now),
+        now,
+      );
+      this.db.prepare(`
+        UPDATE local_vendor_bookings
+        SET booking_status = ?, communication_status = 'SENT_PENDING_SYNC',
+          official_sync_status = 'PENDING', last_send_attempt_id = ?,
+          gmail_message_id = ?, gmail_thread_id = ?, sent_at = ?, updated_at = ?
+        WHERE booking_id = ?
+      `).run(
+        booking.actionType === "CANCEL" ? "CANCELED" : "ACTIVE",
+        sendAttemptId,
+        gmailMessageId,
+        gmailThreadId,
+        String(input.sentAt || now),
+        now,
+        bookingId,
+      );
+    })();
+    this.log("VENDOR_EXTERNAL_GMAIL_LINKED", "VENDOR_SEND_ATTEMPT", sendAttemptId, {
+      bookingId, gmailMessageId, gmailThreadId,
+      attemptNumber: previousAttempts.length + 1,
+    });
+    return {
+      booking: this.getVendorBooking(bookingId),
+      sendAttempt: this.getVendorSendAttempt(sendAttemptId),
+      alreadyLinked: false,
+    };
   }
 
   refreshVendorPortalEvidence(bookingId, bookingDate = "") {
@@ -3348,6 +4234,16 @@ class LocalDatabase {
     const booking = this.getVendorBooking(bookingId);
     if (!booking) throw new Error("Generated booking was not found.");
     if (booking.channel !== "EMAIL") throw new Error("This booking channel is not Email.");
+    if (booking.bookingStatus === "AMENDMENT_REQUIRED") {
+      throw new Error("This booking source was revised. Regenerate an Amendment before sending.");
+    }
+    const changedParent = booking.services.find((service) => service.parentIntegrity?.ready === false);
+    if (changedParent) {
+      throw new Error(
+        `PARENT CHANGED — REVIEW REQUIRED: ${changedParent.productName || changedParent.activityText || changedParent.serviceId}. `
+        + changedParent.parentIntegrity.message,
+      );
+    }
     const resendOfAttemptId = String(input.resendOfAttemptId || "").trim();
     const resendReason = String(input.resendReason || "").trim();
     const isResend = Boolean(resendOfAttemptId);
@@ -3421,10 +4317,11 @@ class LocalDatabase {
     this.db.transaction(() => {
       this.db.prepare(`
         INSERT INTO local_vendor_send_attempts (
-          send_attempt_id, booking_id, resend_of_attempt_id, resend_reason,
+          send_attempt_id, booking_id, channel, evidence_source,
+          resend_of_attempt_id, resend_reason,
           snapshot_json, snapshot_hash, actor_email,
           status, prepared_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PREPARED', ?, ?)
+        ) VALUES (?, ?, 'EMAIL', 'SYSTEM_GMAIL_SEND', ?, ?, ?, ?, ?, 'PREPARED', ?, ?)
       `).run(
         sendAttemptId, bookingId, resendOfAttemptId, resendReason, snapshotJson, snapshotHash,
         snapshot.actorEmail, now, now,
@@ -3447,35 +4344,44 @@ class LocalDatabase {
       "SELECT * FROM local_vendor_send_attempts WHERE send_attempt_id = ?",
     ).get(String(sendAttemptId || ""));
     if (!row) return null;
+    const snapshot = JSON.parse(row.snapshot_json || "{}");
     return {
       sendAttemptId: row.send_attempt_id,
       bookingId: row.booking_id,
+      channel: row.channel || "EMAIL",
+      evidenceSource: row.evidence_source || "SYSTEM_GMAIL_SEND",
       resendOfAttemptId: row.resend_of_attempt_id || "",
       resendReason: row.resend_reason || "",
-      snapshot: JSON.parse(row.snapshot_json || "{}"),
+      snapshot,
+      attemptNumber: Number(snapshot.attemptNumber || 0),
       snapshotHash: row.snapshot_hash,
       actorEmail: row.actor_email,
       status: row.status,
       gmailMessageId: row.gmail_message_id,
       gmailThreadId: row.gmail_thread_id,
+      externalReference: row.external_reference || "",
+      externalEvidence: JSON.parse(row.external_evidence_json || "{}"),
       officialEvidenceId: row.official_evidence_id,
       syncAttempts: Number(row.sync_attempts || 0),
       lastErrorCode: row.last_error_code,
       lastErrorMessage: row.last_error_message,
       preparedAt: row.prepared_at,
       gmailAcceptedAt: row.gmail_accepted_at || "",
+      actionRecordedAt: row.action_recorded_at || "",
       syncedAt: row.synced_at || "",
       updatedAt: row.updated_at,
     };
   }
 
   listVendorSendAttempts(bookingId) {
-    return this.db.prepare(`
+    const rows = this.db.prepare(`
       SELECT send_attempt_id FROM local_vendor_send_attempts
-      WHERE booking_id = ? ORDER BY prepared_at DESC
-    `).all(String(bookingId || "")).map((row) =>
-      this.getVendorSendAttempt(row.send_attempt_id)
-    );
+      WHERE booking_id = ? ORDER BY prepared_at DESC, rowid DESC
+    `).all(String(bookingId || ""));
+    return rows.map((row, index) => ({
+      ...this.getVendorSendAttempt(row.send_attempt_id),
+      attemptNumber: rows.length - index,
+    }));
   }
 
   recordVendorSendOutcomeUnknown(sendAttemptId, error) {
@@ -3540,7 +4446,7 @@ class LocalDatabase {
   recordVendorSendSyncResult(sendAttemptId, input = {}) {
     const attempt = this.getVendorSendAttempt(sendAttemptId);
     if (!attempt) throw new Error("Send attempt was not found.");
-    if (!["GMAIL_ACCEPTED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
+    if (!["GMAIL_ACCEPTED", "EXTERNAL_RECORDED", "SENT_PENDING_SYNC"].includes(attempt.status)) {
       if (attempt.status === "SYNCED") return attempt;
       throw new Error(`Send evidence cannot sync from ${attempt.status}.`);
     }
@@ -3580,7 +4486,7 @@ class LocalDatabase {
   listVendorPendingSendSync() {
     return this.db.prepare(`
       SELECT send_attempt_id FROM local_vendor_send_attempts
-      WHERE status IN ('GMAIL_ACCEPTED','SENT_PENDING_SYNC')
+      WHERE status IN ('GMAIL_ACCEPTED','EXTERNAL_RECORDED','SENT_PENDING_SYNC')
       ORDER BY prepared_at
     `).all().map((row) => this.getVendorSendAttempt(row.send_attempt_id));
   }

@@ -21,6 +21,35 @@ const supplierFocusContexts = new Map();
 
 const isDev = !app.isPackaged;
 
+function openControlledExternal(url, source = "RENDERER_LINK") {
+  const value = String(url || "");
+  if (!/^https:\/\//i.test(value)) return false;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  database?.log("EXTERNAL_LINK_OPENED", "EXTERNAL_LINK", null, {
+    source,
+    host: parsed.host,
+  });
+  void shell.openExternal(value);
+  return true;
+}
+
+function secureWindowNavigation(window, source) {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    openControlledExternal(url, `${source}_NEW_WINDOW`);
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, url) => {
+    if (url === window.webContents.getURL()) return;
+    event.preventDefault();
+    openControlledExternal(url, `${source}_NAVIGATION`);
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -38,6 +67,7 @@ function createWindow() {
     },
   });
 
+  secureWindowNavigation(mainWindow, "MAIN_WINDOW");
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => {
@@ -77,6 +107,7 @@ function openFocusedSupplierWindow(sender, input = {}) {
     },
   });
   supplierFocusWindow = focusedWindow;
+  secureWindowNavigation(focusedWindow, "SUPPLIER_FOCUS_WINDOW");
   focusedWindow.removeMenu();
   const context = {
     requestId: database.id("SFR"),
@@ -153,6 +184,10 @@ function registerIpc() {
   ipcMain.handle("vendor:intake-draft-get", (_event, customerCode) => database.getVendorIntakeDraftByCode(customerCode));
   ipcMain.handle("vendor:intake-draft-list", () => database.listVendorIntakeDrafts());
   ipcMain.handle("vendor:intake-draft-save", (_event, details) => database.saveVendorIntakeDraft(details));
+  ipcMain.handle("vendor:intake-reset-preview", (_event, customerCode) =>
+    database.inspectVendorDaywiseReset(customerCode));
+  ipcMain.handle("vendor:intake-reset-daywise", (_event, customerCode) =>
+    database.resetVendorDaywise(customerCode));
   ipcMain.handle("vendor:intake-publish", (_event, details) => googleWorkspace.publishVendorIntake(details));
   ipcMain.handle("vendor:booking-queue", () => database.listVendorBookingQueue());
   ipcMain.handle("vendor:booking-list", () => database.listVendorBookings());
@@ -162,6 +197,12 @@ function registerIpc() {
     googleWorkspace.vendorGmailPreflight(details || {}));
   ipcMain.handle("vendor:booking-preview", (_event, details) => database.getVendorBookingPreview(details || {}));
   ipcMain.handle("vendor:booking-generate", (_event, details) => database.saveVendorBookingPreview(details || {}));
+  ipcMain.handle("vendor:generate-batch-start", (_event, items) =>
+    database.startVendorGenerateBatch(items || []));
+  ipcMain.handle("vendor:generate-batch-update", (_event, details) =>
+    database.updateVendorGenerateBatchItem(details || {}));
+  ipcMain.handle("vendor:generate-batch-recoverable", () =>
+    database.listRecoverableVendorGenerateBatches());
   ipcMain.handle("vendor:booking-generated-service-cancel", (_event, details) =>
     database.cancelVendorGeneratedService(details || {}));
   ipcMain.handle("vendor:booking-delivery-report", () =>
@@ -171,7 +212,11 @@ function registerIpc() {
   ipcMain.handle("vendor:booking-email-send", (_event, details) =>
     googleWorkspace.sendVendorBookingEmail(details || {}));
   ipcMain.handle("vendor:booking-external-sent", (_event, details) =>
-    database.recordVendorBookingExternalAction(details || {}));
+    googleWorkspace.recordVendorExternalAction(details || {}));
+  ipcMain.handle("vendor:booking-external-email-find", (_event, bookingId) =>
+    googleWorkspace.findVendorExternalEmailCandidates(bookingId));
+  ipcMain.handle("vendor:booking-external-email-link", (_event, details) =>
+    googleWorkspace.linkVendorExternalEmail(details || {}));
   ipcMain.handle("vendor:booking-portal-evidence-refresh", (_event, bookingId) =>
     database.refreshVendorPortalEvidence(bookingId));
   ipcMain.handle("vendor:booking-send-sync-retry", (_event, sendAttemptId) =>
@@ -195,6 +240,8 @@ function registerIpc() {
     googleWorkspace.requestSupplierRateApproval(details || {}));
   ipcMain.handle("supplier-master:rate-approval-review", (_event, details) =>
     googleWorkspace.reviewSupplierRateApproval(details || {}));
+  ipcMain.handle("supplier-master:rate-approval-takeover", (_event, details) =>
+    googleWorkspace.takeOverSupplierRateApproval(details || {}));
   ipcMain.handle("supplier-master:drafts-publish", (_event, details) =>
     googleWorkspace.publishSupplierMasterDrafts(details || {}));
   ipcMain.handle("supplier-master:publish-sessions-list", () =>
@@ -234,10 +281,9 @@ function registerIpc() {
   ipcMain.handle("settings:save", (_event, values) => database.saveSettings(values));
 
   ipcMain.handle("external:open", async (_event, url) => {
-    if (!/^https:\/\//i.test(String(url || ""))) {
+    if (!openControlledExternal(url, "IPC_EXTERNAL_OPEN")) {
       throw new Error("Only HTTPS links can be opened.");
     }
-    await shell.openExternal(url);
     return true;
   });
 
@@ -252,7 +298,11 @@ app.whenReady().then(() => {
   database.requeueAdminDevDummyPublications();
   googleAuth = new GoogleAuthService({
     database,
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (url) => {
+      if (!openControlledExternal(url, "GOOGLE_OAUTH")) {
+        throw new Error("Google OAuth requires an HTTPS authorization URL.");
+      }
+    },
     safeStorage,
     sessionFile: path.join(app.getPath("userData"), "google-session.secure"),
     diagnosticFile: path.join(app.getPath("userData"), "google-auth-diagnostic.log"),

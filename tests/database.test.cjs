@@ -573,13 +573,25 @@ test("groups only Vendor splits per supplier while excluding Additional and Tran
   const sent = database.recordVendorBookingExternalAction({
     bookingId: generated.bookingId, externalReference: "WA 09:15 confirmed delivered",
   });
-  assert.equal(sent.communicationStatus, "SENT");
+  assert.equal(sent.communicationStatus, "SENT_PENDING_SYNC");
+  const repeated = database.recordVendorBookingExternalAction({
+    bookingId: generated.bookingId,
+    externalReference: "WA 09:22 resent to alternate contact",
+    repeatReason: "Supplier requested alternate number",
+  });
+  assert.equal(repeated.sendAttempt.attemptNumber, 2);
+  const externalAttempts = database.listVendorSendAttempts(generated.bookingId);
+  assert.equal(externalAttempts.length, 2);
+  assert.deepEqual(
+    externalAttempts.map((attempt) => attempt.externalReference),
+    ["WA 09:22 resent to alternate contact", "WA 09:15 confirmed delivered"],
+  );
   const partialQueue = database.listVendorBookingQueue()
     .find((row) => row.packageKey === activity.packageKey);
   assert.equal(partialQueue.workflowStatus, "PARTIALLY_GENERATED");
   assert.equal(
     partialQueue.services.find((row) => row.serviceId === selectedServiceId).workflowStatus,
-    "SENT",
+    "SENT_PENDING_SYNC",
   );
   assert.equal(
     partialQueue.services.find((row) => row.serviceId !== selectedServiceId).workflowStatus,

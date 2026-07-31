@@ -73,11 +73,28 @@ function extractProgramDays(tables) {
       }
       const dateInRow = normalizeDate(joined);
       if (currentDay && dateInRow) currentDate = dateInRow;
+      if (currentDay && /\bSTART\b/i.test(joined)) {
+        const times = cells.map(normalizeTime).filter(Boolean);
+        if (times.length) {
+          const existing = result.get(currentDay) || {
+            dayNumber: currentDay,
+            serviceDate: currentDate,
+            dayTitle: "",
+          };
+          result.set(currentDay, {
+            ...existing,
+            serviceDate: currentDate || existing.serviceDate,
+            startTime: times[0] || existing.startTime || "",
+            finishTime: times[1] || existing.finishTime || "",
+          });
+        }
+      }
       const programIndex = cells.findIndex((cell) => /\bPROGRAMS?\b/i.test(cell));
       if (!currentDay || programIndex < 0) continue;
       const program = cells.slice(programIndex + 1).join(" ").replace(/^[:\s-]+/, "").trim();
       if (!program) continue;
       result.set(currentDay, {
+        ...(result.get(currentDay) || {}),
         dayNumber: currentDay,
         serviceDate: currentDate,
         dayTitle: program,

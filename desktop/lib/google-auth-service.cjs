@@ -40,7 +40,7 @@ class GoogleAuthService {
   }
 
   async login() {
-    const settings = this.database.getPublicSettings();
+    const settings = this.database.getPrivateSettings();
     if (!settings.googleClientId) {
       throw new Error("Add the Google Desktop OAuth Client ID in Settings first.");
     }
@@ -110,7 +110,7 @@ class GoogleAuthService {
   }
 
   async refreshAccessToken() {
-    const settings = this.database.getPublicSettings();
+    const settings = this.database.getPrivateSettings();
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld("erim", {
     getIntakeDraft: (customerCode) => ipcRenderer.invoke("vendor:intake-draft-get", customerCode),
     listIntakeDrafts: () => ipcRenderer.invoke("vendor:intake-draft-list"),
     saveIntakeDraft: (details) => ipcRenderer.invoke("vendor:intake-draft-save", details),
+    inspectDaywiseReset: (customerCode) => ipcRenderer.invoke("vendor:intake-reset-preview", customerCode),
+    resetDaywise: (customerCode) => ipcRenderer.invoke("vendor:intake-reset-daywise", customerCode),
     publishIntake: (details) => ipcRenderer.invoke("vendor:intake-publish", details),
     listBookingQueue: () => ipcRenderer.invoke("vendor:booking-queue"),
     listBookings: () => ipcRenderer.invoke("vendor:booking-list"),
@@ -57,6 +59,9 @@ contextBridge.exposeInMainWorld("erim", {
     gmailPreflight: (details) => ipcRenderer.invoke("vendor:gmail-preflight", details),
     getBookingPreview: (details) => ipcRenderer.invoke("vendor:booking-preview", details),
     generateBooking: (details) => ipcRenderer.invoke("vendor:booking-generate", details),
+    startGenerateBatch: (items) => ipcRenderer.invoke("vendor:generate-batch-start", items),
+    updateGenerateBatch: (details) => ipcRenderer.invoke("vendor:generate-batch-update", details),
+    listRecoverableGenerateBatches: () => ipcRenderer.invoke("vendor:generate-batch-recoverable"),
     cancelGeneratedService: (details) =>
       ipcRenderer.invoke("vendor:booking-generated-service-cancel", details),
     getDeliveryReport: () => ipcRenderer.invoke("vendor:booking-delivery-report"),
@@ -64,6 +69,10 @@ contextBridge.exposeInMainWorld("erim", {
       ipcRenderer.invoke("vendor:booking-channel-completion-save", details),
     sendBookingEmail: (details) => ipcRenderer.invoke("vendor:booking-email-send", details),
     recordExternalSent: (details) => ipcRenderer.invoke("vendor:booking-external-sent", details),
+    findExternalEmail: (bookingId) =>
+      ipcRenderer.invoke("vendor:booking-external-email-find", bookingId),
+    linkExternalEmail: (details) =>
+      ipcRenderer.invoke("vendor:booking-external-email-link", details),
     refreshPortalEvidence: (bookingId) =>
       ipcRenderer.invoke("vendor:booking-portal-evidence-refresh", bookingId),
     retrySendSync: (sendAttemptId) =>
@@ -95,6 +104,8 @@ contextBridge.exposeInMainWorld("erim", {
       ipcRenderer.invoke("supplier-master:rate-approval-request", details),
     reviewRateApproval: (details) =>
       ipcRenderer.invoke("supplier-master:rate-approval-review", details),
+    takeOverRateApproval: (details) =>
+      ipcRenderer.invoke("supplier-master:rate-approval-takeover", details),
     publishDrafts: (details) => ipcRenderer.invoke("supplier-master:drafts-publish", details),
     listPublishSessions: () => ipcRenderer.invoke("supplier-master:publish-sessions-list"),
     onPublishProgress: (callback) => {

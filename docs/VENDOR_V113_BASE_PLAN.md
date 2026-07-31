@@ -1168,3 +1168,763 @@ Automated status:
   `02A9EEBB62FE0286CEDCA2BA2CF29673ADE19AD66244882E153E0F39C0818F28`;
 - GitHub Release `v1.1.16` is published as Latest with installer, blockmap, and
   `latest.yml`; GitHub's installer digest matches the local verified SHA-256.
+
+### 12.9 Follow-up patch backlog — Point 1: booking-facing date format
+
+Status: `RECORDED — NOT IMPLEMENTED`
+
+Owner retest confirmed that the maximized Generate & Send Supplier Booking
+workspace still exposes ISO service dates. All staff-visible and
+supplier-facing service dates in this workflow must use the unambiguous
+`dd/MMMM/yyyy` presentation with English full month names, for example
+`30/September/2026`.
+
+The required presentation change covers:
+
+1. the editable Booking message in the middle panel;
+2. the generated final-message preview in the channel panel;
+3. each generated Service summary card/list row;
+4. any other Package/Day label in this communication workspace that exposes a
+   service date.
+
+The generated service context must therefore read, for example,
+`- Day 4 | 30/September/2026`, rather than
+`- Day 4 | 2026-09-30`.
+
+This is a presentation/template correction only:
+
+- SQLite values, chronological sorting, snapshot service data, portal grouping,
+  Apps Script payloads, and other machine contracts remain ISO `yyyy-MM-dd`;
+- Subject formatting is unchanged unless a date is explicitly introduced into
+  the Subject by a later approved template;
+- new snapshots must use the corrected display format consistently in the
+  editor and preview;
+- existing `GENERATED — NOT SENT` snapshots containing ISO dates require a
+  safe compatibility/regeneration decision during implementation;
+- `SENT`, delivery history, and immutable attempt evidence must never be
+  rewritten only to change date presentation.
+
+Minimum UAT must cover a September/October boundary, a multi-day Portal package
+containing outbound and return services, exact consistency between editor,
+preview, and Service cards, unchanged chronological sort order, and immutable
+Sent history.
+
+### 12.10 Follow-up patch backlog — Point 2: recoverable orphan Generated items
+
+Status: `ROOT CAUSE CONFIRMED — RECORDED, NOT IMPLEMENTED`
+
+Owner retest found two TOC items, `PANDAWA` and `ULUWATU - KECAK`, that remain
+in the Generated batch but cannot be removed with `Cancel sending item`.
+
+The live SQLite audit confirmed:
+
+- the stored booking package is still `GENERATED`;
+- both stored Service rows are `REQUIRED`;
+- there is no Send Attempt, Gmail evidence, external reference, or cancellation
+  event for either item;
+- the booking was generated on 29 July 2026 from package `NAME:TOC`;
+- both stored stable Service IDs are now absent from the active
+  `vendor_service_splits` source.
+
+This makes the booking an orphan Generated snapshot, most likely after the
+underlying itinerary/Micro Split was rebuilt or replaced. The existing cancel
+handler first validates the stored booking correctly, but then calls the normal
+preview generator to rebuild the remaining package. That generator requires the
+old package and every requested Service ID to still exist in the current
+Micro Split queue. The orphan therefore fails before its cancellation tombstone
+can be committed.
+
+Required correction:
+
+1. `Cancel sending item` for a `GENERATED`, not-sent booking must use the stored
+   booking and stored Service snapshot as its authority; it must not require the
+   original live Micro Split row merely to release the draft.
+2. The mutation remains restricted to the exact stable Service ID and must stay
+   blocked after any Send Attempt or delivery evidence exists.
+3. If siblings remain, rebuild package membership, body, evidence metadata, and
+   snapshot hash deterministically from the remaining stored snapshots inside
+   one transaction.
+4. If the final item is canceled, move the booking to `GENERATE_CANCELED`, clear
+   its active generated content, and remove the package from the active batch.
+5. Write the existing immutable `GENERATE_ITEM_CANCELED` event with actor,
+   reason, before/after hash, and explicit recovery provenance such as
+   `ORPHAN_SOURCE_RELEASE`.
+6. After authoritative success, reload the SQLite-backed queue and immediately
+   delist only the canceled row. A failed transaction leaves the row and its
+   previous snapshot unchanged.
+7. Repeated clicks or stale UI events must be idempotent: report
+   `already returned to NOT GENERATED` and refresh, rather than create duplicate
+   tombstones or a generic failure.
+
+Prevention and recurrence handling:
+
+- reconcile every active Generated package against the current Micro Split
+  Service IDs when the batch is loaded or refreshed;
+- reconcile the complete active parent chain for every stored Service:
+  Micro Split Service → Supplier → Product → Contract/Rate where applicable;
+- visibly label missing/changed source rows as
+  `SOURCE CHANGED — REVIEW BEFORE SEND`;
+- distinguish the exact dependency condition instead of using one generic
+  orphan label:
+  `SERVICE SOURCE MISSING`, `SUPPLIER MISSING`, `SUPPLIER ARCHIVED`,
+  `PRODUCT MISSING`, `PRODUCT ARCHIVED`, `CONTRACT/RATE ARCHIVED`, or
+  `PARENT RELATION CHANGED`;
+- never allow an orphan/stale snapshot to be sent silently;
+- keep per-item `Cancel sending item` available for every orphan that has no
+  Send Attempt;
+- offer a separate controlled Review/Regenerate path when a current replacement
+  Service can be identified; never relink by Product name alone;
+- show a specific blocking reason and valid next action when a Send Attempt
+  exists, rather than presenting a button that can only fail;
+- surface orphan/stale Generated counts in Daily Control/Online Process Report
+  so abandoned drafts do not remain hidden indefinitely;
+- preserve Sent history and delivery evidence as immutable even when its source
+  itinerary is later rebuilt.
+
+Generated-list parent-integrity guard:
+
+1. The active Generated batch list must never hide or blank a row merely because
+   its live Supplier/Product parent is missing or archived.
+2. Continue displaying the immutable stored snapshot label, Supplier name,
+   Product name, Customer/Day/date, and stable IDs so staff can identify what
+   was originally generated.
+3. Replace the normal actionable state with
+   `PARENT CHANGED — REVIEW REQUIRED` and show the exact broken/archived parent.
+4. Recheck the parent chain when the list opens, when Supplier Master changes,
+   and again immediately before Send.
+5. A parent-integrity failure blocks Send but does not automatically cancel,
+   relink, regenerate, restore, or archive anything.
+6. Valid per-item actions are:
+   - `Review stored snapshot`;
+   - `Open Supplier/Product Master`, including an exact archived record when it
+     still exists locally;
+   - `Cancel sending item` and return the Service to correction/rebuild;
+   - a role-controlled `Reactivate parent` where the master workflow permits;
+   - a controlled `Continue with stored snapshot` only after explicit
+     Manager/Admin confirmation, a displayed before/current comparison, and an
+     immutable override reason.
+7. Relinking to another Supplier/Product is a content change. It must cancel the
+   existing Generated item, correct the Micro Split, and create a new snapshot;
+   it must never modify the Generated snapshot in place.
+8. Archived is not treated as deleted: the application retains and exposes its
+   historical label/ID and archive status.
+9. Parent-integrity issues appear in Needs Action and Daily Control with filters
+   for missing/archived Supplier, Product, and Rate dependencies.
+10. Sent/history rows remain readable from their immutable snapshots and are
+    never reclassified as unsent merely because a master record is archived
+    later.
+
+Minimum UAT:
+
+1. cancel the first of two orphan Generated items and retain only the sibling;
+2. cancel the final orphan and remove its package;
+3. restart the application and prove both releases persist;
+4. repeat a stale cancel event without duplicate audit data;
+5. simulate one valid current Service plus one deleted source Service;
+6. rebuild itinerary dates/splits after Generate and show the stale-source
+   warning before Send;
+7. confirm a package with any prepared/accepted Send Attempt cannot be released;
+8. confirm atomic rollback after an injected snapshot/hash rebuild failure;
+9. confirm unrelated packages and current Micro Split rows are unchanged;
+10. confirm Daily Control exposes the stale/orphan state and recovery result;
+11. archive Supplier after Generate and block Send with the exact reason;
+12. archive Product after Generate and preserve its stored snapshot label;
+13. archive Contract/Rate and expose the dependency without changing price
+    history;
+14. delete/miss one parent and keep the Generated item visible and recoverable;
+15. reactivate the exact parent and clear the guard after authoritative refresh;
+16. cancel/rebuild through a replacement parent without mutating the old
+    snapshot;
+17. approve Continue with stored snapshot only through Manager/Admin reasoned
+    override;
+18. archive a parent after Sent and preserve immutable delivery history.
+
+### 12.11 Follow-up patch backlog — Point 3: continuous Process mode
+
+Status: `RECORDED — NOT IMPLEMENTED`
+
+The generated-batch spreadsheet/list design remains approved. The owner needs
+one additional primary action in its top header:
+
+`Process`
+
+This button starts a continuous delivery work session instead of requiring
+staff to open every package through its individual `Review` button.
+
+Required behavior:
+
+1. `Process` opens the first actionable Generated package using the existing
+   authoritative deterministic SOP/channel/package sort order.
+2. It enters the same detailed channel-adaptive delivery workspace used by
+   package Review; it does not create a second sending implementation.
+3. Email opens its Gmail Send/evidence controls, while WhatsApp, Portal, and
+   Others open their corresponding external-action/evidence panels.
+4. Sending or recording one package must not automatically return staff to the
+   generated-batch spreadsheet.
+5. After an authoritative result, keep the detailed workspace open and move to
+   the next actionable package through a prominent `Next pending` action.
+6. `Previous` and `Next pending` navigate the same stable Process session;
+   neither action sends automatically.
+7. `Back to list` remains available whenever staff wants the overview. Returning
+   to the list must preserve expansion, scroll position, filters, and the last
+   active package.
+8. The existing package-level `Review` button remains available for opening one
+   exact package without changing the batch order.
+9. The header action should expose useful progress, preferably
+   `Process (N pending)`, and becomes disabled with an explicit
+   `No actionable package` state when none remain.
+10. Successfully Sent/recorded or per-item canceled rows are removed from the
+    active pending sequence after authoritative SQLite refresh, while remaining
+    visible in the appropriate Delivery Report/history.
+11. Blocked packages are never skipped silently. The workspace must show the
+    exact reason and permitted action; `Next pending` may continue to the next
+    actionable package while the blocked package remains in Needs Action.
+12. Closing the popup or application preserves all generated unsent snapshots.
+    Resume returns to the batch list with the Process control and current
+    progress, not directly to an arbitrary package.
+
+The intended operating loop is:
+
+`Generated batch list → Process → package/channel workspace → Send or record
+evidence → Next pending → next package`
+
+This is a guided manual sequence only. It must never become bulk send,
+automatic Gmail send, or automatic external-channel confirmation.
+
+Minimum UAT:
+
+1. start a mixed Email/WhatsApp/Portal/Others batch with the top Process button;
+2. prove the first package follows the deterministic channel/SOP sort;
+3. complete one Email package and continue directly to Next pending;
+4. complete an external-channel package and continue without returning to list;
+5. navigate Previous/Next without sending;
+6. encounter a blocked package, expose its cause, and continue safely;
+7. return to list and preserve the previous list context;
+8. cancel one Service during Process and refresh only the affected package;
+9. close/reopen and resume with the correct remaining count;
+10. reach zero actionable packages without `Package 0 of N`, stale detail, or
+    false unsaved-change warnings.
+
+### 12.12 Follow-up patch backlog — Point 4: compact Generate preparation tree
+
+Status: `RECORDED — NOT IMPLEMENTED`
+
+The Generate preparation left panel must be restyled as a compact
+Windows Explorer-style directory tree. Its authoritative hierarchy is:
+
+`Customer Code → Daywise → Vendor Service`
+
+Grouping and row contract:
+
+1. The root node is one Customer Code. Customer name and Client Tag/occasion
+   remain available as smaller secondary context, not as an oversized heading.
+2. The second level is the exact Daywise node, sorted by Day number and service
+   date. Its compact label includes Day number, `dd/MMMM/yyyy`, and a clearly
+   readable Day Wise Header.
+3. The leaf level is one stable Vendor Service ID. Its primary label exposes
+   the exact Product/Service and Supplier without replacing Product with the
+   broad Day Wise Header.
+4. Booking, rate, Supplier readiness, and draft state remain visible as compact
+   secondary text or restrained status markers.
+5. Customer and Day nodes are collapsible using familiar disclosure controls,
+   connector lines, indentation, and folder/leaf visual hierarchy comparable to
+   Windows Explorer.
+6. Use standard compact desktop typography and row height; avoid large cards,
+   excessive blank space, oversized headings, and repeated labels.
+
+Interaction requirements:
+
+- Customer, Day, and eligible Service checkboxes retain the existing
+  descendant-selection behavior;
+- only eligible normalized Vendor Service leaves can be selected for Generate;
+- partial parent selection must be visibly distinct from fully selected and
+  unselected;
+- filtering by Customer, Day, Supplier, Product, or free word keeps matching
+  leaves visible together with their Customer/Day ancestors;
+- clearing the filter restores the staff's previous expansion state;
+- `Select all eligible`, Clear, selected count, `Generate Booking`, Resume
+  Draft, and exact Open actions remain available;
+- Generate uses stable selected Service IDs and the existing deterministic
+  regrouping/sorting contract;
+- refresh after Generate, Cancel sending, source change, or local Supplier
+  completion updates only the affected branches where possible and preserves
+  scroll/selection/expansion context;
+- Customer roots sort by Customer Code; Day nodes sort by Day number then ISO
+  service date; Service leaves use the existing stable service sort;
+- the tree must remain usable for 100+ Service leaves with one panel scrollbar
+  and no nested horizontal overflow.
+
+Suggested compact visible form:
+
+```text
+▾ ND/PSHBALI7661
+  ▾ Day 3 · 29/September/2026
+    ├─ [ ] Product A · Supplier X
+    └─ [ ] Product B · Supplier Y
+  ▸ Day 4 · 30/September/2026
+```
+
+Minimum UAT:
+
+1. multiple customers with repeated Day numbers stay in separate roots;
+2. multiple Services on one Day remain individually selectable;
+3. parent checkbox correctly selects only eligible descendant leaves;
+4. partial parent state survives collapse and expand;
+5. keyword search for Product, Supplier, and Day Header reveals full ancestry;
+6. clear search restores previous expansion and scroll context;
+7. Resume Draft opens the exact stored package without changing selections;
+8. Cancel one generated item and refresh only its corresponding branch;
+9. verify `dd/MMMM/yyyy` at the Day node while database sorting remains ISO;
+10. verify compact and responsive operation with at least 100 Service leaves.
+
+### 12.13 Follow-up patch backlog — Point 5: controlled Reset Daywise
+
+Status: `OWNER CLARIFIED — RECORDED, NOT IMPLEMENTED`
+
+Add a secondary `Reset Daywise` button beside the existing `Rebuild dates`
+control in Vendor Booking → New Itinerary.
+
+The owner clarified that Reset Daywise is an intentional full restart of the
+Daywise working area when correcting individual rows would be slower or more
+confusing.
+
+Reset scope:
+
+- remove every local Day row, including an explicit Day 0;
+- remove every Day date, Day Wise Header, Start/Finish, pasted detail, and
+  Day-level working state;
+- remove every linked Micro Split row, stable Service ID, Supplier/Product/Rate
+  selection, quantity, and local split detail;
+- cancel and delist every Generated-but-not-sent booking draft that depends on
+  those Services;
+- preserve only the itinerary-level source and identity needed to start again:
+  Customer Code/name, Client Tag, Adult/Child/Infant, Arrival/Departure and
+  flights, hotel source, Drive/source revision reference, and itinerary preview;
+- after Reset, staff explicitly clicks `Rebuild dates` to reconstruct fresh Day
+  rows from Arrival/Departure and the latest posted itinerary.
+
+Reset does not post or queue a replacement online automatically. Daily Control
+must show `LOCAL DAYWISE RESET — REBUILD/REPOST REQUIRED` until the replacement
+Daywise is saved and, when applicable, posted again.
+
+Hard safety gate:
+
+- if any affected Service/package has a recorded delivery, Reset is forbidden;
+- recorded delivery includes `SENT`, `SENT_PENDING_SYNC`,
+  `SEND_OUTCOME_UNKNOWN`, a prepared Send Attempt whose final outcome is not
+  safely proven absent, a Gmail message/thread ID, external-channel evidence,
+  Portal/WhatsApp/Other booking reference, or equivalent immutable delivery
+  ledger;
+- the entire reset is blocked rather than deleting only the unsent remainder;
+- the blocking notice identifies the affected Customer, Supplier/Product, sent
+  time/evidence state, and provides Open Delivery Report/Open Gmail Thread where
+  applicable;
+- Sent and delivery evidence remain immutable.
+
+Generated snapshots with no Send Attempt or delivery evidence do not block the
+reset. They are atomically moved to `GENERATE_CANCELED`, delisted from the
+active batch, and audited before their underlying Service rows are removed.
+
+The action requires a blocking confirmation dialog:
+
+```text
+Reset all Daywise data for {Customer Code}?
+
+This will remove:
+- {N} Day rows, including Day 0 when present
+- {N} Micro Split items
+- {N} Generated drafts that have not been sent
+
+Customer, flight, pax, hotel, and source-itinerary data will remain.
+You must run Rebuild dates afterward.
+
+[OK] [Cancel]
+```
+
+Behavior:
+
+1. `Cancel` closes the prompt and changes nothing.
+2. Before showing the final confirmation, the backend performs the authoritative
+   delivery-ledger safety check; the UI count alone is never sufficient.
+3. `OK` performs one atomic local transaction in dependency order: cancel
+   eligible Generated drafts, record cancellation/reset evidence, remove
+   Micro Split rows, then remove Day rows.
+4. Write one auditable `VENDOR_DAYWISE_RESET` event with Customer Code,
+   affected Day/Service/booking IDs and counts, actor, time, source revision,
+   previous snapshot hash, and reason `STAFF_FULL_DAYWISE_RESTART`.
+5. Successful reset refreshes only the current New Itinerary workspace,
+   displays a clear completion notice, and leaves a prominent
+   `Rebuild dates` next action.
+6. Failure rolls back every booking, Service, Day, event, and status change;
+   partial reset is forbidden.
+7. Repeated Reset on an already-empty Daywise is idempotent and reports
+   `Daywise is already empty`.
+8. Rebuild creates new stable Day/Service identities; removed Service IDs must
+   never be reused or silently relinked by Product name.
+9. Existing central/online Daywise data is not silently deleted. The local
+   reset remains visibly pending rebuild/repost until staff completes the
+   controlled online publication flow.
+
+Minimum UAT:
+
+1. Cancel the confirmation and prove no value changes;
+2. reset several Days, Day 0, Micro Splits, and Generated drafts with no attempt;
+3. prove all affected Generated drafts are delisted and audited;
+4. preserve Customer, pax, flight, hotel, and itinerary-source data;
+5. run Rebuild Dates afterward and create fresh Day rows;
+6. confirm old Day/Service IDs are not reused;
+7. repeat Reset and receive an idempotent already-empty result;
+8. inject a database failure and prove complete atomic rollback;
+9. block Reset for Gmail `SENT`;
+10. block Reset for `SENT_PENDING_SYNC` and `SEND_OUTCOME_UNKNOWN`;
+11. block Reset for Portal/WhatsApp/Other external evidence;
+12. block Reset for a prepared attempt whose outcome is ambiguous;
+13. show the exact blocking delivery and its valid evidence/history action;
+14. show Daily Control `REBUILD/REPOST REQUIRED` after successful reset;
+15. restart the app and confirm the reset, audit, and blocking rules persist.
+
+### 12.14 Follow-up patch backlog — Point 6: efficient Gmail send critical path
+
+Status: `CURRENT BOTTLENECK CONFIRMED — RECORDED, NOT IMPLEMENTED`
+
+Owner UAT found that the Send Email button remains in `Sending...` for too long.
+The source audit confirmed that the current foreground path performs:
+
+1. a renderer Gmail and central-readiness preflight;
+2. the final confirmation;
+3. a second backend Gmail and central-readiness preflight;
+4. immutable Send Attempt preparation;
+5. the Gmail API send;
+6. local Gmail Message/Thread ID persistence;
+7. synchronous Apps Script evidence publication;
+8. a broad application refresh;
+9. return to the generated batch list.
+
+The duplicate preflight, synchronous central evidence call, and broad refresh
+extend perceived Send time beyond the Gmail operation itself.
+
+Required optimized critical path:
+
+`final authoritative pre-send validation → immutable PREPARED ledger →
+Gmail send → persist Gmail Message/Thread ID as SENT_PENDING_SYNC →
+immediate staff acknowledgement/Next pending`
+
+Efficiency contract:
+
+1. Keep exactly one authoritative backend pre-send validation at the final Send
+   boundary. The renderer readiness card may use a recent cached result for
+   display but cannot authorize Send.
+2. The final check must still validate the exact connected employee Gmail
+   account, usable OAuth session/token, TO recipient, unchanged snapshot hash,
+   current booking state, and absence of another active attempt.
+3. Central/Apps Script readiness is displayed separately and must not delay or
+   block Gmail when Gmail itself is valid. Its result controls evidence-sync
+   state, not whether the supplier email may leave.
+4. Preserve the immutable `PREPARED` Send Attempt before the Gmail network call,
+   unique active-attempt constraint, disabled Send button, and double-click
+   protection.
+5. As soon as Gmail returns both Message ID and Thread ID, persist them
+   transactionally, mark the booking `SENT_PENDING_SYNC`, and release the UI
+   from the Sending state.
+6. Start official Apps Script evidence sync through the persistent background
+   queue. Success promotes the booking to `SENT`; failure remains visible as
+   `SENT_PENDING_SYNC` and retries only evidence sync, never Gmail.
+7. Replace the broad foreground `refresh()` with an exact affected-booking/
+   package refresh. Other Dashboard/Inbox refreshes may run asynchronously.
+8. Integrate Patch Point 3: after Gmail acceptance, keep Process mode open and
+   enable `Next pending`; do not force staff back to the batch list.
+9. Never report `Email sent` before Gmail Message/Thread ID has been durably
+   stored locally.
+10. Gmail timeout or broken connection after PREPARED becomes
+    `SEND_OUTCOME_UNKNOWN`; it must never trigger an automatic Gmail retry.
+
+Staff-visible stages:
+
+- `Checking Gmail...`
+- `Locking booking snapshot...`
+- `Sending via Gmail...`
+- `Email accepted by Gmail`
+- `Evidence syncing in background` or `Evidence synced`
+
+Progress checklist presentation:
+
+- reuse the clear progress/check pattern already used by Supplier Master;
+- show one persistent row for each stage:
+  `Gmail connection`, `Snapshot locked`, `Gmail delivery`,
+  `Local evidence saved`, `Central evidence sync`, and `Package refreshed`;
+- each row has one explicit state:
+  `WAITING`, `RUNNING`, `DONE`, `FAILED`, `SKIPPED`, or `BLOCKED`;
+- completed rows retain a visible check mark and completion time;
+- the active row shows an in-progress indicator without hiding previously
+  completed stages;
+- failed/blocked rows show a short safe error, attempt number, last attempt
+  time, and only the actions valid for that exact stage;
+- progress is derived from the persisted Send Attempt/booking/background job,
+  not from temporary renderer state, so closing/reopening shows the same truth;
+- a compact overall progress indicator may remain visible while staff continues
+  to another package, making background evidence sync observable.
+
+Failure action matrix:
+
+1. Gmail connection/preflight failure:
+   `Retry check` or `Skip for now`.
+2. Local snapshot/ledger failure before Gmail:
+   `Retry preparation` or `Skip for now`; no email has left.
+3. Gmail definitively rejects the request before acceptance:
+   expose a controlled user-confirmed `Retry send` only when the backend can
+   prove Gmail did not accept the message.
+4. Gmail outcome is ambiguous:
+   mark `BLOCKED — OUTCOME UNKNOWN`; allow only `Recheck/Reconcile` or
+   `Skip for now`. Never offer automatic Retry send.
+5. Gmail accepted but local Message/Thread evidence cannot be committed:
+   keep the attempt blocked for recovery/reconciliation; never resend.
+6. Gmail accepted and central sync fails:
+   show `Retry evidence sync` or `Skip for now`. Retry calls only Apps Script
+   and never Gmail.
+7. Package refresh fails after durable Gmail acceptance:
+   show `Retry refresh` or `Skip for now`; the email remains Sent.
+
+`Skip for now` semantics:
+
+- Skip advances the Process session to the next actionable package;
+- it does not delete the Send Attempt, change Failed/Blocked into Done, discard
+  evidence, mark an email as Sent, or silently cancel the package;
+- the skipped issue remains in Needs Action, Delivery Report, and the progress
+  monitor with its exact recovery action;
+- staff can reopen it later from the list/report;
+- an intentional Resend remains a separate user interaction requiring proven
+  original delivery, recipient review, reason, and final confirmation. It is
+  never a generic retry button for a failed stage.
+
+The UI must remain responsive, but navigation away from a PREPARED in-flight
+attempt must show its exact state. Repeated clicks, window close, or application
+restart cannot create a second send.
+
+Performance and observability:
+
+- record local monotonic duration for preflight, ledger preparation, Gmail API,
+  local acceptance persistence, evidence sync, and UI refresh;
+- do not log recipients, body, OAuth data, or other message content in
+  performance telemetry;
+- local processing overhead before/after the Gmail network call should target
+  less than 500 ms on the supported office PC;
+- UI acknowledgement should occur within 500 ms after a successful Gmail API
+  response and local evidence commit;
+- network duration is reported separately so staff can distinguish Gmail delay
+  from central-sync delay;
+- use bounded timeouts with explicit state transitions, never an indefinite
+  spinner.
+
+Minimum UAT:
+
+1. prove only one authoritative final Gmail preflight occurs per Send;
+2. send with central sync healthy and persist one Message/Thread ID;
+3. send with central sync slow/unavailable and release UI at Gmail acceptance;
+4. retry pending evidence without a second Gmail call;
+5. double-click Send and create exactly one Send Attempt/email;
+6. close the popup during Gmail in-flight and recover the same attempt;
+7. restart after Gmail acceptance but before evidence sync and resume sync only;
+8. simulate Gmail timeout and enter `SEND_OUTCOME_UNKNOWN` without auto-retry;
+9. change snapshot or TO after readiness check and block at final validation;
+10. confirm exact package refresh and immediate Next pending navigation;
+11. verify stage timings contain no recipient/body/token data;
+12. close/reopen during every stage and reconstruct the same checklist state;
+13. Retry each safely retryable stage without repeating completed stages;
+14. Skip each failed/blocked stage and retain it in Needs Action;
+15. prove central-sync Retry never calls Gmail;
+16. prove ambiguous outcome never exposes automatic Retry send;
+17. test a mixed 50-package Process session without accumulating full-refresh
+    delays after each accepted email.
+
+### 12.15 Follow-up patch backlog — Point 7: cross-PC Approval Center
+
+Status: `OWNER DIRECTION CONFIRMED — RECORDED, NOT IMPLEMENTED`
+
+Add a Manager/Admin submenu:
+
+`Manager / Admin → Approval Center`
+
+The initial queue is `Supplier Contract/Rate Approvals`. The architecture must
+support maker and checker working on different PCs.
+
+Cross-PC authority model:
+
+1. Staff saves a Contract/Rate draft locally as `LOCAL_ONLY`.
+2. `Request approval` creates the local immutable approval snapshot and sends a
+   central request through Apps Script.
+3. The central request contains the normalized Contract/Rate payload, snapshot
+   hash, Supplier/Product/Contract IDs and readable labels, previous central
+   version/hash, before/proposed values, validity, maker identity, request
+   reason, evidence reference, affected-booking references, origin device ID,
+   and timestamps.
+4. Never include OAuth tokens, passwords, local filesystem paths, Gmail body,
+   or unrelated local database content.
+5. The Manager PC loads the central Approval Queue; it never needs direct access
+   to the staff PC or its SQLite file.
+6. The Manager decision applies only to the exact central snapshot hash.
+7. The staff PC polls approval state on app start, Supplier Master open, Sync
+   Center refresh, and a bounded background interval.
+
+Approval Center layout:
+
+- top counts: Pending, Changes requested, Approved waiting sync, Failed/conflict;
+- searchable/filterable compact table:
+  `Requested | Supplier | Product | Contract | Old Rate | Proposed Rate |
+  Difference | Validity | Maker | Status | Action`;
+- detail view shows full old-versus-proposed field diff, source/evidence link,
+  affected bookings, dependency state, overlap/validity warnings, request
+  reason, maker identity, and snapshot hash;
+- actions:
+  `Approve`, `Request changes`, `Reject`, and `Open evidence`;
+- Manager cannot edit price values inside the approval decision. Data correction
+  returns to the maker through Request Changes.
+
+Maker-checker and permission rules:
+
+- only Manager/Admin may decide;
+- the maker cannot approve the same snapshot, even when the maker also has an
+  administrative role;
+- Approve is disabled until required evidence and dependencies are readable;
+- Request Changes and Reject require a reason;
+- every request/decision is centrally and locally audited with employee email,
+  employee ID, time, decision, reason, and snapshot hash.
+
+Status lifecycle:
+
+`LOCAL_ONLY → APPROVAL_REQUESTED → APPROVED_TO_SYNC → SYNCING → SYNCED`
+
+Alternative branches:
+
+- `APPROVAL_REQUESTED → CHANGES_REQUESTED → LOCAL_ONLY/new snapshot`;
+- `APPROVAL_REQUESTED → REJECTED`;
+- payload changes after request:
+  `CANCELED_PAYLOAD_CHANGED → LOCAL_ONLY/new request`;
+- approved snapshot conflicts with a newer central version:
+  `APPROVED_TO_SYNC → VERSION_CONFLICT → REVIEW_REQUIRED`.
+
+Cross-PC completion:
+
+1. Normal path: approval is recorded centrally; the originating staff PC pulls
+   `APPROVED_TO_SYNC`, queues the exact local draft, and resumes its blocked
+   publish session without repeating already-synced items.
+2. The staff PC does not need to remain open while the Manager reviews.
+3. If the staff PC later reconnects, it must validate that its local payload
+   still matches the approved hash before publishing.
+4. If the originating PC is unavailable, Manager/Admin may use
+   `Take over approved sync`. This imports only the centrally stored approved
+   snapshot into a controlled publish session on the Manager PC.
+5. Takeover requires confirmation, records both origin and takeover devices/
+   actors, revalidates Supplier/Product dependencies and central record version,
+   and publishes only the approved hash.
+6. A successful central publish is pulled back by every PC on its next Supplier
+   Master refresh; the original local draft becomes `SYNCED` when its entity ID
+   and approved hash are confirmed online.
+7. Approval itself must not be confused with publication. The UI displays
+   `Approved — waiting sync`, `Syncing`, or `Synced` separately.
+
+Offline behavior:
+
+- a request that cannot reach Apps Script remains
+  `LOCAL_PENDING_APPROVAL_SYNC` and is not yet visible to Manager;
+- staff sees `Manager cannot see this request yet` with Retry request sync;
+- Manager decisions already stored centrally remain durable while the staff PC
+  is offline;
+- no device may invent central approval from a local-only status.
+
+Publish/conflict presentation:
+
+- an unapproved Contract/Rate must become an item-level
+  `BLOCKED_APPROVAL`, not a generic remote-method error;
+- the publish session continues safe unrelated items;
+- the blocked row identifies Supplier, Product, Contract, Rate, validity, and
+  current approval status with exact Request/Open/Resume actions;
+- `VERSION_CONFLICT` remains distinct from `APPROVAL REQUIRED`;
+- after approval, Resume/Takeover continues only remaining dependency-safe
+  stages.
+
+Minimum UAT:
+
+1. staff PC requests approval and Manager PC sees the exact snapshot;
+2. Manager PC approves and staff PC receives `APPROVED_TO_SYNC`;
+3. maker with Manager/Admin role cannot approve their own snapshot;
+4. Request Changes returns reason and exact record link to staff;
+5. staff edit after request invalidates the old approval hash;
+6. Manager approves while staff PC is closed, then staff resumes later;
+7. Manager takes over approved sync while origin PC is unavailable;
+8. two PCs attempt Resume/Takeover and publish the approved hash once;
+9. newer central version creates VERSION_CONFLICT rather than overwrite;
+10. request offline remains visibly local and invisible to Manager;
+11. evidence permission failure blocks decision with a clear reason;
+12. unrelated publish-session items continue around BLOCKED_APPROVAL;
+13. all PCs reconcile to SYNCED after central readback;
+14. audit identifies maker, checker, origin/takeover device, and exact hash;
+15. verify no token, password, local path, or unrelated data enters the central
+    approval record.
+
+### 12.16 v1.1.17 implementation result
+
+Implemented and locally verified:
+
+- booking-facing dates are rendered as `dd/MMMM/yyyy` while persisted values
+  remain ISO;
+- generated Email Send validates the current Service, Supplier, Product,
+  Contract, and Rate parent chain and blocks changed/archived parents with an
+  exact `PARENT CHANGED — REVIEW REQUIRED` notice;
+- Cancel sending is snapshot-based and recovers an orphan Generated service
+  even when its live Micro Split parent has disappeared;
+- Reset Daywise clears Day 0, all Daywise and Micro Split records, and every
+  unsent/no-attempt Generated snapshot; any Send Attempt or delivery evidence
+  hard-blocks the reset;
+- Rebuild Dates fills blank posted Program headers and available Start/Finish
+  times, with arrival/departure time fallback, without overwriting manual input;
+- Generated Batch exposes `Process (N pending)` and continues directly to the
+  next pending package after a proven delivery;
+- Gmail Send returns immediately after Message ID and Thread ID are stored
+  durably, then official evidence sync continues in the background with a
+  five-stage status display and existing Retry path;
+- Manager/Admin has a cross-PC Approval Center for review and a hash-verified
+  `Take over sync` path for an approved central Contract/Rate snapshot;
+- `docs/POST_NOTIFICATION_MATRIX_PLAN.md` remains an official planning record
+  only and does not activate new notification routes.
+
+Verification:
+
+- version: `1.1.17`;
+- automated tests: `65/65` pass;
+- source syntax and diff hygiene: pass;
+- installer and unpacked executable metadata: `1.1.17` / `1.1.17.0`;
+- packaged ASAR contains the reset, orphan, parent-integrity, Process,
+  background Gmail stages, Approval Center, and takeover controls;
+- isolated packaged application remains alive through the eight-second smoke
+  gate;
+- installer: `release/ERIM-PSH-Setup-1.1.17.exe`;
+- size: `111,087,733` bytes;
+- SHA-256:
+  `AB2B548A53006131A2D4C54CED7389BD8F02FD31560D8938E0339AB11F400BC5`.
+
+Still gated:
+
+- no Git commit, push, GitHub release, or updater publication has been made;
+- Portal/WhatsApp delivery remains manual operational UAT;
+- representative two-PC Manager approval/takeover remains blocked until the
+  active Apps Script approval route/schema is redeployed and health-checked.
+
+Controlled live dummy evidence:
+
+- Gmail preflight: `GMAIL_READY`, exact staff profile confirmed, central
+  evidence endpoint ready;
+- booking: `ND/PSHBALI7661 / TARANTULA / ATV TANDEM B`;
+- Gmail Message/Thread ID: `19fb6681308934f2`;
+- local Send Attempt:
+  `VSEND-6b4e8b1e-0113-4dce-96b2-b49306c9c8ba`;
+- central Communication ID:
+  `COMM-2b0646c7-6125-41b2-87e6-bbae73f59b4a`;
+- final status: `SYNCED`, one official sync attempt, no error;
+- Gmail readback confirms exact Product, `03/October/2026`, Hotel,
+  Start/Finish, and no Day Wise Header;
+- a separate stale item was correctly marked `PRODUCT_MISSING` and was not
+  sent;
+- a central Contract/Rate approval request remained
+  `LOCAL_PENDING_SYNC` after the live Apps Script returned a generic failure;
+  the local request, exact hash, reason, and evidence reference remain durable
+  for retry after backend deployment.

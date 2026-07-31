@@ -1352,12 +1352,21 @@ function recordVendorBookingEvidence_(request, actor) {
   const sendAttemptId = String(evidence.sendAttemptId || "").trim();
   const bookingId = String(evidence.bookingId || "").trim();
   const customerCode = String(evidence.customerCode || "").trim().toUpperCase();
+  const channel = String(evidence.channel || "EMAIL").trim().toUpperCase();
   const gmailMessageId = String(evidence.gmailMessageId || "").trim();
   const gmailThreadId = String(evidence.gmailThreadId || "").trim();
-  if (!sendAttemptId || !bookingId || !customerCode || !gmailMessageId || !gmailThreadId) {
+  const externalReference = String(evidence.externalReference || "").trim();
+  if (!["EMAIL", "WHATSAPP", "PORTAL", "OTHERS", "OTHER"].includes(channel)) {
+    throw apiError_("VALIDATION_ERROR", "Unsupported Vendor delivery channel.");
+  }
+  if (!sendAttemptId || !bookingId || !customerCode
+      || (channel === "EMAIL" && (!gmailMessageId || !gmailThreadId))
+      || (channel !== "EMAIL" && !externalReference)) {
     throw apiError_(
       "VALIDATION_ERROR",
-      "Send Attempt, Booking, Customer Code, Gmail message, and Gmail thread IDs are required.",
+      channel === "EMAIL"
+        ? "Send Attempt, Booking, Customer Code, Gmail message, and Gmail thread IDs are required."
+        : "Send Attempt, Booking, Customer Code, and external reference are required.",
     );
   }
 
@@ -1373,6 +1382,7 @@ function recordVendorBookingEvidence_(request, actor) {
     "resend_of_attempt_id", "resend_reason",
     "snapshot_hash", "recipients_json", "subject_snapshot", "body_snapshot",
     "service_ids_json", "source_revision_id", "gmail_thread_id", "gmail_message_id",
+    "external_reference", "external_evidence_json", "evidence_source",
     "sent_at", "actor_email", "created_at", "created_by",
   ]);
 
@@ -1396,7 +1406,7 @@ function recordVendorBookingEvidence_(request, actor) {
       supplier_id: evidence.supplierId || "",
       supplier_name: evidence.supplierName || "",
       action_type: evidence.actionType || "NEW",
-      channel: "EMAIL",
+      channel,
       booking_status: evidence.actionType === "CANCEL" ? "CANCELED" : "ACTIVE",
       communication_status: "SENT",
       supplier_result: "PENDING",
@@ -1416,7 +1426,7 @@ function recordVendorBookingEvidence_(request, actor) {
       customer_code: customerCode,
       supplier_id: evidence.supplierId || "",
       communication_type: "SUPPLIER_BOOKING",
-      channel: "EMAIL",
+      channel,
       direction: "OUTBOUND",
       status: "SENT",
       send_attempt_id: sendAttemptId,
@@ -1430,6 +1440,10 @@ function recordVendorBookingEvidence_(request, actor) {
       source_revision_id: evidence.sourceRevisionId || "",
       gmail_thread_id: gmailThreadId,
       gmail_message_id: gmailMessageId,
+      external_reference: externalReference,
+      external_evidence_json: JSON.stringify(evidence.externalEvidence || {}),
+      evidence_source: evidence.evidenceSource || (channel === "EMAIL"
+        ? "SYSTEM_GMAIL_SEND" : "MANUAL_EXTERNAL_ACTION"),
       sent_at: evidence.sentAt || now,
       actor_email: actor.email,
       created_at: now,
@@ -1441,7 +1455,8 @@ function recordVendorBookingEvidence_(request, actor) {
       actor_employee_id: actor.employeeId,
       actor_email: actor.email,
       client_mode: "DESKTOP",
-      action: "VENDOR_BOOKING_EMAIL_SENT",
+      action: channel === "EMAIL"
+        ? "VENDOR_BOOKING_EMAIL_SENT" : "VENDOR_BOOKING_EXTERNAL_SENT",
       entity_type: "SUPPLIER_BOOKING",
       entity_id: bookingId,
       tour_id: evidence.tourId || "",
@@ -1451,6 +1466,8 @@ function recordVendorBookingEvidence_(request, actor) {
         communicationId,
         gmailMessageId,
         gmailThreadId,
+        channel,
+        externalReference,
         snapshotHash: evidence.snapshotHash || "",
       }),
       reason: "",
