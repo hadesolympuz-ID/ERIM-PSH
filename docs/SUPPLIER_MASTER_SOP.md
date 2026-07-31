@@ -1,0 +1,237 @@
+# ERIM-PSH Supplier Master and Contract Rate SOP
+
+Document status: `APPROVED IMPLEMENTATION BASELINE`
+Effective release: `v1.1.4`
+Owner: `Manager / Admin`
+Authoritative source: `ERIM-PSH Google Sheet + Google Drive`
+
+## 1. Purpose
+
+Supplier Master is the only maintained source for Vendor, TOC, Transport,
+Luggage Van, Additional Service, and future supplier categories. Operational
+screens consume this source; they do not maintain their own vendor or rate
+lists.
+
+Routine changes are saved immediately to the user's local SQLite staging queue.
+They become active centrally only after an authorized user reviews and publishes
+the batch to Google. Successful batch publication is audited per entity and
+announced to all active ERIM-PSH users with one summary notification.
+
+## 2. Menu and screen
+
+Open `Manager / Admin > Supplier Master`.
+
+- Type tabs select a supplier category.
+- The left section maintains supplier identity, booking contacts, recipients,
+  and booking SOP.
+- The right section maintains products/services and contract rates for the
+  selected supplier.
+- `Add Type` creates a future category without a backend syntax change.
+- `Pending` opens the local change queue and supports selecting all or part of a batch.
+- `Publish to Google` sends the reviewed dependency-ordered batch and refreshes
+  the central catalog once.
+- The gear button opens protected `System Maintenance`.
+
+Archived records remain in history but are removed from new operational
+selection.
+
+## 2.1 Local save and batch publish
+
+1. Save each Type, Supplier, Product, Contract, or archive action locally.
+2. Continue entering the remaining supplier catalogue without waiting for Google.
+3. Open `Pending` and review the selected changes.
+4. Publish all or only the checked changes.
+5. Review any `CONFLICT` or `FAILED` item. A conflict means the Google record
+   version changed after the local edit began; refresh and reconcile it before retrying.
+
+Local statuses are `READY_TO_PUBLISH`, `SYNCING`, `SYNCED`, `CONFLICT`, and
+`FAILED`. New Supplier records are published before their Products; Products
+before Contracts and Rates. A successful batch refreshes the local cache once.
+
+## 3. Supplier Type procedure
+
+1. Select `Add Type`.
+2. Fill a permanent uppercase code, display name, description, and display
+   order.
+3. Save once the category is operationally approved.
+4. Never reuse an existing code for a different meaning.
+5. Archive an unused type only after its suppliers and active contracts have
+   been reviewed.
+
+Initial types are:
+
+- `VENDOR`
+- `TOC`
+- `TRANSPORT`
+- `LUGGAGE_VAN`
+- `ADDITIONAL_SERVICE`
+
+## 4. Supplier profile procedure
+
+Select a type and an existing supplier, or choose `New Supplier`.
+
+Complete the applicable fields:
+
+- official supplier name and optional legal name;
+- booking channel: Email, WhatsApp, Email + WhatsApp, Portal, or Others;
+- timezone, address, website/portal URL, tax and payment information;
+- operational booking notes;
+- one or more contact persons, each with role, phone, WhatsApp, and email;
+- one or more booking recipients marked `TO`, `CC`, or `BCC`;
+- one or more SOP steps with sequence, channel, instruction, lead time,
+  escalation contact, and notes.
+
+Recipient rows are unlimited. This supports a booking email with twelve or more
+CC addresses without storing them inside one text field.
+
+Save the supplier only after checking that the primary booking destination and
+escalation path are usable.
+
+Phone and WhatsApp fields use international text format and must start with
+`+`, for example `+62 812-3916-9392`. Spaces, parentheses, dots, and hyphens
+may be retained for readability. ERIM-PSH stores these fields as plain text so
+Google Sheets never interprets the leading `+` as a formula. Existing
+formula-error cells are converted back to literal text by the Supplier Master
+schema repair.
+
+## 5. Product/service procedure
+
+Select a supplier, then add or edit a product in the right section.
+
+Fill:
+
+- service/product name and optional code/category;
+- default price basis and unit;
+- inclusion and exclusion;
+- terms and conditions;
+- cancellation policy;
+- lead time and cutoff;
+- location/area, capacity, and operational notes.
+
+A product describes what is booked. Its price belongs to a contract rate, not
+to the supplier or product profile.
+
+## 6. Contract procedure
+
+1. Select `New Contract`.
+2. Fill contract number, currency, validity start and end dates, signed date,
+   contract notes, and terms.
+3. Upload the contract document when available. The file is stored below
+   `Supplier Contracts/{Supplier ID - Supplier Name}` in the official Drive
+   folder.
+4. Add one or more rate rows. Each row links a product to a price basis, amount,
+   currency, and optional row-level validity.
+5. Save after checking date range, products, amounts, and source document.
+
+The system blocks overlapping contracts for the same supplier and product
+unless Manager/Admin records an explicit exception reason.
+
+Contract state is derived from the current date:
+
+- `SCHEDULED`: validity has not started;
+- `ACTIVE`: currently valid;
+- `EXPIRING`: valid and inside the expiry warning window;
+- `EXPIRED`: validity has ended;
+- `SUPERSEDED`, `CANCELLED`, or `ARCHIVED`: retained for history and excluded
+  from new automatic rate selection.
+
+For a renewal, create a new contract. Do not overwrite the old validity and
+rates. The old contract remains the historical source for prior bookings.
+
+## 7. Expiry and notification procedure
+
+A daily central check evaluates contract validity. Warnings are created at
+90, 60, 30, 14, 7, and 1 day before expiry, on the expiry date, and once after
+expiry. Notifications are delivered to every active user with ERIM-PSH access.
+
+Manager/Admin should:
+
+1. review the expiring supplier and affected products;
+2. request and upload the renewal;
+3. create the new contract and rate rows;
+4. verify the new validity before archiving or superseding an obsolete record.
+
+## 8. Micro Split and pending-rate rule
+
+Micro Split always displays:
+
+1. Type
+2. Supplier
+3. Supplier Service / Product
+
+The available options come from active Supplier Master records. For the service
+date, the system applies only a valid contract rate.
+
+If no valid contract rate exists:
+
+- the item becomes `PENDING_RATE`;
+- booking generation and sending by Email, WhatsApp, Portal, or another channel
+  may continue;
+- a booking-only manual rate may be entered at split time or later;
+- manual rate requires a reason and source (`EMAIL`, `WHATSAPP`, `QUOTATION`,
+  `PHONE`, `PORTAL`, or `OTHERS`);
+- an evidence reference should identify the supporting email, thread, file,
+  quotation, or note;
+- the manual rate does not modify Supplier Master and does not become a future
+  default.
+
+This separates operational booking progress from commercial rate completion.
+
+## 9. Archive and audit
+
+Deletion is implemented as controlled archive so historical bookings never
+lose their supplier, product, contract, or rate reference. Archive requires a
+reason.
+
+The desktop uses an in-app archive dialog. It identifies the selected record,
+summarizes active Product, Contract, or Rate references, and saves the action to
+Local Pending before anything is published to Google. Browser-style
+`window.prompt` input is not used because it is unsupported in the packaged
+Electron workflow.
+
+Every create, edit, archive, initialization, and expiry event records actor,
+timestamp, entity, and change context in `AUDIT_LOG` and
+`SUPPLIER_MASTER_EVENTS`.
+
+## 10. Initial seed and migration
+
+Initialization is an infrequent Admin/Owner maintenance operation, not a routine
+save or publish action. Open the gear menu and type `INITIALIZE` to unlock it.
+The operation is idempotent: it creates or repairs the Supplier Master tables and migrates the existing
+`VENDOR_RATE_MASTER` and `TOC_MASTER` records. It also seeds temporary Transport
+and Luggage Van examples and:
+
+- Additional / Garland
+- Additional / Water
+
+Temporary records must be replaced with verified supplier and contract data
+before production financial use.
+
+## 11. Bulk Import / Export
+
+Use `Manager / Admin > Import / Export Data` for controlled bulk entry and
+selective export. Import is create-only, validates the official workbook before
+writing, saves valid records to the same local Pending queue, and retains
+conflicts per batch for export or direct correction in Supplier Master.
+
+The detailed procedure and workbook schema are recorded in
+`docs/SUPPLIER_IMPORT_EXPORT_SOP.md`.
+
+Hotel is not a Supplier Import Type. It will use a separate Hotel submenu and
+seasonal-rate model while reusing the common Excel mechanism.
+
+## 12. Local rate approval and sync
+
+A newly saved local Contract/Rate may be used immediately on the same PC when
+its operational fields, validity, source, and evidence are complete. It must
+remain visibly marked as a local rate and must not be represented as centrally
+approved or synced.
+
+The detailed operational status model, approval notice, maker-checker review,
+conflict behavior, booking snapshot rules, implementation checklist, and UAT
+gates are defined in:
+
+`docs/SUPPLIER_LOCAL_RATE_APPROVAL_SYNC_SOP.md`
+
+Publishing an unapproved local rate is prohibited by this SOP. Application
+enforcement for the approval-specific states remains an implementation item.

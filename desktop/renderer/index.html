@@ -1,0 +1,1316 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src https:;">
+    <title>ERIM-PSH Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <button id="sidebar-toggle" class="brand" type="button" title="Hide menu" aria-label="Hide menu" aria-expanded="true">
+          <span class="brand-mark">EP</span>
+          <span class="brand-text">
+            <strong>ERIM-PSH</strong>
+            <small>Desktop Operations</small>
+          </span>
+        </button>
+        <nav id="main-nav">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="workspace" data-module="RESERVATION" data-menu-group="reservation" aria-label="Open Reservation dashboard">Reservation</button>
+            <button class="nav-collapse-control" data-menu-toggle="reservation" type="button" aria-controls="reservation-submenu" aria-expanded="true">Hide</button>
+          </div>
+          <div id="reservation-submenu" class="nav-submenu" data-menu-content="reservation" aria-label="Reservation actions">
+            <button class="nav-subitem" data-itinerary-action="new">Add New Itinerary</button>
+            <button class="nav-subitem" data-itinerary-action="revise">Revise Itinerary</button>
+            <button class="nav-subitem" data-reservation-action="recheck">Re Check Itinerary</button>
+            <button class="nav-subitem" data-reservation-action="kpi">Cek KPI</button>
+          </div>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="vendor-dashboard" data-module="VENDOR" data-menu-group="vendor" aria-label="Open Vendor Booking dashboard">Vendor Booking</button>
+            <button class="nav-collapse-control" data-menu-toggle="vendor" type="button" aria-controls="vendor-submenu" aria-expanded="true">Hide</button>
+          </div>
+          <div id="vendor-submenu" class="nav-submenu" data-menu-content="vendor" aria-label="Vendor Booking actions">
+            <button class="nav-subitem" data-vendor-action="itinerary-check">Itinerary Check</button>
+            <button class="nav-subitem" data-vendor-action="inbox">Inbox</button>
+            <button class="nav-subitem" data-vendor-action="generate">Generate</button>
+            <button class="nav-subitem" data-vendor-action="new">New Itinerary</button>
+            <button class="nav-subitem" data-vendor-action="revise">Revise Itinerary</button>
+            <button class="nav-subitem" data-vendor-action="cancel">Cancel All Service</button>
+            <button class="nav-subitem" data-vendor-action="kpi">Cek KPI</button>
+          </div>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="transport-operation" data-module="TRANSPORT" data-menu-group="transport" aria-label="Open Transport dashboard">Transport</button>
+            <button class="nav-collapse-control" data-menu-toggle="transport" type="button" aria-controls="transport-submenu" aria-expanded="true">Hide</button>
+          </div>
+          <div id="transport-submenu" class="nav-submenu" data-menu-content="transport" aria-label="Transport actions">
+            <button class="nav-subitem" data-transport-action="new-itinerary-check">New Itinerary Check</button>
+            <button class="nav-subitem" data-transport-action="revise-itinerary-check">Revise Itinerary Check</button>
+            <button class="nav-subitem" data-transport-action="add-cost">Add Cost to Itinerary</button>
+            <button class="nav-subitem" data-transport-action="driver-detail">Set Driver Detail</button>
+            <button class="nav-subitem" data-transport-action="arrival-review">Review Arrival per Date</button>
+            <button class="nav-subitem" data-transport-action="toc-review">Review TOC per Itinerary</button>
+            <button class="nav-subitem" data-transport-action="kpi">Cek KPI</button>
+            <button class="nav-subitem" data-transport-action="day-tour">Review Day Tour</button>
+            <button class="nav-subitem" data-transport-action="invoicing">Invoicing</button>
+          </div>
+          <button class="nav-item" data-view="workspace" data-module="OPS_ACCOUNTING">Ops Accounting</button>
+          <button class="nav-item" data-view="workspace" data-module="GENERAL_CASHIER">General Cashier</button>
+          <div class="nav-parent-row">
+            <button class="nav-item nav-parent" data-view="workspace" data-module="MANAGER_ADMIN" data-menu-group="manager" aria-label="Open Manager / Admin dashboard">Manager / Admin</button>
+            <button class="nav-collapse-control" data-menu-toggle="manager" type="button" aria-controls="manager-submenu" aria-expanded="true">Hide</button>
+          </div>
+          <div id="manager-submenu" class="nav-submenu" data-menu-content="manager" aria-label="Manager and Admin actions">
+            <button class="nav-subitem" data-manager-action="approval-center">Approval Center · Temporary</button>
+            <button class="nav-subitem" data-manager-action="supplier-master">Supplier Master</button>
+            <button class="nav-subitem" data-manager-action="supplier-excel">Import / Export Data</button>
+          </div>
+          <button class="nav-item" data-view="sync">Sync Center <span id="sync-nav-count" class="nav-count">0</span></button>
+          <button class="nav-item" data-view="admin">Admin DEV Console</button>
+          <button class="nav-item" data-view="settings">Settings</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span id="environment-label">DEV</span>
+          <small id="version-label">Version —</small>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="view-eyebrow">Local workspace</p>
+            <h1 id="view-title">Operations dashboard</h1>
+          </div>
+          <div class="topbar-actions">
+            <div id="update-panel" class="update-panel">
+              <span id="update-message">Checking application status…</span>
+              <button id="update-action" class="button ghost small" hidden>Check update</button>
+            </div>
+            <button id="google-auth" class="button ghost small" hidden>Connect Google</button>
+            <div class="user-chip">
+              <span id="user-initials">DU</span>
+              <div><strong id="user-name">Development User</strong><small id="user-department">RESERVATION</small></div>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <section id="dashboard-view" class="view active">
+            <div id="general-dashboard-panel" class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Notifications</p><h2>Inbox</h2></div>
+                <span id="inbox-count" class="inbox-count">0</span>
+              </div>
+              <div id="notification-inbox" class="notification-inbox"></div>
+            </div>
+            <div id="reservation-followup-panel" class="panel followup-panel" hidden>
+              <div class="panel-heading">
+                <div><p class="eyebrow">Reservation KPI</p><h2>Pending follow-up queue</h2></div>
+              </div>
+              <div class="callout">Pending age starts when an itinerary or revision is posted. Longer unresolved items reduce the Reservation follow-up KPI.</div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Source</th><th>Pending age</th><th>KPI</th><th>Waiting for</th><th>Alasan pending</th><th></th></tr></thead>
+                  <tbody id="reservation-followup-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="vendor-dashboard-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Vendor Booking</p>
+                <h2>Daily control dashboard</h2>
+                <p>Operational views may overlap; one stable micro-item remains the source of truth.</p>
+              </div>
+            </div>
+            <div class="vendor-dashboard-grid">
+              <section class="panel vendor-dashboard-card urgent">
+                <div class="panel-heading"><div><p class="eyebrow">Required work</p><h2>New Itinerary — Not Split</h2></div><span id="vendor-not-split-count" class="inbox-count">0</span></div>
+                <div id="vendor-not-split-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card pending">
+                <div class="panel-heading"><div><p class="eyebrow">Supplier packages</p><h2>Split — Not Generated</h2></div><span id="vendor-not-generated-count" class="inbox-count">0</span></div>
+                <div id="vendor-not-generated-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card replied">
+                <div class="panel-heading"><div><p class="eyebrow">Human review required</p><h2>Email Replied — Check Thread</h2></div><span id="vendor-replied-count" class="inbox-count">0</span></div>
+                <div id="vendor-replied-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-dashboard-card done">
+                <div class="panel-heading"><div><p class="eyebrow">Arrival D+1 to D+7</p><h2>Upcoming Arrival Recheck</h2></div><span id="vendor-upcoming-count" class="inbox-count">0</span></div>
+                <div id="vendor-upcoming-list" class="vendor-dashboard-scroll"></div>
+              </section>
+              <section class="panel vendor-process-report">
+                <div class="panel-heading"><div><p class="eyebrow">Local & online publication</p><h2>Online Process Report</h2></div><span id="vendor-process-report-count" class="inbox-count">0</span></div>
+                <div id="vendor-process-report-list" class="vendor-process-report-list"></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="vendor-itinerary-check-view" class="view">
+            <div class="workspace-banner">
+              <div><p class="eyebrow">Vendor Booking · Read only</p><h2>Itinerary Check</h2><p>Inspect every Day Wise and split type without changing Transport-owned data.</p></div>
+            </div>
+            <div class="panel vendor-itinerary-check-panel">
+              <div class="vendor-itinerary-check-search">
+                <label>Customer Code<input id="vendor-itinerary-check-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-vendor-itinerary-check" class="button primary" type="button">Check itinerary</button>
+                <span id="vendor-itinerary-check-status" class="status">READ ONLY</span>
+              </div>
+              <div id="vendor-itinerary-check-result" class="vendor-itinerary-check-result">
+                <div class="empty-notifications">Enter a Customer Code to inspect the complete itinerary.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="vendor-inbox-view" class="view">
+            <div class="vendor-inbox-layout">
+              <section class="panel vendor-delivery-report">
+                <div class="panel-heading"><div><p class="eyebrow">Service-level evidence</p><h2>Booking Delivery Report</h2></div><span id="vendor-delivery-report-count" class="inbox-count">0</span></div>
+                <div class="vendor-delivery-report-filters">
+                  <input id="vendor-delivery-report-search" type="search" placeholder="Code, name, supplier, product, dinner..." />
+                  <select id="vendor-delivery-report-status"><option value="NEEDS_ACTION">Needs Action</option><option value="">All statuses</option><option>GENERATED</option><option>SENT_PENDING_SYNC</option><option>SENT</option><option>SEND_OUTCOME_UNKNOWN</option></select>
+                  <select id="vendor-delivery-report-channel"><option value="">All channels</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option><option>OTHERS</option></select>
+                  <input id="vendor-delivery-report-supplier" placeholder="Supplier name" />
+                  <label>Service date<input id="vendor-delivery-report-service-date" type="date" /></label>
+                  <label>Sent date<input id="vendor-delivery-report-sent-date" type="date" /></label>
+                  <select id="vendor-delivery-report-evidence"><option value="">All evidence</option><option value="PENDING">Evidence pending</option><option value="RECORDED">Evidence recorded</option><option value="REPLY">Reply review</option></select>
+                  <select id="vendor-delivery-report-sort"><option value="LATEST">Latest activity</option><option value="SUPPLIER">Supplier</option><option value="DATE">Service date</option><option value="CODE">Customer Code</option></select>
+                </div>
+                <div id="vendor-delivery-report-grid" class="vendor-delivery-report-grid"></div>
+              </section>
+              <section class="panel vendor-booking-register">
+                <div class="panel-heading"><div><p class="eyebrow">Booking history</p><h2>Booking Register</h2></div><span id="vendor-booking-register-count" class="inbox-count">0</span></div>
+                <div class="vendor-register-filters">
+                  <input id="vendor-register-search" type="search" placeholder="Client Code, guest, supplier, or service" />
+                  <select id="vendor-register-state"><option value="">All states</option><option>GENERATED</option><option>SENT_PENDING_SYNC</option><option>SENT</option><option>SEND_OUTCOME_UNKNOWN</option></select>
+                  <select id="vendor-register-channel"><option value="">All channels</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option><option>OTHERS</option></select>
+                  <select id="vendor-register-sort"><option value="SENT">Latest sent</option><option value="GENERATED">Latest generated</option><option value="CODE">Client Code</option></select>
+                </div>
+                <div id="vendor-booking-register-list" class="vendor-inbox-scroll"></div>
+              </section>
+              <section class="panel vendor-work-inbox">
+                <div class="panel-heading"><div><p class="eyebrow">Incoming work</p><h2>Work Inbox</h2></div><span id="vendor-inbox-count" class="inbox-count">0</span></div>
+                <div class="callout">Read, acknowledged, claimed, and completed remain separate states.</div>
+                <div id="vendor-notification-inbox" class="vendor-inbox-scroll"></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="vendor-new-itinerary-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Vendor Booking intake</p>
+                <h2 id="vendor-intake-mode-title">New Itinerary</h2>
+                <p id="vendor-intake-mode-description">Review hasil ekstraksi, isi Day Wise, lalu split layanan sebelum masuk Generate Booking.</p>
+              </div>
+            </div>
+            <div class="panel vendor-intake-panel">
+              <div class="vendor-intake-lookup">
+                <label>Customer Code<input id="vendor-customer-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-vendor-itinerary" class="button primary" type="button">Load itinerary</button>
+                <span id="vendor-extraction-status" class="status">Not loaded</span>
+              </div>
+              <form id="vendor-intake-form" hidden>
+                <input type="hidden" name="vendorDraftId" />
+                <input type="hidden" name="tourId" />
+                <input type="hidden" name="sourcePublicationId" />
+                <input type="hidden" name="sourceRecordVersion" />
+                <input type="hidden" name="sourceRevisionId" />
+                <input type="hidden" name="driveFileId" />
+                <input type="hidden" name="driveFileName" />
+                <input type="hidden" name="driveFileUrl" />
+                <datalist id="vendor-name-options"></datalist>
+                <datalist id="vendor-service-options"></datalist>
+                <datalist id="toc-service-options"></datalist>
+                <datalist id="transport-name-options"></datalist>
+                <datalist id="transport-service-options"></datalist>
+                <datalist id="luggage-van-name-options"></datalist>
+                <datalist id="luggage-van-service-options"></datalist>
+                <section class="vendor-summary-fields">
+                  <div class="vendor-identity-fields">
+                    <label>Customer Code<input name="customerCode" readonly /></label>
+                    <label>Customer Name<input name="customerName" required /></label>
+                    <label>Client Tag / Occasion<input name="clientTag" placeholder="HONEYMOONERS" /></label>
+                    <label>Adult<input name="adultPax" type="number" min="0" step="1" value="0" required /></label>
+                    <label>Child<input name="childPax" type="number" min="0" step="1" value="0" required /></label>
+                    <label>Infant<input name="infantPax" type="number" min="0" step="1" value="0" required /></label>
+                  </div>
+                  <div class="vendor-travel-fields">
+                    <div class="vendor-travel-group">
+                      <strong>Arrival</strong>
+                      <label>Date<input name="arrivalDate" type="text" placeholder="03/October/2026" required data-vendor-date-input /></label>
+                      <label>Flight<input name="arrivalFlight" /></label>
+                      <label>Time<input name="arrivalTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
+                      <label>Sector<input name="arrivalSector" /></label>
+                    </div>
+                    <div class="vendor-travel-group">
+                      <strong>Departure</strong>
+                      <label>Date<input name="departureDate" type="text" placeholder="03/October/2026" required data-vendor-date-input /></label>
+                      <label>Flight<input name="departureFlight" /></label>
+                      <label>Time<input name="departureTime" inputmode="numeric" placeholder="HH:MM" data-hour-time /></label>
+                      <label>Sector<input name="departureSector" /></label>
+                    </div>
+                  </div>
+                </section>
+                <section class="vendor-hotels">
+                  <div class="section-heading">
+                    <div><p class="eyebrow">Repeatable records</p><h3>Hotel stays</h3></div>
+                    <button id="add-vendor-hotel" class="button ghost small" type="button">Add hotel</button>
+                  </div>
+                  <div id="vendor-hotel-list"></div>
+                </section>
+                <section class="vendor-daywise-section">
+                  <div class="section-heading">
+                    <div><p class="eyebrow">Arrival to departure</p><h3>Day Wise & micro split</h3>
+                      <div class="vendor-day-zero-actions">
+                        <button id="add-vendor-day-zero" class="button ghost small" type="button">+ Add Day 0</button>
+                        <button id="delete-vendor-day-zero" class="button ghost small" type="button" hidden>Delete Day 0</button>
+                      </div>
+                    </div>
+                    <div class="vendor-daywise-toolbar">
+                      <button id="reset-vendor-daywise" class="button danger small" type="button">Reset Daywise</button>
+                      <button id="rebuild-vendor-days" class="button ghost small" type="button">Rebuild dates</button>
+                    </div>
+                  </div>
+                  <div class="vendor-work-columns">
+                    <div id="vendor-day-list" class="vendor-day-list"></div>
+                    <section class="vendor-document-pane">
+                      <div class="pane-heading">
+                        <div><strong id="vendor-itinerary-name">Posted itinerary</strong><small>Read-only DOCX content from Google Drive</small></div>
+                        <a id="vendor-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open Drive</a>
+                      </div>
+                      <div id="vendor-itinerary-preview" class="document-preview vendor-document-scroll"></div>
+                    </section>
+                  </div>
+                </section>
+                <div class="vendor-intake-actions">
+                  <span id="vendor-save-note" class="muted-text">Split autosaves to this PC. Online posting remains a separate controlled action.</span>
+                  <button id="save-vendor-draft" class="button ghost" type="button">Save local draft</button>
+                  <button id="post-vendor-intake" class="button primary" type="button">Post structured data online</button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section id="vendor-generate-view" class="view">
+            <div class="workspace-banner vendor-booking-banner">
+              <div><p class="eyebrow">Vendor Booking</p><h2>Generate preparation</h2><p>Pilih Micro Split Vendor, periksa Supplier/SOP dan Product/Rate, lalu buka workspace komunikasi.</p></div>
+              <div class="vendor-booking-summary"><strong id="vendor-booking-package-count">0</strong><span>supplier packages</span></div>
+            </div>
+            <div class="panel vendor-generate-prep-layout">
+              <aside class="vendor-booking-queue">
+                <div class="panel-heading compact"><div><p class="eyebrow">Daywise tree</p><h2>Client → Day → service</h2></div></div>
+                <label class="vendor-booking-search">Filter<input id="vendor-booking-search" placeholder="Client, Day, supplier, or service" /></label>
+                <div class="vendor-tree-selection-bar">
+                  <label><input id="vendor-tree-select-all" type="checkbox" /> Select all eligible</label>
+                  <button id="vendor-tree-clear" class="button ghost small" type="button">Clear</button>
+                  <span id="vendor-tree-selected-count">0 selected</span>
+                  <button id="vendor-tree-resume" class="button ghost small" type="button" disabled>Resume drafts</button>
+                  <button id="vendor-tree-recover-batch" class="button ghost small" type="button" hidden>Retry interrupted batch</button>
+                  <button id="vendor-tree-skip-batch" class="button ghost small" type="button" hidden>Skip failed packages</button>
+                  <button id="vendor-tree-prepare" class="button primary small" type="button" disabled>Generate Booking</button>
+                </div>
+                <div id="vendor-booking-queue-list" class="vendor-booking-queue-list"></div>
+              </aside>
+              <section class="vendor-prep-detail-panel">
+                <div class="panel-heading compact"><div><p class="eyebrow">Supplier Master</p><h2>Supplier, SOP & channel</h2></div></div>
+                <div id="vendor-prep-supplier-detail" class="vendor-prep-detail-scroll">
+                  <div class="empty-notifications">Choose one Daywise service to inspect its Supplier Master detail.</div>
+                </div>
+              </section>
+              <section class="vendor-prep-detail-panel">
+                <div class="panel-heading compact"><div><p class="eyebrow">Product Master</p><h2>Product, contract & rate</h2></div></div>
+                <div id="vendor-prep-product-detail" class="vendor-prep-detail-scroll">
+                  <div class="empty-notifications">Choose one Daywise service to inspect its Product and Rate detail.</div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <dialog id="vendor-communication-dialog" class="vendor-communication-dialog">
+            <div class="vendor-communication-shell">
+              <header class="vendor-communication-header">
+                <div><p class="eyebrow">Controlled communication workspace</p><h2>Generate & Send Supplier Booking</h2></div>
+                <div class="vendor-communication-header-actions">
+                  <div id="vendor-communication-progress" class="vendor-communication-progress">0 Packages</div>
+                  <button id="close-vendor-communication" class="button ghost" type="button">Close</button>
+                </div>
+              </header>
+              <section id="vendor-communication-batch-view" class="vendor-communication-batch-view">
+                <div class="vendor-batch-toolbar">
+                  <div><p class="eyebrow">Generated batch</p><h2>Review items before delivery</h2></div>
+                  <div class="vendor-batch-toolbar-actions">
+                    <small>Generate only creates local snapshots. No item is Sent until its channel action succeeds.</small>
+                    <button id="vendor-communication-process" class="button primary" type="button">Process</button>
+                  </div>
+                </div>
+                <div id="vendor-communication-batch-grid" class="vendor-communication-batch-grid"></div>
+              </section>
+              <div id="vendor-communication-work-view" class="vendor-communication-layout" hidden>
+                <aside class="vendor-communication-queue">
+                  <div class="panel-heading compact"><div><p class="eyebrow">Outgoing queue</p><h2>Supplier packages</h2></div></div>
+                  <div id="vendor-communication-queue-list" class="vendor-communication-queue-list"></div>
+                </aside>
+                <section class="vendor-communication-message">
+                  <div id="vendor-booking-empty" class="empty-notifications">No generated package is selected.</div>
+                  <div id="vendor-booking-preview" hidden>
+                    <div class="vendor-booking-preview-heading">
+                      <div><p class="eyebrow">Generated snapshot</p><h2 id="vendor-booking-preview-title">Booking preview</h2></div>
+                      <div id="vendor-booking-preview-status"></div>
+                    </div>
+                    <div class="vendor-booking-form-grid vendor-communication-form">
+                      <label>Action<select id="vendor-booking-action"><option value="NEW">New booking</option><option value="AMEND">Amendment</option><option value="CANCEL">Cancellation</option></select></label>
+                      <label>Channel<select id="vendor-booking-channel" disabled></select></label>
+                      <label class="wide">Recipients <small>One row: TO, CC, BCC, WHATSAPP | address</small><textarea id="vendor-booking-recipients" rows="4"></textarea></label>
+                      <label class="wide">Subject<input id="vendor-booking-subject" /></label>
+                      <label class="wide">Booking message<textarea id="vendor-booking-body" rows="16"></textarea></label>
+                    </div>
+                    <div id="vendor-booking-service-summary" class="vendor-booking-service-summary"></div>
+                    <div class="vendor-selected-item-actions">
+                      <button id="vendor-communication-back-list" class="button ghost" type="button">Back to list</button>
+                    </div>
+                    <div class="vendor-communication-navigation">
+                      <button id="vendor-communication-previous" class="button ghost" type="button">Previous</button>
+                      <strong id="vendor-communication-position">No package selected</strong>
+                      <button id="vendor-communication-next" class="button ghost" type="button">Next pending</button>
+                    </div>
+                  </div>
+                </section>
+                <aside class="vendor-communication-action">
+                  <div><p class="eyebrow">Selected channel</p><h2>Send & evidence</h2></div>
+                  <div id="vendor-gmail-readiness" class="vendor-gmail-readiness" hidden></div>
+                  <div id="vendor-booking-sop" class="vendor-booking-sop"></div>
+                  <div id="vendor-email-context-content" class="vendor-email-context-content"></div>
+                  <div class="vendor-booking-actions vendor-communication-send-actions">
+                    <span id="vendor-booking-send-note" class="muted-text">Generate saves a local evidence snapshot. Sending remains a separate explicit action.</span>
+                    <button id="generate-vendor-booking" class="button ghost" type="button">Regenerate snapshot</button>
+                    <button id="send-vendor-booking-email" class="button danger" type="button" hidden>Send via Gmail</button>
+                  </div>
+                  <div id="vendor-booking-send-panel" class="vendor-booking-send-panel" hidden>
+                    <label><span id="vendor-external-reference-label">External reference / evidence note</span><input id="vendor-booking-external-reference" placeholder="WhatsApp time, portal booking ID, or evidence note" /></label>
+                    <button id="record-vendor-booking-sent" class="button primary" type="button">Record as sent</button>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </dialog>
+
+          <dialog id="vendor-channel-dialog" class="compact-dialog vendor-channel-dialog">
+            <form id="vendor-channel-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Local Supplier Master update</p><h2>Complete delivery channel</h2></div>
+                <button id="close-vendor-channel" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-channel-content">
+                <input name="supplierId" type="hidden" />
+                <input name="channel" type="hidden" />
+                <div id="vendor-channel-notice" class="maintenance-warning"></div>
+                <label>Destination
+                  <input name="destination" autocomplete="off" required />
+                  <small id="vendor-channel-destination-help"></small>
+                </label>
+                <small>No password is stored here. Portal credentials stay in the approved local/browser password manager.</small>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-channel" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Save locally & queue online</button>
+              </div>
+            </form>
+          </dialog>
+
+          <dialog id="vendor-resend-dialog" class="compact-dialog vendor-resend-dialog">
+            <form id="vendor-resend-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Intentional delivery override</p><h2>Kirim ulang / Ganti penerima</h2></div>
+                <button id="close-vendor-resend" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-resend-content">
+                <div id="vendor-resend-notice" class="maintenance-warning"></div>
+                <div class="vendor-resend-recipient-grid">
+                  <label>Previous recipients<textarea id="vendor-resend-old-recipients" rows="4" readonly></textarea></label>
+                  <label>New recipients <small>TO, CC, or BCC | address</small><textarea id="vendor-resend-new-recipients" rows="4" required></textarea></label>
+                </div>
+                <label>Resend reason<textarea id="vendor-resend-reason" rows="3" required placeholder="Example: original supplier mailbox is unavailable"></textarea></label>
+                <small>The original email and ledger remain immutable. Continue creates one linked Send Attempt.</small>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-resend" class="button ghost" type="button">Cancel</button>
+                <button id="confirm-vendor-resend" class="button danger" type="submit">Continue</button>
+              </div>
+            </form>
+          </dialog>
+
+          <dialog id="vendor-external-email-dialog" class="compact-dialog">
+            <form id="vendor-external-email-form">
+              <div class="dialog-heading">
+                <div><p class="eyebrow">Gmail evidence recovery</p><h2>Link email sent outside system</h2></div>
+                <button id="close-vendor-external-email" class="icon-button" type="button" aria-label="Close">×</button>
+              </div>
+              <div class="vendor-resend-content">
+                <div class="maintenance-warning">
+                  <strong>Exact generated Subject</strong>
+                  <span id="vendor-external-email-subject"></span>
+                </div>
+                <label>Sent Mail candidate
+                  <select id="vendor-external-email-candidate"></select>
+                  <small>Subject discovers candidates only. The selected Gmail Message ID and Thread ID become the evidence.</small>
+                </label>
+                <label>Reason / note
+                  <textarea id="vendor-external-email-reason" rows="3" placeholder="Example: staff sent directly from Gmail after a system problem"></textarea>
+                </label>
+              </div>
+              <div class="dialog-actions">
+                <button id="cancel-vendor-external-email" class="button ghost" type="button">Cancel</button>
+                <button id="confirm-vendor-external-email" class="button primary" type="submit">Link selected Gmail evidence</button>
+              </div>
+            </form>
+          </dialog>
+
+          <section id="vendor-revise-itinerary-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Revise Itinerary</h2><p>Revise memakai workspace itinerary dan Micro Split yang sama agar detail lama tidak perlu diketik ulang.</p></div></div>
+            <div class="panel vendor-revise-launch"><div><strong>Load current itinerary, edit only the affected day/service, then save.</strong><p class="muted-text">Setelah revisi tersimpan, buka Generate dan pilih Amendment untuk supplier yang terdampak.</p></div><button id="open-vendor-revise-workspace" class="button primary" type="button">Open revise workspace</button></div>
+          </section>
+          <section id="vendor-cancel-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cancel All Services</h2><p>Prepare cancellation per supplier while preserving every original service and communication record.</p></div></div>
+            <div class="panel vendor-cancel-panel">
+              <div class="vendor-cancel-form">
+                <label>Customer Code<select id="vendor-cancel-customer"></select></label>
+                <label>Cancellation reason<textarea id="vendor-cancel-reason" rows="4" placeholder="Required for audit and supplier communication"></textarea></label>
+                <button id="prepare-vendor-cancel" class="button danger" type="button">Prepare cancellation packages</button>
+              </div>
+              <div><div class="panel-heading compact"><div><p class="eyebrow">Prepared only</p><h2>Cancellation packages</h2></div></div><div id="vendor-cancel-package-list"></div></div>
+            </div>
+          </section>
+          <section id="vendor-kpi-view" class="view vendor-placeholder-view">
+            <div class="workspace-banner"><div><p class="eyebrow">Vendor Booking</p><h2>Cek KPI</h2><p>Submenu personal KPI siap; rumus dan indikator akan mengikuti workflow final Vendor.</p></div></div>
+            <div class="panel"><div class="empty-notifications">KPI Vendor belum dihitung pada sprint ini.</div></div>
+          </section>
+
+          <section id="transport-operation-view" class="view">
+            <div class="workspace-banner transport-operation-banner">
+              <div>
+                <p class="eyebrow">Transport Operations</p>
+                <h2 id="transport-operation-title">New Itinerary Check</h2>
+                <p id="transport-operation-description">Review kebutuhan kendaraan dari itinerary baru sebelum assignment dan costing.</p>
+              </div>
+              <span id="transport-operation-status" class="status">FOUNDATION</span>
+            </div>
+            <div class="panel transport-operation-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Prepared workflow</p><h2 id="transport-operation-heading">Operational foundation</h2></div>
+                <small id="transport-operation-note" class="muted-text">Detailed rules will be activated after the Transport workflow discussion.</small>
+              </div>
+              <div id="transport-operation-cards" class="transport-operation-grid"></div>
+            </div>
+          </section>
+
+          <section id="approval-center-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Approval Center</h2>
+                <p>Cross-PC inbox for local Contract/Rate sync requests. Approval never changes a generated or sent booking snapshot.</p>
+              </div>
+              <button id="refresh-approval-center" class="button ghost" type="button">Refresh approvals</button>
+            </div>
+            <div class="approval-center-temporary-note" role="status">
+              <strong>Temporary single-window workflow</strong>
+              <span>This Approval Center stays inside the main ERIM window. Its final approval workflow and layout are still pending owner review.</span>
+            </div>
+            <div class="panel approval-center-panel">
+              <div class="approval-center-toolbar">
+                <input id="approval-center-search" type="search" placeholder="Supplier, contract, maker, or reason" />
+                <select id="approval-center-status">
+                  <option value="">All statuses</option>
+                  <option value="APPROVAL_REQUESTED">Approval requested</option>
+                  <option value="APPROVED_TO_SYNC">Approved to sync</option>
+                  <option value="CHANGES_REQUESTED">Changes requested</option>
+                  <option value="REJECTED">Rejected</option>
+                </select>
+                <span id="approval-center-summary" class="status">Not loaded</span>
+              </div>
+              <div class="approval-center-table">
+                <div class="approval-center-row approval-center-head">
+                  <span>Supplier / Contract</span><span>Maker</span><span>Requested</span>
+                  <span>Reason / Evidence</span><span>Status</span><span>Action</span>
+                </div>
+                <div id="approval-center-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="supplier-master-view" class="view">
+            <div class="workspace-banner supplier-master-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Supplier Master & Contract Rates</h2>
+                <p id="supplier-master-banner-note">One authoritative source for supplier identity, contacts, booking SOP, products, contracts, rates, and future supplier types.</p>
+              </div>
+              <div class="supplier-master-banner-actions">
+                <span id="supplier-master-sync-status" class="status">Not loaded</span>
+                <button id="review-supplier-drafts" class="button ghost small" type="button">Pending <span id="supplier-draft-count">0</span></button>
+                <button id="publish-supplier-drafts" class="button primary small" type="button" disabled>Publish to Google</button>
+                <button id="refresh-supplier-master" class="button ghost small" type="button">Refresh</button>
+                <button id="open-supplier-maintenance" class="icon-button supplier-maintenance-button" type="button" title="System Maintenance" aria-label="System Maintenance">⚙</button>
+                <button id="focused-supplier-close" class="button ghost small" type="button" hidden>Close</button>
+              </div>
+            </div>
+            <div class="panel supplier-master-panel">
+              <div class="supplier-type-tabs">
+                <div id="supplier-type-tabs" class="supplier-type-tab-list"></div>
+                <button id="add-supplier-type" class="button ghost small" type="button">+ Add Type</button>
+              </div>
+              <div class="supplier-master-columns">
+                <section class="supplier-master-left">
+                  <div class="supplier-master-toolbar">
+                    <input id="supplier-master-search" type="search" placeholder="Search supplier, code, or destination" />
+                    <button id="add-supplier" class="button primary small" type="button">+ Supplier</button>
+                  </div>
+                  <div class="supplier-left-layout">
+                    <div id="supplier-master-list" class="supplier-master-list"></div>
+                    <form id="supplier-master-form" class="supplier-master-form">
+                      <input name="supplierId" type="hidden" />
+                      <input name="typeCode" type="hidden" />
+                      <div class="supplier-form-heading">
+                        <div><strong id="supplier-form-title">New supplier</strong><small>Save instantly to this PC, then publish the reviewed batch to Google.</small></div>
+                        <span id="supplier-form-status" class="status">NEW</span>
+                      </div>
+                      <div class="supplier-form-grid">
+                        <label>Supplier code<input name="supplierCode" placeholder="Auto when blank" /></label>
+                        <label>Supplier name<input name="supplierName" required /></label>
+                        <label>Legal name<input name="legalName" /></label>
+                        <label>Destinations<input name="destinations" placeholder="Bali, Lombok, Java" /></label>
+                        <label class="wide">Address<textarea name="address" rows="2"></textarea></label>
+                        <label>Website<input name="website" type="url" placeholder="https://" /></label>
+                        <label>Tax/NPWP ID<input name="taxId" /></label>
+                        <label>Internal PIC employee ID<input name="internalPicEmployeeId" /></label>
+                        <label class="wide">Operational notes<textarea name="operationalNotes" rows="3"></textarea></label>
+                      </div>
+                      <div class="supplier-form-section supplier-contact-section">
+                        <div class="section-heading"><div><p class="eyebrow">Repeatable</p><h3>Contact persons</h3></div><button id="add-supplier-contact" class="button ghost small" type="button">+ Contact</button></div>
+                        <div id="supplier-contact-list" class="supplier-repeatable-list"></div>
+                      </div>
+                      <div class="supplier-form-section supplier-recipient-section">
+                        <div class="section-heading"><div><p class="eyebrow">To / CC / BCC / WhatsApp</p><h3>Booking recipients</h3></div><button id="add-supplier-recipient" class="button ghost small" type="button">+ Recipient</button></div>
+                        <div id="supplier-recipient-list" class="supplier-repeatable-list"></div>
+                      </div>
+                      <div class="supplier-form-section supplier-sop-section">
+                        <div class="section-heading"><div><p class="eyebrow">Default communication</p><h3>Booking SOP</h3></div></div>
+                        <div class="supplier-channel-options">
+                          <label><input name="bookingChannels" type="checkbox" value="EMAIL" /> Email</label>
+                          <label><input name="bookingChannels" type="checkbox" value="WHATSAPP" /> WhatsApp</label>
+                          <label><input name="bookingChannels" type="checkbox" value="EMAIL_WHATSAPP" /> Email + WhatsApp</label>
+                          <label><input name="bookingChannels" type="checkbox" value="PORTAL" /> Portal</label>
+                          <label><input name="bookingChannels" type="checkbox" value="OTHERS" /> Others</label>
+                        </div>
+                        <div class="supplier-form-grid">
+                          <label>Booking lead time<input name="leadTime" placeholder="Example: 48 hours" /></label>
+                          <label>Cut-off time<input name="cutoffTime" placeholder="Example: 16:00 Bali time" /></label>
+                          <label class="wide">Required booking information<textarea name="requiredInformation" rows="3"></textarea></label>
+                          <label class="wide">Confirmation procedure<textarea name="confirmationProcedure" rows="3"></textarea></label>
+                          <label class="wide">Amendment procedure<textarea name="amendmentProcedure" rows="3"></textarea></label>
+                          <label class="wide">Cancellation procedure<textarea name="cancellationProcedure" rows="3"></textarea></label>
+                          <label class="wide">Emergency/escalation procedure<textarea name="emergencyProcedure" rows="3"></textarea></label>
+                          <label>Portal URL<input name="portalUrl" type="url" placeholder="https://" /></label>
+                          <label>Account reference<input name="accountReference" placeholder="No passwords" /></label>
+                          <label>Portal payment rule<select name="portalPaymentRule">
+                            <option value="">Standard / none</option>
+                            <option value="EKA_JAYA_15_DAY">Eka Jaya: ≤15 Deposit, &gt;15 Prepaid</option>
+                          </select></label>
+                          <label class="wide">Default email subject template<input name="subjectTemplate" /></label>
+                          <label class="wide">Default booking body template<textarea name="bodyTemplate" rows="4"></textarea></label>
+                        </div>
+                      </div>
+                      <div class="supplier-master-form-actions">
+                        <button id="archive-supplier" class="button danger" type="button" hidden>Archive supplier</button>
+                        <button id="save-supplier-master" class="button primary" type="submit">Save supplier locally</button>
+                      </div>
+                    </form>
+                  </div>
+                </section>
+                <section class="supplier-master-right">
+                  <div class="supplier-product-toolbar">
+                    <div><p class="eyebrow">Selected supplier</p><h3 id="supplier-product-heading">Select a supplier</h3><small id="supplier-product-subheading">Products, contracts, and rates will appear here.</small></div>
+                    <div><button id="add-supplier-product" class="button ghost small" type="button" disabled>+ Product</button><button id="add-supplier-contract" class="button primary small" type="button" disabled>+ New Contract</button></div>
+                  </div>
+                  <div id="supplier-product-contract-list" class="supplier-product-contract-list"><div class="empty-notifications">Choose a supplier from the left.</div></div>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          <section id="supplier-excel-view" class="view">
+            <div class="workspace-banner supplier-excel-banner">
+              <div>
+                <p class="eyebrow">Manager / Admin</p>
+                <h2>Supplier Data Import / Export</h2>
+                <p>Bulk-create supplier data locally, review conflicts, then publish the approved pending batch to Google. Hotel will use a separate submenu and seasonal-rate model.</p>
+              </div>
+              <div class="supplier-excel-banner-actions">
+                <button id="supplier-excel-template" class="button ghost small" type="button">Download Excel template</button>
+                <button id="supplier-excel-open-pending" class="button primary small" type="button">Open Pending Supplier Master</button>
+              </div>
+            </div>
+
+            <div class="supplier-excel-typebar panel">
+              <div>
+                <p class="eyebrow">Required scope</p>
+                <strong>Choose one supplier type</strong>
+                <small>One workbook and one export always belong to one Type.</small>
+              </div>
+              <div id="supplier-excel-type-tabs" class="supplier-excel-type-tabs"></div>
+            </div>
+
+            <div class="supplier-excel-layout">
+              <section class="panel supplier-excel-card">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">Create only</p><h2>Import new data</h2></div>
+                  <span id="supplier-excel-import-status" class="status">Waiting for file</span>
+                </div>
+                <div class="supplier-excel-card-body">
+                  <div class="supplier-excel-step">
+                    <span>1</span>
+                    <div><strong>Select the official Excel workbook</strong><small>Headers and table structure are checked before any record is saved.</small></div>
+                    <button id="supplier-excel-select-file" class="button primary" type="button">Select Excel</button>
+                  </div>
+                  <div id="supplier-excel-file-result" class="supplier-excel-message">No workbook selected.</div>
+                  <div id="supplier-excel-summary" class="supplier-excel-summary">
+                    <article><span>Total rows</span><strong>0</strong></article>
+                    <article class="success"><span>Ready</span><strong>0</strong></article>
+                    <article class="attention"><span>Conflicts</span><strong>0</strong></article>
+                    <article class="danger"><span>Invalid</span><strong>0</strong></article>
+                  </div>
+                  <div class="supplier-excel-preview">
+                    <div class="supplier-excel-subheading">
+                      <div><strong>Review result</strong><small>Conflicts are retained locally per import batch.</small></div>
+                      <button id="supplier-excel-export-conflicts" class="button ghost small" type="button" disabled>Export conflicts</button>
+                    </div>
+                    <div class="table-wrap supplier-excel-table-wrap">
+                      <table>
+                        <thead><tr><th>Sheet / row</th><th>Record</th><th>Result</th><th>Explanation</th><th></th></tr></thead>
+                        <tbody id="supplier-excel-preview-rows"><tr><td class="empty" colspan="5">Select a workbook to see the validation result.</td></tr></tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="supplier-excel-actions">
+                    <span>Valid rows become local Pending items; Excel never overwrites existing records.</span>
+                    <button id="supplier-excel-stage" class="button primary" type="button" disabled>Save valid data locally</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel supplier-excel-card">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">Selectable output</p><h2>Export supplier data</h2></div>
+                  <span id="supplier-excel-selected-count" class="status">0 selected</span>
+                </div>
+                <div class="supplier-excel-card-body">
+                  <div class="supplier-excel-filter-grid">
+                    <label class="wide">Search supplier<input id="supplier-excel-search" type="search" placeholder="Name, code, or destination" /></label>
+                    <label>Location<input id="supplier-excel-location" list="supplier-excel-location-options" placeholder="Bali, Ubud..." /></label>
+                    <label>Product<input id="supplier-excel-product" list="supplier-excel-product-options" placeholder="Service or product" /></label>
+                    <label>Supplier status<select id="supplier-excel-supplier-status"><option value="">All</option><option value="ACTIVE">Active</option><option value="ARCHIVED">Archived</option></select></label>
+                    <label>Contract status<select id="supplier-excel-contract-status"><option value="">All</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option><option value="FUTURE">Future</option></select></label>
+                    <label>Rate state<select id="supplier-excel-rate-state"><option value="">All</option><option value="HAS_ACTIVE_RATE">Has rate</option><option value="PENDING_RATE">Pending rate</option></select></label>
+                    <label>Booking channel<input id="supplier-excel-channel" list="supplier-excel-channel-options" placeholder="Email, WhatsApp..." /></label>
+                    <label>Valid from<input id="supplier-excel-valid-from" type="date" /></label>
+                    <label>Valid until<input id="supplier-excel-valid-to" type="date" /></label>
+                  </div>
+                  <datalist id="supplier-excel-location-options"></datalist>
+                  <datalist id="supplier-excel-product-options"></datalist>
+                  <datalist id="supplier-excel-channel-options"></datalist>
+                  <div class="supplier-excel-selection-heading">
+                    <label><input id="supplier-excel-select-all" type="checkbox" /> Select all filtered</label>
+                    <button id="supplier-excel-clear-filters" class="button ghost small" type="button">Clear filters</button>
+                  </div>
+                  <div id="supplier-excel-supplier-list" class="supplier-excel-supplier-list">
+                    <div class="empty-notifications">Choose a Type to load suppliers.</div>
+                  </div>
+                  <div class="supplier-excel-actions">
+                    <span>Export uses the same workbook format accepted by Import.</span>
+                    <button id="supplier-excel-export" class="button primary" type="button" disabled>Export selected</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section class="panel supplier-excel-history">
+              <div class="panel-heading"><div><p class="eyebrow">Local audit trail</p><h2>Recent import batches</h2></div></div>
+              <div id="supplier-excel-batch-list" class="supplier-excel-batch-list"><div class="empty-notifications">No local import batch yet.</div></div>
+            </section>
+          </section>
+
+          <section id="workspace-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Department workspace</p>
+                <h2 id="workspace-title">Reservation</h2>
+                <p id="workspace-description"></p>
+              </div>
+              <button id="workspace-new-draft" class="button primary">New department draft</button>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><h2>Department work queue</h2></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Type</th><th>Title</th><th>Status</th><th>Sync</th><th>Updated</th><th></th></tr></thead>
+                  <tbody id="workspace-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="reservation-recheck-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Reservation final checking</p>
+                <h2>Re Check Itinerary</h2>
+                <p>Review the connected email, daywise record, latest Drive itinerary, and complete activity log in one place.</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="recheck-lookup">
+                <label>Customer Code<input id="recheck-customer-code" placeholder="AK/PSHBALI4804" autocomplete="off" /></label>
+                <button id="load-recheck-record" class="button primary" type="button">Find record</button>
+              </div>
+              <section id="recheck-record" class="recheck-record" hidden>
+                <div class="recheck-summary">
+                  <div><span>Customer</span><strong id="recheck-customer">—</strong></div>
+                  <div><span>Tour status</span><strong id="recheck-tour-status">—</strong></div>
+                  <div><span>Latest revision</span><strong id="recheck-revision-number">REV 0</strong></div>
+                  <div class="recheck-actions">
+                    <button id="download-latest-itinerary" class="button primary small" type="button">Download Latest Itinerary</button>
+                    <button id="open-itinerary-download-folder" class="button ghost small" type="button">Open Download Folder</button>
+                  </div>
+                </div>
+
+                <div class="recheck-columns">
+                  <section class="recheck-pane">
+                    <div class="pane-heading"><div><strong>Connected email</strong><small>Confirmation trail matched by Customer Code</small></div></div>
+                    <div id="recheck-email-panel" class="recheck-scroll"></div>
+                  </section>
+                  <section class="recheck-pane">
+                    <div class="pane-heading"><div><strong>Daywise</strong><small>Central record and current status</small></div></div>
+                    <div class="table-wrap recheck-scroll">
+                      <table>
+                        <thead><tr><th>Day</th><th>Date</th><th>Detail</th><th>Status</th></tr></thead>
+                        <tbody id="recheck-daywise"></tbody>
+                      </table>
+                    </div>
+                  </section>
+                  <section class="recheck-pane">
+                    <div class="pane-heading">
+                      <div><strong id="recheck-itinerary-name">Latest itinerary</strong><small>DOCX content currently stored in Google Drive</small></div>
+                      <a id="recheck-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open Drive</a>
+                    </div>
+                    <div id="recheck-itinerary-content" class="document-preview recheck-scroll"></div>
+                  </section>
+                </div>
+
+                <section class="logbook-panel">
+                  <div class="panel-heading"><div><p class="eyebrow">Append-only history</p><h2>Itinerary logbook</h2></div></div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>Date / time</th><th>User</th><th>Activity</th><th>Revision</th><th>Note</th><th>Result</th></tr></thead>
+                      <tbody id="recheck-logbook"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </section>
+            </div>
+          </section>
+
+          <section id="reservation-kpi-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Reservation personal performance</p>
+                <h2>KPI Saya</h2>
+                <p id="personal-kpi-owner">Ringkasan follow-up Reservation pada komputer staff ini.</p>
+              </div>
+            </div>
+            <div class="metric-grid personal-kpi-metrics">
+              <article><span>Total posted</span><strong id="personal-kpi-total">0</strong></article>
+              <article><span>Pending</span><strong id="personal-kpi-pending">0</strong></article>
+              <article class="success"><span>On track</span><strong id="personal-kpi-ontrack">0</strong></article>
+              <article class="attention"><span>Attention</span><strong id="personal-kpi-attention">0</strong></article>
+              <article class="attention"><span>Overdue</span><strong id="personal-kpi-overdue">0</strong></article>
+            </div>
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">My follow-up records</p><h2>Detail KPI Reservation</h2></div>
+                <span id="personal-kpi-missing-reason" class="status">0 missing reason</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Source</th><th>Status</th><th>Pending age</th><th>KPI</th><th>Waiting for</th><th>Alasan pending</th><th>Updated</th></tr></thead>
+                  <tbody id="personal-kpi-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="sync-view" class="view">
+            <div class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Publication safety</p><h2>Sync Center</h2></div>
+                <button id="run-sync" class="button primary">Publish pending</button>
+              </div>
+              <div class="callout">
+                Drafts are published only after validation. Failed jobs retain the same idempotency key, and version conflicts require review.
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer Code</th><th>Department</th><th>Operation</th><th>Status</th><th>Sync mode</th><th>Attempts</th><th>Last error</th><th>Updated</th></tr></thead>
+                  <tbody id="sync-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="admin-view" class="view">
+            <div class="workspace-banner">
+              <div>
+                <p class="eyebrow">Administrator diagnostics</p>
+                <h2>Backend connection console</h2>
+                <p>Read-only health checks for local database, dummy engine, Google services, Apps Script, GitHub, and updater.</p>
+              </div>
+              <button id="run-health-check" class="button primary">Run all checks</button>
+            </div>
+            <div class="metric-grid admin-metrics">
+              <article class="success"><span>Healthy</span><strong id="health-healthy">0</strong></article>
+              <article class="attention"><span>Needs configuration</span><strong id="health-attention">0</strong></article>
+              <article><span>Failed</span><strong id="health-failed">0</strong></article>
+              <article><span>Last checked</span><small id="health-checked">Not checked</small></article>
+            </div>
+            <div id="health-grid" class="health-grid">
+              <div class="panel empty-health">Run the checks to inspect backend readiness.</div>
+            </div>
+          </section>
+
+          <section id="settings-view" class="view">
+            <div class="panel settings-panel">
+              <div class="panel-heading"><div><p class="eyebrow">Local profile</p><h2>Desktop settings</h2></div></div>
+              <form id="settings-form" class="form-grid">
+                <label>Employee ID<input name="employeeId" required /></label>
+                <label>Employee name<input name="employeeName" required /></label>
+                <label>Department<select name="department">
+                  <option>RESERVATION</option><option>VENDOR</option><option>TRANSPORT</option>
+                  <option>OPS_ACCOUNTING</option><option>GENERAL_CASHIER</option><option>MANAGER_ADMIN</option>
+                </select></label>
+                <label>Environment<select name="environment"><option>DEV</option><option>ADMIN_DEV</option><option>STAGING</option><option>PROD</option></select></label>
+                <label class="wide">Apps Script API URL<input name="apiBaseUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" /></label>
+                <div id="google-settings" class="wide form-grid" hidden>
+                  <label class="wide">Google Desktop OAuth Client ID<input name="googleClientId" placeholder="...apps.googleusercontent.com" /></label>
+                  <label class="wide">Google Desktop OAuth Client Secret (legacy; not required)<input name="googleClientSecret" type="password" autocomplete="new-password" /><small>The stored value is never returned to this window. Leave blank to keep the existing local value.</small></label>
+                  <label class="wide">Google Spreadsheet ID<input name="spreadsheetId" placeholder="1abc..." /></label>
+                  <label class="wide">Google Drive DEV Folder ID<input name="driveFolderId" placeholder="Optional folder ID" /></label>
+                </div>
+                <div class="wide form-actions"><button class="button primary" type="submit">Save settings</button></div>
+              </form>
+              <div class="database-location"><strong>Local database</strong><code id="database-path">—</code></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="draft-dialog">
+      <form id="draft-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Temporary local database</p><h2 id="draft-dialog-title">New local draft</h2></div>
+          <button type="button" id="close-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <input type="hidden" name="draftId" />
+        <div class="form-grid">
+          <label>Customer Code<input name="customerCode" placeholder="PSH-0001" required /></label>
+          <label>Department<select name="module">
+            <option>RESERVATION</option><option>VENDOR</option><option>TRANSPORT</option>
+            <option>OPS_ACCOUNTING</option><option>GENERAL_CASHIER</option><option>MANAGER_ADMIN</option>
+          </select></label>
+          <label>Work type<select name="workType">
+            <option>NEW_CONFIRMATION</option><option>ITINERARY_REVISION</option><option>DAYWISE_BOOKING</option>
+            <option>DRIVER_ASSIGNMENT</option><option>CUSTOMER_INVOICE</option><option>PAYMENT_REQUEST</option>
+            <option>GENERAL</option>
+          </select></label>
+          <label>Title<input name="title" required /></label>
+          <label class="wide">Details<textarea name="details" rows="8" placeholder="Write complete working details, notes, references, and expected output." required></textarea></label>
+          <label>Confirmation email URL<input name="confirmationEmailUrl" type="url" placeholder="https://mail.google.com/..." /></label>
+          <label>Quotation email URL<input name="quotationEmailUrl" type="url" placeholder="https://mail.google.com/..." /></label>
+          <label>Booking channel<select name="bookingChannel"><option value="">Not applicable</option><option>EMAIL</option><option>WHATSAPP</option><option>PORTAL</option></select></label>
+          <label>External reference<input name="externalReference" placeholder="Booking/thread/portal reference" /></label>
+          <label class="wide">Source publication ID<input name="basePublicationId" placeholder="Optional upstream publication ID" /></label>
+          <label>Source version<input name="baseRecordVersion" type="number" min="1" /></label>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-dialog" class="button ghost">Cancel</button>
+          <button type="submit" class="button primary">Save local draft</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="itinerary-dialog" class="compact-dialog">
+      <form id="itinerary-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Reservation</p><h2 id="itinerary-dialog-title">Add New Itinerary</h2></div>
+          <button type="button" id="close-itinerary-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <input type="hidden" name="action" value="new" />
+        <div class="form-grid itinerary-fields">
+          <label>Customer Code<input name="customerCode" placeholder="PSH-0001" autocomplete="off" required /></label>
+          <label>Customer Name<input name="customerName" placeholder="Customer or group name" autocomplete="off" required /></label>
+          <label class="wide agent-field">
+            Agent Name
+            <input name="agentName" placeholder="Type to find an agent" autocomplete="off" />
+            <input type="hidden" name="agentId" />
+            <div id="agent-suggestions" class="suggestion-list" hidden></div>
+            <button id="add-agent-name" type="button" class="inline-action" hidden>Add Agent Name</button>
+          </label>
+          <div class="wide linked-section">
+            <div class="field-heading">
+              <div><strong>Link with confirmation email</strong><small>Searches Gmail subjects containing the Customer Code.</small></div>
+              <button id="search-confirmation-email" type="button" class="button ghost small">Find email</button>
+            </div>
+            <div id="confirmation-email-results" class="selection-list">
+              <span class="muted-text">No email selected.</span>
+            </div>
+            <div id="confirmation-thread-trail" class="email-trail" hidden></div>
+            <input type="hidden" name="confirmationMessageId" />
+            <input type="hidden" name="confirmationThreadId" />
+            <input type="hidden" name="confirmationSubject" />
+          </div>
+          <div class="wide linked-section">
+            <div class="field-heading">
+              <div><strong>Soft copy itinerary</strong><small>File will be renamed to Customer Code - Customer Name before upload.</small></div>
+              <button id="post-itinerary-file" type="button" class="button ghost small">Post Soft Copy Itinerary</button>
+            </div>
+            <div id="itinerary-upload-result" class="upload-result muted-text">No file uploaded.</div>
+            <input type="hidden" name="driveFileId" />
+            <input type="hidden" name="driveFileName" />
+            <input type="hidden" name="driveFileUrl" />
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-itinerary-dialog" class="button ghost">Cancel</button>
+          <button id="save-itinerary" type="submit" class="button primary">Create itinerary</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="revision-dialog" class="revision-dialog">
+      <form id="revision-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Reservation</p><h2>Revise Itinerary</h2></div>
+          <button type="button" id="close-revision-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <div class="revision-layout">
+          <div class="revision-lookup">
+            <label>Customer Code<input name="customerCode" placeholder="PSH-0001" autocomplete="off" required /></label>
+            <button id="load-revision-record" type="button" class="button primary">Find record</button>
+          </div>
+
+          <section id="revision-record" class="revision-record" hidden>
+            <div class="revision-summary">
+              <div><span>Customer</span><strong id="revision-customer">—</strong></div>
+              <div><span>Tour status</span><strong id="revision-tour-status">—</strong></div>
+              <div><span>Current revision</span><strong id="revision-current-number">REV 0</strong></div>
+              <a id="revision-drive-link" class="button ghost small" href="#" target="_blank" rel="noreferrer">Open in Google Drive</a>
+            </div>
+
+            <div class="revision-columns">
+              <section class="revision-pane">
+                <div class="pane-heading"><strong>Daywise & status</strong></div>
+                <div class="table-wrap daywise-scroll">
+                  <table>
+                    <thead><tr><th>Day</th><th>Date</th><th>Detail</th><th>Status</th></tr></thead>
+                    <tbody id="revision-daywise"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="revision-pane">
+                <div class="pane-heading">
+                  <div><strong id="old-itinerary-name">Current itinerary</strong><small>Contents of the DOCX stored in Google Drive</small></div>
+                </div>
+                <div id="old-itinerary-content" class="document-preview"></div>
+              </section>
+            </div>
+
+            <div class="revision-inputs">
+              <div class="linked-section">
+                <div class="field-heading">
+                  <div><strong>Revised DOCX</strong><small>Required. Select the completed revision from My Computer.</small></div>
+                  <button id="choose-revised-docx" type="button" class="button ghost small">Choose DOCX</button>
+                </div>
+                <div id="revised-docx-result" class="upload-result muted-text">No revised file selected.</div>
+                <input type="hidden" name="revisedFilePath" />
+              </div>
+              <label>
+                Keterangan revisi
+                <textarea name="revisionNote" rows="4" placeholder="Jelaskan perubahan yang dilakukan pada itinerary." required></textarea>
+              </label>
+            </div>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-revision-dialog" class="button ghost">Cancel</button>
+          <button id="post-revision" type="submit" class="button primary" disabled>Post</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="vendor-split-dialog" class="vendor-split-dialog">
+      <form id="vendor-split-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Vendor Booking · Micro split</p>
+            <h2 id="vendor-split-dialog-title">Day Wise</h2>
+            <small id="vendor-split-dialog-meta" class="muted-text">—</small>
+          </div>
+          <button type="button" id="close-vendor-split-dialog" class="icon-button" aria-label="Close">×</button>
+        </div>
+        <div class="vendor-split-dialog-layout">
+          <section class="vendor-split-dialog-pane">
+            <div class="pane-heading">
+              <div><strong>Micro split services</strong><small>Type, vendor, and service detail for this Day only.</small></div>
+              <button id="vendor-split-dialog-add" class="button ghost small" type="button">Add service</button>
+            </div>
+            <div id="vendor-split-dialog-list" class="vendor-split-dialog-list"></div>
+          </section>
+          <section class="vendor-split-dialog-pane">
+            <div class="pane-heading">
+              <div><strong>Day Wise & evidence</strong><small>Email thread or other evidence will appear in this panel.</small></div>
+            </div>
+            <div class="vendor-split-evidence">
+              <div class="vendor-split-day-context" aria-label="Selected Day context">
+                <div>
+                  <span>Hotel hari itu</span>
+                  <strong id="vendor-split-context-hotel">Hotel not assigned</strong>
+                </div>
+                <div>
+                  <span>Start</span>
+                  <strong id="vendor-split-context-start">—</strong>
+                </div>
+                <div>
+                  <span>Finish</span>
+                  <strong id="vendor-split-context-finish">—</strong>
+                </div>
+              </div>
+              <div class="vendor-split-day-reference">
+                <span>Day Wise reference</span>
+                <strong id="vendor-split-evidence-title">—</strong>
+                <p id="vendor-split-evidence-detail">No Day Wise detail.</p>
+              </div>
+              <div class="empty-notifications">
+                Booking email, confirmation trail, or other linked evidence will be displayed here in the next booking stage.
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="cancel-vendor-split-dialog" class="button ghost">Cancel</button>
+          <button type="button" id="apply-vendor-split" class="button primary">Save split locally</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-archive-dialog" class="compact-dialog supplier-archive-dialog">
+      <form id="supplier-archive-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Controlled archive</p><h2 id="supplier-archive-title">Archive record</h2></div>
+          <button id="close-supplier-archive-dialog" class="icon-button" type="button" aria-label="Close">Ã—</button>
+        </div>
+        <div class="supplier-archive-content">
+          <div class="maintenance-warning">
+            <strong id="supplier-archive-record">Selected record</strong>
+            <p id="supplier-archive-impact">Historical bookings and documents will remain available.</p>
+          </div>
+          <label>Archive reason
+            <textarea id="supplier-archive-reason" name="reason" rows="4" required
+              placeholder="Explain why this record must no longer be available for new bookings."></textarea>
+          </label>
+          <small>This action is saved to Local Pending first. Nothing changes in Google until the reviewed batch is published.</small>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-archive-dialog" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-archive" class="button danger" type="submit">Queue archive locally</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-type-dialog" class="compact-dialog">
+      <form id="supplier-type-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Dynamic classification</p><h2>Supplier Type</h2></div><button id="close-supplier-type-dialog" class="icon-button" type="button">×</button></div>
+        <div class="form-grid single-field">
+          <input name="supplierTypeId" type="hidden" />
+          <label>Type name<input name="typeName" required placeholder="Example: Restaurant" /></label>
+          <label>Type code<input name="typeCode" required pattern="[A-Za-z0-9_ -]+" placeholder="RESTAURANT" /></label>
+          <label>Description<textarea name="description" rows="3"></textarea></label>
+          <label>Display order<input name="displayOrder" type="number" min="1" value="100" /></label>
+          <label>Allowed price bases<input name="allowedPriceBases" value="PER_PAX,PER_SERVICE,PER_ITEM,CUSTOM" /></label>
+          <label>Default booking channels<input name="defaultBookingChannels" value="EMAIL,WHATSAPP,OTHERS" /></label>
+        </div>
+        <div class="dialog-actions"><button id="cancel-supplier-type-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Type locally</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-product-dialog">
+      <form id="supplier-product-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Supplier product</p><h2 id="supplier-product-dialog-title">Add Product</h2></div><button id="close-supplier-product-dialog" class="icon-button" type="button">×</button></div>
+        <div class="form-grid">
+          <input name="productId" type="hidden" /><input name="supplierId" type="hidden" />
+          <label>Product code<input name="productCode" placeholder="Auto when blank" /></label>
+          <label>Product/service name<input name="productName" required /></label>
+          <label>Category<input name="category" /></label><label>Subcategory<input name="subcategory" /></label>
+          <label class="wide">Destinations<input name="destinations" /></label>
+          <label class="wide">Description<textarea name="description" rows="3"></textarea></label>
+          <label class="wide">Inclusion<textarea name="inclusion" rows="4"></textarea></label>
+          <label class="wide">Exclusion<textarea name="exclusion" rows="4"></textarea></label>
+          <label class="wide">Terms and Conditions<textarea name="termsAndConditions" rows="4"></textarea></label>
+          <label class="wide">Cancellation terms<textarea name="cancellationTerms" rows="3"></textarea></label>
+          <label class="wide">Booking instructions<textarea name="bookingInstructions" rows="3"></textarea></label>
+          <label>Minimum order<input name="minimumOrder" /></label><label>Maximum capacity<input name="maximumCapacity" /></label>
+          <label>Tax treatment<select name="taxTreatment"><option>AS_CONTRACT</option><option>INCLUDED</option><option>EXCLUDED</option></select></label>
+          <label class="wide">Internal notes<textarea name="notes" rows="3"></textarea></label>
+        </div>
+        <div class="dialog-actions"><button id="archive-supplier-product" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-product-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Product locally</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-product-duplicate-dialog" class="supplier-product-duplicate-dialog">
+      <form id="supplier-product-duplicate-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Bulk local staging</p><h2>Copy Product to Suppliers</h2></div>
+          <button id="close-supplier-product-duplicate-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="supplier-product-duplicate-body">
+          <input name="sourceProductId" type="hidden" />
+          <div class="supplier-copy-source">
+            <span>Selected source products</span>
+            <strong id="supplier-copy-product-name">—</strong>
+            <small id="supplier-copy-source-name">—</small>
+          </div>
+          <label id="supplier-copy-name-field">Product/service name for the copies
+            <input name="productName" required />
+          </label>
+          <div class="supplier-copy-options">
+            <label><input name="includeContracts" type="checkbox" checked /> Copy contract validity, terms, and conditions</label>
+            <label><input name="includeRates" type="checkbox" checked /> Copy matching rates/prices</label>
+            <small>New Product, Contract, and Rate IDs are always generated. Contract files from Google Drive are not copied.</small>
+          </div>
+          <div class="supplier-copy-target-heading">
+            <div><strong>Destination suppliers</strong><small>Only active suppliers from the same Type are available.</small></div>
+            <label><input id="supplier-copy-select-all" type="checkbox" /> Select all</label>
+          </div>
+          <div id="supplier-copy-target-list" class="supplier-copy-target-list"></div>
+          <div id="supplier-copy-matrix" class="supplier-copy-matrix">
+            Select destination suppliers to preview the Product × supplier matrix.
+          </div>
+          <div id="supplier-copy-result" class="supplier-copy-result" hidden></div>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-product-duplicate-dialog" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-product-duplicate" class="button primary" type="submit">Save copies locally</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-contract-dialog" class="supplier-contract-dialog">
+      <form id="supplier-contract-form" method="dialog">
+        <div class="dialog-heading"><div><p class="eyebrow">Effective-dated source</p><h2 id="supplier-contract-dialog-title">New Contract</h2></div><button id="close-supplier-contract-dialog" class="icon-button" type="button">×</button></div>
+        <div class="supplier-contract-body">
+          <input name="contractId" type="hidden" /><input name="supplierId" type="hidden" />
+          <input name="driveFileId" type="hidden" /><input name="driveFileName" type="hidden" /><input name="driveFileUrl" type="hidden" />
+          <div class="form-grid">
+            <label>Contract number<input name="contractNumber" required /></label><label>Contract name<input name="contractName" /></label>
+            <label>Valid from<input name="validFrom" type="date" required /></label><label>Valid until<input name="validTo" type="date" required /></label>
+            <label>Currency<input name="currency" value="IDR" /></label>
+            <label>Tax treatment<select name="taxTreatment"><option>AS_CONTRACT</option><option>INCLUDED</option><option>EXCLUDED</option></select></label>
+            <label class="wide">Contract Terms and Conditions<textarea name="termsAndConditions" rows="4"></textarea></label>
+            <div class="wide supplier-contract-file"><button id="upload-supplier-contract" class="button ghost" type="button">Upload contract to Google Drive</button><a id="supplier-contract-file-link" href="#" hidden>Open uploaded contract</a></div>
+            <label class="wide supplier-overlap-option"><input name="allowOverlap" type="checkbox" /> Allow overlapping contract dates as an exception</label>
+            <label class="wide">Overlap reason<textarea name="overlapReason" rows="2" placeholder="Required only when overlap is allowed"></textarea></label>
+          </div>
+          <div class="supplier-contract-rates-heading"><div><p class="eyebrow">Repeatable components</p><h3>Contract rates</h3></div><button id="add-contract-rate" class="button ghost small" type="button">+ Rate</button></div>
+          <div id="supplier-contract-rate-list" class="supplier-contract-rate-list"></div>
+        </div>
+        <div class="dialog-actions"><button id="archive-supplier-contract" class="button danger" type="button" hidden>Archive</button><button id="cancel-supplier-contract-dialog" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save Contract locally</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-draft-dialog" class="supplier-queue-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SQLite staging queue</p><h2>Pending Supplier Master changes</h2><small>Review the checked records, then publish them to Google in one batch.</small></div>
+        <button id="close-supplier-draft-dialog" class="icon-button" type="button">×</button>
+      </div>
+      <div class="supplier-queue-actions">
+        <label><input id="select-all-supplier-drafts" type="checkbox" checked /> Select all pending</label>
+        <span id="supplier-queue-summary" class="muted-text">No pending changes.</span>
+      </div>
+      <section id="supplier-publish-progress" class="supplier-publish-progress" hidden>
+        <div class="supplier-publish-progress-heading">
+          <div>
+            <p class="eyebrow">Google readback progress</p>
+            <strong id="supplier-publish-current">Preparing Publish Session…</strong>
+            <small id="supplier-publish-count">0 of 0 records confirmed</small>
+          </div>
+          <strong id="supplier-publish-percent">0%</strong>
+        </div>
+        <progress id="supplier-publish-progress-bar" max="100" value="0"></progress>
+        <div id="supplier-publish-stage-summary" class="supplier-publish-stage-summary"></div>
+        <div id="supplier-publish-item-list" class="supplier-publish-item-list"></div>
+        <button id="resume-supplier-publish-session" class="button ghost small" type="button" hidden>Resume unresolved items</button>
+      </section>
+      <div id="supplier-draft-list" class="supplier-draft-list"></div>
+      <div class="dialog-actions">
+        <button id="cancel-supplier-draft-dialog" class="button ghost" type="button">Close</button>
+        <button id="publish-selected-supplier-drafts" class="button primary" type="button">Publish selected to Google</button>
+      </div>
+    </dialog>
+
+    <dialog id="supplier-rate-approval-dialog" class="compact-dialog">
+      <form id="supplier-rate-approval-form">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Maker-checker control</p><h2 id="supplier-rate-approval-title">Local Rate approval</h2></div>
+          <button id="close-supplier-rate-approval" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="supplier-maintenance-content">
+          <div id="supplier-rate-approval-notice" class="maintenance-warning"></div>
+          <label id="supplier-rate-evidence-field">Source/evidence reference
+            <input id="supplier-rate-approval-evidence" placeholder="Contract, quote, email, or approved document" />
+          </label>
+          <label>Reason / review note
+            <textarea id="supplier-rate-approval-reason" rows="4"></textarea>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancel-supplier-rate-approval" class="button ghost" type="button">Cancel</button>
+          <button id="confirm-supplier-rate-approval" class="button primary" type="submit">Continue</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="supplier-maintenance-dialog" class="compact-dialog supplier-maintenance-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Admin / Owner only</p><h2>System Maintenance</h2></div>
+        <button id="close-supplier-maintenance" class="icon-button" type="button">×</button>
+      </div>
+      <div class="supplier-maintenance-content">
+        <div class="maintenance-warning"><strong>Initialize / migrate</strong><p>Creates or repairs the Google Sheet schema, migrates legacy supplier data, and installs the contract-expiry monitor. This is not required for daily data entry.</p></div>
+        <label>Type <strong>INITIALIZE</strong> to unlock<input id="supplier-maintenance-confirmation" autocomplete="off" placeholder="INITIALIZE" /></label>
+      </div>
+      <div class="dialog-actions">
+        <button id="cancel-supplier-maintenance" class="button ghost" type="button">Cancel</button>
+        <button id="initialize-supplier-master" class="button danger" type="button" disabled>Initialize / migrate Google source</button>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>
